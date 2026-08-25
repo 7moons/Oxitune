@@ -86,6 +86,7 @@ async function initYTMD() {
   const observer = new PlayerObserver();
 
   observer.onTrackChange(async (track) => {
+    currentActiveTrack = track;
     registry.handleTrackChange(track);
     try {
       await invokeBackend('update_track_info', {
@@ -224,14 +225,16 @@ async function initYTMD() {
     return btn;
   };
 
+  let currentActiveTrack: any = null;
+
   const injectNavbarControls = () => {
     if (document.getElementById('ytmd-nav-controls')) return;
 
-    const rightContent = document.querySelector('ytmusic-nav-bar .right-content, ytmusic-nav-bar #right-content');
+    const rightContent = document.querySelector('ytmusic-nav-bar .right-content, ytmusic-nav-bar #right-content, ytmusic-nav-bar');
     if (rightContent) {
       const btnWrapper = document.createElement('div');
       btnWrapper.id = 'ytmd-nav-controls';
-      btnWrapper.style.cssText = 'display:flex;align-items:center;gap:6px;margin-right:12px;';
+      btnWrapper.style.cssText = 'display:flex !important;align-items:center !important;gap:6px !important;margin:0 10px !important;flex-shrink:0 !important;z-index:9999 !important;';
 
       const localBtn = createNavButton('🎵 Local', 'Open Local Music Library', () => {
         invokeBackend('toggle_local_library_window');
@@ -241,12 +244,38 @@ async function initYTMD() {
         invokeBackend('toggle_sync_window');
       });
 
+      const downloadBtn = createNavButton('⬇ Download', 'Download Current Track (MP3/FLAC)', async () => {
+        if (!currentActiveTrack || !currentActiveTrack.videoId) {
+          downloadBtn.textContent = 'Play a track first';
+          setTimeout(() => { downloadBtn.textContent = '⬇ Download'; }, 2000);
+          return;
+        }
+        downloadBtn.textContent = '⏳ Downloading...';
+        try {
+          await invokeBackend('download_track', {
+            request: {
+              video_id: currentActiveTrack.videoId,
+              title: currentActiveTrack.title,
+              artist: currentActiveTrack.artist,
+              album: currentActiveTrack.album || undefined,
+              cover_url: currentActiveTrack.coverUrl || undefined,
+              format: config.download_format || 'mp3',
+              embed_lyrics: config.embed_lyrics !== false
+            }
+          });
+          downloadBtn.textContent = '✓ Saved!';
+          setTimeout(() => { downloadBtn.textContent = '⬇ Download'; }, 2500);
+        } catch {
+          downloadBtn.textContent = '✕ Error';
+          setTimeout(() => { downloadBtn.textContent = '⬇ Download'; }, 2500);
+        }
+      });
+
       const remoteBtn = createNavButton('📱 Remote', 'Mobile Web Remote (QR Code)', () => {
         const modal = document.getElementById('ytmd-remote-nav-btn');
         if (modal) {
           modal.click();
         } else {
-          // Open settings or trigger remote QR modal
           invokeBackend('toggle_settings_window');
         }
       });
@@ -261,6 +290,7 @@ async function initYTMD() {
 
       btnWrapper.appendChild(localBtn);
       btnWrapper.appendChild(syncBtn);
+      btnWrapper.appendChild(downloadBtn);
       btnWrapper.appendChild(remoteBtn);
       btnWrapper.appendChild(miniBtn);
       btnWrapper.appendChild(settingsBtn);
