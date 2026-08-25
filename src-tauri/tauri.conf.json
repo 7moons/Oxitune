@@ -61,10 +61,5 @@
       "iconPath": "icons/icon.png",
       "tooltip": "YouTube Music Desktop"
     }
-  },
-  "plugins": {
-    "global-shortcut": {},
-    "notification": {},
-    "store": {}
   }
 }
