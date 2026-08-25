@@ -183,9 +183,10 @@ pub fn run() {
                             "update_track_info" => {
                                 if let Some(args_val) = req.args {
                                     if let Ok(wrapper) = serde_json::from_value::<UpdateTrackWrapper>(args_val) {
+                                        let app_state = h.state::<Arc<AppState>>();
                                         let _ = commands::update_track_info(
                                             h.clone(),
-                                            state.clone(),
+                                            app_state,
                                             wrapper.track,
                                         );
                                     }
@@ -195,9 +196,10 @@ pub fn run() {
                             "notify_track_change" => {
                                 if let Some(args_val) = req.args {
                                     if let Ok(p) = serde_json::from_value::<NotifyArgs>(args_val) {
+                                        let app_state = h.state::<Arc<AppState>>();
                                         let _ = commands::notify_track_change(
                                             h.clone(),
-                                            state.clone(),
+                                            app_state,
                                             p.title,
                                             p.artist,
                                         );
@@ -224,9 +226,10 @@ pub fn run() {
                             "download_track" => {
                                 if let Some(args_val) = req.args {
                                     if let Ok(dr) = serde_json::from_value::<DownloadRequestWrapper>(args_val) {
+                                        let app_state = h.state::<Arc<AppState>>();
                                         let _ = commands::download_track(
                                             h.clone(),
-                                            state.clone(),
+                                            app_state,
                                             dr.request,
                                         )
                                         .await;
