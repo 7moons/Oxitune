@@ -256,7 +256,9 @@ pub fn run() {
             .resizable(true)
             .initialization_script(include_str!("../inject/preload.js"));
 
-            if let Some(icon) = app.default_window_icon() {
+            if let Ok(icon) = tauri::image::Image::from_bytes(include_bytes!("../icons/icon.png")) {
+                main_builder = main_builder.icon(icon)?;
+            } else if let Some(icon) = app.default_window_icon() {
                 main_builder = main_builder.icon(icon.clone())?;
             }
 
