@@ -165,6 +165,44 @@ pub fn notify_track_change(
     Ok(())
 }
 
+#[tauri::command]
+pub async fn download_track(
+    app_handle: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    request: crate::downloader::DownloadRequest,
+) -> Result<String, String> {
+    let config = state.config_manager.load();
+    let output_dir = std::path::PathBuf::from(&config.download_dir);
+    crate::downloader::execute_download(app_handle, request, output_dir).await
+}
+
+#[tauri::command]
+pub fn scan_local_music(
+    state: State<'_, Arc<AppState>>,
+    directory: Option<String>,
+) -> Vec<crate::local_files::LocalTrack> {
+    let config = state.config_manager.load();
+    let target_dir = directory
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from(&config.local_music_dir));
+    crate::local_files::scan_directory(&target_dir)
+}
+
+#[tauri::command]
+pub fn toggle_local_library_window(app_handle: AppHandle) -> Result<(), String> {
+    if let Some(local_win) = app_handle.get_webview_window("local") {
+        if let Ok(visible) = local_win.is_visible() {
+            if visible {
+                let _ = local_win.hide();
+            } else {
+                let _ = local_win.show();
+                let _ = local_win.set_focus();
+            }
+        }
+    }
+    Ok(())
+}
+
 mod urlencoding {
     pub fn encode(s: &str) -> String {
         url::form_urlencoded::byte_serialize(s.as_bytes()).collect()

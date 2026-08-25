@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>YTMD Local Music Library</title>
+    <link rel="stylesheet" href="./src/ui/styles.css" />
+    <style>
+      .local-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 16px 20px;
+        background: var(--bg-surface);
+        border-bottom: 1px solid var(--border);
+      }
+      .search-box {
+        flex: 1;
+        max-width: 380px;
+        background: var(--bg-subtle);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 8px 14px;
+        color: var(--text-primary);
+        font-family: var(--font-sans);
+        font-size: 13px;
+        outline: none;
+      }
+      .search-box:focus {
+        border-color: var(--text-muted);
+      }
+      .tracks-table-container {
+        padding: 16px 20px;
+        height: calc(100vh - 140px);
+        overflow-y: auto;
+      }
+      table.tracks-table {
+        width: 100%;
+        border-collapse: collapse;
+        text-align: left;
+        font-size: 13px;
+      }
+      table.tracks-table th {
+        color: var(--text-muted);
+        font-weight: 500;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--border);
+      }
+      table.tracks-table tr.track-row {
+        cursor: pointer;
+        border-bottom: 1px solid var(--border-subtle);
+        transition: background-color 0.12s ease;
+      }
+      table.tracks-table tr.track-row:hover {
+        background-color: var(--bg-card-hover);
+      }
+      table.tracks-table td {
+        padding: 10px 12px;
+        color: var(--text-secondary);
+      }
+      table.tracks-table td.title-col {
+        color: var(--text-primary);
+        font-weight: 500;
+      }
+      .local-player-bar {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: 64px;
+        background: var(--bg-surface);
+        border-top: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 20px;
+      }
+      .local-track-info {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 200px;
+      }
+      .empty-state {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 260px;
+        color: var(--text-muted);
+        gap: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="local-header">
+      <div style="display: flex; align-items: center; gap: 14px; flex: 1;">
+        <span style="font-weight: 600; font-size: 16px;">Local Music Library</span>
+        <input type="text" id="search-input" class="search-box" placeholder="Search title, artist or album..." />
+      </div>
+      <div style="display: flex; gap: 8px;">
+        <button id="rescan-btn" class="btn-secondary" style="font-size: 12px; padding: 6px 12px;">Rescan Folder</button>
+      </div>
+    </div>
+
+    <div class="tracks-table-container">
+      <div id="loading-state" class="empty-state" style="display: none;">Scanning music files...</div>
+      <table class="tracks-table" id="tracks-table" style="display: none;">
+        <thead>
+          <tr>
+            <th style="width: 40px;">#</th>
+            <th>Title</th>
+            <th>Artist</th>
+            <th>Album</th>
+            <th style="width: 80px;">Format</th>
+            <th style="width: 70px; text-align: right;">Time</th>
+          </tr>
+        </thead>
+        <tbody id="tracks-body"></tbody>
+      </table>
+      <div id="empty-state" class="empty-state">
+        <span>No local music files found.</span>
+        <button id="scan-now-btn" class="btn-primary" style="font-size: 12px; padding: 6px 14px;">Scan Music Directory</button>
+      </div>
+    </div>
+
+    <div class="local-player-bar" id="local-player-bar">
+      <div class="local-track-info">
+        <span id="playing-title" style="font-size: 13px; font-weight: 600; color: var(--text-primary);">Select a track to play</span>
+        <span id="playing-artist" style="font-size: 11px; color: var(--text-secondary);">Offline Local Player</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 12px;">
+        <button id="play-pause-btn" class="btn-primary" style="padding: 6px 14px; font-size: 12px;">Play</button>
+      </div>
+    </div>
+
+    <audio id="local-audio-element"></audio>
+    <script type="module" src="./src/ui/local.ts"></script>
+  </body>
+</html>

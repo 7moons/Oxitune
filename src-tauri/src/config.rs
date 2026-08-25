@@ -32,6 +32,10 @@ pub struct AppConfig {
     pub ambient_lighting_enabled: bool,
     pub ambient_intensity: f64,
     pub theme_preset: String,
+    pub download_dir: String,
+    pub download_format: String,
+    pub embed_lyrics: bool,
+    pub local_music_dir: String,
     pub lastfm_enabled: bool,
     pub lastfm_api_key: String,
     pub lastfm_secret: String,
@@ -39,6 +43,17 @@ pub struct AppConfig {
 
 impl Default for AppConfig {
     fn default() -> Self {
+        let default_music_dir = dirs::audio_dir()
+            .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join("Music"))
+            .to_string_lossy()
+            .to_string();
+
+        let default_download_dir = dirs::audio_dir()
+            .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join("Music"))
+            .join("YTMD")
+            .to_string_lossy()
+            .to_string();
+
         Self {
             autostart: false,
             minimize_to_tray: true,
@@ -68,6 +83,10 @@ impl Default for AppConfig {
             ambient_lighting_enabled: true,
             ambient_intensity: 0.6,
             theme_preset: "default".to_string(),
+            download_dir: default_download_dir,
+            download_format: "mp3".to_string(),
+            embed_lyrics: true,
+            local_music_dir: default_music_dir,
             lastfm_enabled: false,
             lastfm_api_key: "".to_string(),
             lastfm_secret: "".to_string(),
@@ -131,6 +150,8 @@ mod tests {
         assert_eq!(config.ambient_lighting_enabled, true);
         assert_eq!(config.ambient_intensity, 0.6);
         assert_eq!(config.theme_preset, "default");
+        assert_eq!(config.download_format, "mp3");
+        assert_eq!(config.embed_lyrics, true);
         assert_eq!(config.wheel_volume_step, 0.05);
         assert_eq!(config.quality, "high");
     }
@@ -147,6 +168,8 @@ mod tests {
         config.ambient_lighting_enabled = true;
         config.ambient_intensity = 0.8;
         config.theme_preset = "catppuccin".to_string();
+        config.download_format = "flac".to_string();
+        config.embed_lyrics = true;
         let serialized = serde_json::to_string(&config).expect("Serialization failed");
         let deserialized: AppConfig = serde_json::from_str(&serialized).expect("Deserialization failed");
         assert_eq!(deserialized.theme, "default-dark");
@@ -161,5 +184,7 @@ mod tests {
         assert_eq!(deserialized.ambient_lighting_enabled, true);
         assert_eq!(deserialized.ambient_intensity, 0.8);
         assert_eq!(deserialized.theme_preset, "catppuccin");
+        assert_eq!(deserialized.download_format, "flac");
+        assert_eq!(deserialized.embed_lyrics, true);
     }
 }

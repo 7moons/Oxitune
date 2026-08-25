@@ -29,6 +29,10 @@ interface AppConfig {
   ambient_lighting_enabled: boolean;
   ambient_intensity: number;
   theme_preset: string;
+  download_dir: string;
+  download_format: string;
+  embed_lyrics: boolean;
+  local_music_dir: string;
   lastfm_enabled: boolean;
   lastfm_api_key: string;
   lastfm_secret: string;
@@ -146,6 +150,17 @@ async function loadSettings() {
       setCheckbox('skip_silence_enabled', config.skip_silence_enabled);
       setCheckbox('preserve_pitch', config.preserve_pitch !== false);
       setCheckbox('ambient_lighting_enabled', config.ambient_lighting_enabled !== false);
+      setCheckbox('embed_lyrics', config.embed_lyrics !== false);
+
+      // Downloader & Local Music fields
+      const downloadFormatSelect = document.getElementById('download_format') as HTMLSelectElement;
+      if (downloadFormatSelect) downloadFormatSelect.value = config.download_format || 'mp3';
+
+      const downloadDirInput = document.getElementById('download_dir') as HTMLInputElement;
+      if (downloadDirInput) downloadDirInput.value = config.download_dir || '';
+
+      const localDirInput = document.getElementById('local_music_dir') as HTMLInputElement;
+      if (localDirInput) localDirInput.value = config.local_music_dir || '';
 
       // Ambient intensity slider
       const intensitySlider = document.getElementById('ambient_intensity') as HTMLInputElement;
@@ -238,6 +253,16 @@ async function saveSettings() {
   currentConfig.skip_silence_enabled = getCheckbox('skip_silence_enabled');
   currentConfig.preserve_pitch = getCheckbox('preserve_pitch');
   currentConfig.ambient_lighting_enabled = getCheckbox('ambient_lighting_enabled');
+  currentConfig.embed_lyrics = getCheckbox('embed_lyrics');
+
+  const downloadFormatSelect = document.getElementById('download_format') as HTMLSelectElement;
+  if (downloadFormatSelect) currentConfig.download_format = downloadFormatSelect.value;
+
+  const downloadDirInput = document.getElementById('download_dir') as HTMLInputElement;
+  if (downloadDirInput) currentConfig.download_dir = downloadDirInput.value;
+
+  const localDirInput = document.getElementById('local_music_dir') as HTMLInputElement;
+  if (localDirInput) currentConfig.local_music_dir = localDirInput.value;
 
   const intensitySlider = document.getElementById('ambient_intensity') as HTMLInputElement;
   if (intensitySlider) currentConfig.ambient_intensity = parseFloat(intensitySlider.value);

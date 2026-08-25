@@ -52,6 +52,19 @@
         "alwaysOnTop": false,
         "decorations": true,
         "visible": false
+      },
+      {
+        "label": "local",
+        "title": "YTMD Local Music Library",
+        "url": "local.html",
+        "width": 900,
+        "height": 650,
+        "minWidth": 600,
+        "minHeight": 450,
+        "resizable": true,
+        "alwaysOnTop": false,
+        "decorations": true,
+        "visible": false
       }
     ],
     "security": {

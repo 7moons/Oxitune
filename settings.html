@@ -251,6 +251,46 @@
           </label>
         </div>
 
+        <!-- Audio Downloader -->
+        <div class="section-title">Built-in Downloader</div>
+
+        <div class="setting-card">
+          <div class="setting-info">
+            <span class="setting-label">Default Audio Format</span>
+            <span class="setting-desc">Format and bitrate for downloaded tracks</span>
+          </div>
+          <select id="download_format" class="eq-select">
+            <option value="mp3">MP3 (320 kbps Extreme Quality)</option>
+            <option value="flac">FLAC (Lossless Studio Audio)</option>
+            <option value="opus">Opus (High Efficiency Audio)</option>
+          </select>
+        </div>
+
+        <div class="setting-card">
+          <div class="setting-info">
+            <span class="setting-label">Embed Synced Lyrics & Art</span>
+            <span class="setting-desc">Embed LRC lyrics and 1080p square album artwork into ID3 tags</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="embed_lyrics" />
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="setting-card" style="flex-direction: column; align-items: stretch; gap: 6px;">
+          <span class="setting-label">Download Output Folder</span>
+          <input type="text" id="download_dir" class="search-box" style="width: 100%; max-width: 100%;" placeholder="~/Music/YTMD" />
+        </div>
+
+        <!-- Local Music Library -->
+        <div class="section-title">Local Music Library</div>
+
+        <div class="setting-card" style="flex-direction: column; align-items: stretch; gap: 6px;">
+          <span class="setting-label">Local Music Directory</span>
+          <input type="text" id="local_music_dir" class="search-box" style="width: 100%; max-width: 100%;" placeholder="~/Music" />
+          <span class="setting-desc">Scans MP3, FLAC, M4A, OGG, OPUS, WAV files</span>
+        </div>
+
       </div>
     </main>
     <script type="module" src="./src/ui/settings.ts"></script>

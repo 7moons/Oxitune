@@ -1,6 +1,8 @@
 pub mod commands;
 pub mod config;
 pub mod discord_rpc;
+pub mod downloader;
+pub mod local_files;
 pub mod mpris;
 pub mod shortcuts;
 pub mod tray;
@@ -73,7 +75,7 @@ pub fn run() {
                         api.prevent_close();
                         let _ = window.hide();
                     }
-                } else if window.label() == "miniplayer" || window.label() == "settings" {
+                } else if window.label() == "miniplayer" || window.label() == "settings" || window.label() == "local" {
                     api.prevent_close();
                     let _ = window.hide();
                 }
@@ -85,11 +87,14 @@ pub fn run() {
             commands::update_track_info,
             commands::toggle_mini_player,
             commands::toggle_settings_window,
+            commands::toggle_local_library_window,
             commands::send_player_command,
             commands::send_seek_command,
             commands::send_volume_command,
             commands::fetch_lyrics,
             commands::notify_track_change,
+            commands::download_track,
+            commands::scan_local_music,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

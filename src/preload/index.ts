@@ -11,6 +11,8 @@ import { AudioDspPlugin } from '../plugins/audio-dsp';
 import { AmbientLightingPlugin } from '../plugins/ambient';
 import { ThemeEnginePlugin } from '../plugins/themes';
 import { PipPlugin } from '../plugins/pip';
+import { DownloaderPlugin } from '../plugins/downloader';
+import { LocalFilesPlugin } from '../plugins/local-files';
 import { PluginContext } from '../plugins/types';
 
 declare global {
@@ -69,6 +71,8 @@ async function initYTMD() {
   registry.register(AmbientLightingPlugin);
   registry.register(ThemeEnginePlugin);
   registry.register(PipPlugin);
+  registry.register(DownloaderPlugin);
+  registry.register(LocalFilesPlugin);
 
   await registry.initAll();
 
