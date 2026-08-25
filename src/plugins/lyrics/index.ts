@@ -52,6 +52,7 @@ export const LyricsPlugin: YTMDPlugin = {
         margin: 0 auto;
         box-sizing: border-box;
         font-family: inherit;
+        width: 100%;
       }
       .ytmd-native-lyric-line {
         font-size: 22px;
@@ -92,11 +93,13 @@ export const LyricsPlugin: YTMDPlugin = {
         font-weight: 500;
         text-align: center;
       }
-      /* Hide default un-synced text when our synced lyrics wrapper is active */
-      ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"] ytmusic-message-renderer:has(+ #ytmd-native-lyrics-wrapper),
-      ytmusic-description-shelf-renderer:has(#ytmd-native-lyrics-wrapper) #description,
-      ytmusic-description-shelf-renderer:has(#ytmd-native-lyrics-wrapper) .description,
-      ytmusic-description-shelf-renderer:has(#ytmd-native-lyrics-wrapper) yt-formatted-string.description {
+      /* Hide default un-synced text and unavailable messages inside lyrics tab */
+      ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"] ytmusic-message-renderer,
+      ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"] ytmusic-message-renderer #text,
+      ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"] ytmusic-message-renderer #subtext,
+      ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"] ytmusic-description-shelf-renderer #description,
+      ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"] ytmusic-description-shelf-renderer .description,
+      ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"] ytmusic-description-shelf-renderer yt-formatted-string.description {
         display: none !important;
       }
     `;
@@ -288,11 +291,17 @@ function ensureLyricsMounted(ctx: PluginContext): void {
     return;
   }
 
+  // Hide YouTube Music's default "unavailable" message element
+  const msgRenderer = targetContainer.querySelector('ytmusic-message-renderer');
+  if (msgRenderer) {
+    (msgRenderer as HTMLElement).style.display = 'none';
+  }
+
   let wrapper = document.getElementById('ytmd-native-lyrics-wrapper');
   if (!wrapper || !targetContainer.contains(wrapper)) {
     if (wrapper) wrapper.remove();
     wrapper = createEl('div', { id: 'ytmd-native-lyrics-wrapper' });
-    targetContainer.appendChild(wrapper);
+    targetContainer.prepend(wrapper);
     renderCurrentLyrics(ctx);
   }
 }
