@@ -7,6 +7,7 @@ import { LyricsPlugin } from '../plugins/lyrics';
 import { VolumePlugin } from '../plugins/volume';
 import { NotificationsPlugin } from '../plugins/notifications';
 import { VisualizerPlugin } from '../plugins/visualizer';
+import { AudioDspPlugin } from '../plugins/audio-dsp';
 import { PluginContext } from '../plugins/types';
 
 declare global {
@@ -61,6 +62,7 @@ async function initYTMD() {
   registry.register(VolumePlugin);
   registry.register(NotificationsPlugin);
   registry.register(VisualizerPlugin);
+  registry.register(AudioDspPlugin);
 
   await registry.initAll();
 

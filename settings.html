@@ -9,12 +9,63 @@
   <body>
     <header class="app-header">
       <div class="brand">
-        <span>Preferences</span>
+        <span>YTMD Preferences</span>
       </div>
       <button id="save-btn" class="btn-primary">Save Changes</button>
     </header>
     <main class="container">
       <div class="settings-grid">
+        
+        <!-- Audio Engine & DSP -->
+        <div class="section-title">Audio Engine & DSP</div>
+
+        <div class="eq-container">
+          <div class="eq-header">
+            <div>
+              <div class="setting-label">10-Band Graphic Equalizer</div>
+              <div class="setting-desc">Parametric studio filter chain</div>
+            </div>
+            <div class="eq-controls-top">
+              <select id="eq_preset" class="eq-select">
+                <option value="flat">Preset: Flat</option>
+                <option value="bass_boost">Preset: Bass Boost</option>
+                <option value="bass_reducer">Preset: Bass Reducer</option>
+                <option value="treble_boost">Preset: Treble Boost</option>
+                <option value="vocal_clarity">Preset: Vocal Clarity</option>
+                <option value="electronic">Preset: Electronic / EDM</option>
+                <option value="rock">Preset: Rock / Metal</option>
+                <option value="classical">Preset: Classical / Acoustic</option>
+                <option value="pop">Preset: Pop</option>
+                <option value="custom">Custom</option>
+              </select>
+              <button id="eq-reset-btn" class="btn-secondary" style="padding: 4px 10px; font-size: 11px;">Reset</button>
+            </div>
+          </div>
+
+          <!-- Preamp Slider -->
+          <div class="preamp-row">
+            <span class="preamp-label">Preamp Gain</span>
+            <input type="range" id="preamp_gain" min="-12" max="12" step="0.5" value="0" class="preamp-slider" />
+            <span id="preamp_val" class="preamp-val">0.0 dB</span>
+          </div>
+
+          <!-- 10 Vertical Faders -->
+          <div class="eq-faders-grid" id="eq-faders-grid">
+            <!-- Dynamically populated 10 vertical sliders -->
+          </div>
+        </div>
+
+        <div class="setting-card">
+          <div class="setting-info">
+            <span class="setting-label">Loudness Normalization (Auto-Gain)</span>
+            <span class="setting-desc">Smooth out volume peaks and prevent loud volume jumps between YouTube videos</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="loudness_normalization" />
+            <span class="slider"></span>
+          </label>
+        </div>
+
         <!-- Integrations -->
         <div class="section-title">System & Integrations</div>
         
@@ -63,7 +114,7 @@
         </div>
 
         <!-- Plugins & Enhancements -->
-        <div class="section-title">Audio & Plugins</div>
+        <div class="section-title">Plugins & Addons</div>
 
         <div class="setting-card">
           <div class="setting-info">
@@ -106,11 +157,12 @@
             <span class="setting-label">Theme Mode</span>
             <span class="setting-desc">Select visual styling mode</span>
           </div>
-          <select id="theme" style="background: var(--bg-subtle); color: var(--text-primary); border: 1px solid var(--border); padding: 6px 12px; border-radius: 6px;">
+          <select id="theme" class="eq-select">
             <option value="default-dark">Modern Dark</option>
             <option value="oled">Pure OLED Black</option>
           </select>
         </div>
+
       </div>
     </main>
     <script type="module" src="./src/ui/settings.ts"></script>

@@ -20,6 +20,11 @@ pub struct AppConfig {
     pub custom_user_agent: String,
     pub quality: String,
     pub normalize_volume: bool,
+    pub equalizer_enabled: bool,
+    pub equalizer_preset: String,
+    pub equalizer_gains: Vec<f64>,
+    pub preamp_gain: f64,
+    pub loudness_normalization: bool,
     pub lastfm_enabled: bool,
     pub lastfm_api_key: String,
     pub lastfm_secret: String,
@@ -44,6 +49,11 @@ impl Default for AppConfig {
             custom_user_agent: "".to_string(),
             quality: "high".to_string(),
             normalize_volume: false,
+            equalizer_enabled: true,
+            equalizer_preset: "flat".to_string(),
+            equalizer_gains: vec![0.0; 10], // 10 bands default at 0dB
+            preamp_gain: 0.0,
+            loudness_normalization: false,
             lastfm_enabled: false,
             lastfm_api_key: "".to_string(),
             lastfm_secret: "".to_string(),
@@ -97,16 +107,24 @@ mod tests {
         assert!(config.adblock_enabled);
         assert!(config.sponsorblock_enabled);
         assert!(config.lyrics_enabled);
+        assert!(config.equalizer_enabled);
+        assert_eq!(config.equalizer_gains.len(), 10);
+        assert_eq!(config.equalizer_preset, "flat");
         assert_eq!(config.wheel_volume_step, 0.05);
         assert_eq!(config.quality, "high");
     }
 
     #[test]
     fn test_config_serialization() {
-        let config = AppConfig::default();
+        let mut config = AppConfig::default();
+        config.equalizer_gains = vec![3.0, 2.5, 1.0, 0.0, -1.0, -2.0, 0.0, 1.5, 3.0, 4.0];
+        config.preamp_gain = 1.5;
         let serialized = serde_json::to_string(&config).expect("Serialization failed");
         let deserialized: AppConfig = serde_json::from_str(&serialized).expect("Deserialization failed");
         assert_eq!(deserialized.theme, "default-dark");
         assert_eq!(deserialized.mpris_enabled, true);
+        assert_eq!(deserialized.equalizer_gains.len(), 10);
+        assert_eq!(deserialized.equalizer_gains[0], 3.0);
+        assert_eq!(deserialized.preamp_gain, 1.5);
     }
 }
