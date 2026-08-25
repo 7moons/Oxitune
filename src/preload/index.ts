@@ -14,6 +14,8 @@ import { PipPlugin } from '../plugins/pip';
 import { DownloaderPlugin } from '../plugins/downloader';
 import { LocalFilesPlugin } from '../plugins/local-files';
 import { SyncRoomPlugin } from '../plugins/sync-room';
+import { PowerPlugin } from '../plugins/power';
+import { RemotePlugin } from '../plugins/remote';
 import { PluginContext } from '../plugins/types';
 
 declare global {
@@ -75,6 +77,8 @@ async function initYTMD() {
   registry.register(DownloaderPlugin);
   registry.register(LocalFilesPlugin);
   registry.register(SyncRoomPlugin);
+  registry.register(PowerPlugin);
+  registry.register(RemotePlugin);
 
   await registry.initAll();
 

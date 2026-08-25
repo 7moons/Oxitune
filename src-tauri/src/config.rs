@@ -36,6 +36,10 @@ pub struct AppConfig {
     pub download_format: String,
     pub embed_lyrics: bool,
     pub local_music_dir: String,
+    pub remote_enabled: bool,
+    pub remote_port: u16,
+    pub inhibit_sleep: bool,
+    pub pause_on_lock: bool,
     pub lastfm_enabled: bool,
     pub lastfm_api_key: String,
     pub lastfm_secret: String,
@@ -87,6 +91,10 @@ impl Default for AppConfig {
             download_format: "mp3".to_string(),
             embed_lyrics: true,
             local_music_dir: default_music_dir,
+            remote_enabled: true,
+            remote_port: 9863,
+            inhibit_sleep: true,
+            pause_on_lock: true,
             lastfm_enabled: false,
             lastfm_api_key: "".to_string(),
             lastfm_secret: "".to_string(),
@@ -152,6 +160,10 @@ mod tests {
         assert_eq!(config.theme_preset, "default");
         assert_eq!(config.download_format, "mp3");
         assert_eq!(config.embed_lyrics, true);
+        assert_eq!(config.remote_enabled, true);
+        assert_eq!(config.remote_port, 9863);
+        assert_eq!(config.inhibit_sleep, true);
+        assert_eq!(config.pause_on_lock, true);
         assert_eq!(config.wheel_volume_step, 0.05);
         assert_eq!(config.quality, "high");
     }
@@ -170,6 +182,8 @@ mod tests {
         config.theme_preset = "catppuccin".to_string();
         config.download_format = "flac".to_string();
         config.embed_lyrics = true;
+        config.remote_enabled = false;
+        config.remote_port = 8888;
         let serialized = serde_json::to_string(&config).expect("Serialization failed");
         let deserialized: AppConfig = serde_json::from_str(&serialized).expect("Deserialization failed");
         assert_eq!(deserialized.theme, "default-dark");
@@ -186,5 +200,7 @@ mod tests {
         assert_eq!(deserialized.theme_preset, "catppuccin");
         assert_eq!(deserialized.download_format, "flac");
         assert_eq!(deserialized.embed_lyrics, true);
+        assert_eq!(deserialized.remote_enabled, false);
+        assert_eq!(deserialized.remote_port, 8888);
     }
 }

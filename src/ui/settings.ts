@@ -33,6 +33,10 @@ interface AppConfig {
   download_format: string;
   embed_lyrics: boolean;
   local_music_dir: string;
+  remote_enabled: boolean;
+  remote_port: number;
+  inhibit_sleep: boolean;
+  pause_on_lock: boolean;
   lastfm_enabled: boolean;
   lastfm_api_key: string;
   lastfm_secret: string;
@@ -151,6 +155,12 @@ async function loadSettings() {
       setCheckbox('preserve_pitch', config.preserve_pitch !== false);
       setCheckbox('ambient_lighting_enabled', config.ambient_lighting_enabled !== false);
       setCheckbox('embed_lyrics', config.embed_lyrics !== false);
+      setCheckbox('remote_enabled', config.remote_enabled !== false);
+      setCheckbox('inhibit_sleep', config.inhibit_sleep !== false);
+      setCheckbox('pause_on_lock', config.pause_on_lock !== false);
+
+      const remotePortInput = document.getElementById('remote_port') as HTMLInputElement;
+      if (remotePortInput) remotePortInput.value = String(config.remote_port || 9863);
 
       // Downloader & Local Music fields
       const downloadFormatSelect = document.getElementById('download_format') as HTMLSelectElement;
@@ -254,6 +264,12 @@ async function saveSettings() {
   currentConfig.preserve_pitch = getCheckbox('preserve_pitch');
   currentConfig.ambient_lighting_enabled = getCheckbox('ambient_lighting_enabled');
   currentConfig.embed_lyrics = getCheckbox('embed_lyrics');
+  currentConfig.remote_enabled = getCheckbox('remote_enabled');
+  currentConfig.inhibit_sleep = getCheckbox('inhibit_sleep');
+  currentConfig.pause_on_lock = getCheckbox('pause_on_lock');
+
+  const remotePortInput = document.getElementById('remote_port') as HTMLInputElement;
+  if (remotePortInput) currentConfig.remote_port = parseInt(remotePortInput.value, 10) || 9863;
 
   const downloadFormatSelect = document.getElementById('download_format') as HTMLSelectElement;
   if (downloadFormatSelect) currentConfig.download_format = downloadFormatSelect.value;

@@ -4,6 +4,8 @@ pub mod discord_rpc;
 pub mod downloader;
 pub mod local_files;
 pub mod mpris;
+pub mod power_manager;
+pub mod remote_server;
 pub mod shortcuts;
 pub mod sync_room;
 pub mod tray;
@@ -12,6 +14,7 @@ use config::ConfigManager;
 use discord_rpc::{DiscordRpcHandle, TrackPayload};
 use mpris::MprisManager;
 use parking_lot::Mutex;
+use power_manager::PowerManager;
 use std::sync::Arc;
 use sync_room::SyncRoomManager;
 use tauri::{Manager, WindowEvent};
@@ -22,6 +25,7 @@ pub struct AppState {
     pub mpris: Mutex<Option<MprisManager>>,
     pub current_track: Mutex<Option<TrackPayload>>,
     pub sync_room: SyncRoomManager,
+    pub power_manager: PowerManager,
 }
 
 pub fn run() {
@@ -40,9 +44,12 @@ pub fn run() {
         mpris: Mutex::new(None),
         current_track: Mutex::new(None),
         sync_room: SyncRoomManager::new(),
+        power_manager: PowerManager::new(),
     });
 
     let app_state_for_setup = app_state.clone();
+    let remote_enabled = initial_config.remote_enabled;
+    let remote_port = initial_config.remote_port;
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -62,6 +69,11 @@ pub fn run() {
 
             // Initialize Global Shortcuts
             let _ = shortcuts::setup_shortcuts(&handle);
+
+            // Start Mobile Web Remote Server if enabled
+            if remote_enabled {
+                remote_server::start_remote_server(handle.clone(), remote_port);
+            }
 
             // Inject preload script into the main window when initialized
             if let Some(main_win) = handle.get_webview_window("main") {
@@ -105,6 +117,8 @@ pub fn run() {
             commands::leave_sync_room,
             commands::get_sync_room_state,
             commands::broadcast_sync_state,
+            commands::get_remote_info,
+            commands::set_inhibit_sleep,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

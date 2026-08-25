@@ -291,6 +291,53 @@
           <span class="setting-desc">Scans MP3, FLAC, M4A, OGG, OPUS, WAV files</span>
         </div>
 
+        <!-- Web Remote -->
+        <div class="section-title">Mobile Web Remote (Wi-Fi)</div>
+
+        <div class="setting-card">
+          <div class="setting-info">
+            <span class="setting-label">Enable Mobile Web Remote</span>
+            <span class="setting-desc">Allows controlling playback from phone or tablet via local Wi-Fi</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="remote_enabled" />
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="setting-card" style="display: flex; justify-content: space-between; align-items: center;">
+          <div class="setting-info">
+            <span class="setting-label">Remote Port</span>
+            <span class="setting-desc">Port for the embedded local HTTP server</span>
+          </div>
+          <input type="number" id="remote_port" class="search-box" style="width: 100px; text-align: center;" value="9863" />
+        </div>
+
+        <!-- Smart Power & Sleep -->
+        <div class="section-title">Smart Power & Screen Lock</div>
+
+        <div class="setting-card">
+          <div class="setting-info">
+            <span class="setting-label">Inhibit Sleep During Playback</span>
+            <span class="setting-desc">Prevents system from entering sleep mode while music is actively playing</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="inhibit_sleep" />
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="setting-card">
+          <div class="setting-info">
+            <span class="setting-label">Pause on Screen Lock</span>
+            <span class="setting-desc">Automatically pause playback when locking your workstation</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="pause_on_lock" />
+            <span class="slider"></span>
+          </label>
+        </div>
+
       </div>
     </main>
     <script type="module" src="./src/ui/settings.ts"></script>
