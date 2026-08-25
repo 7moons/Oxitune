@@ -94,56 +94,108 @@ pub fn send_volume_command(app_handle: AppHandle, volume: f64) -> Result<(), Str
     Ok(())
 }
 
+fn clean_track_name(title: &str) -> String {
+    let mut cleaned = title.to_string();
+    let patterns = [
+        "(Official Video)", "(Official Music Video)", "(Official Audio)",
+        "[Official Video]", "[Official Music Video]", "[Official Audio]",
+        "(Official Visualizer)", "[Official Visualizer]", "(Official)",
+        "(Audio)", "[Audio]", "(Lyrics)", "[Lyrics]", "(Lyric Video)",
+        "(Visualizer)", "[Visualizer]", "(Clip Officiel)", "(Video)",
+        "(Remastered)", "[Remastered]", "(Teledysk)", "(Oficjalny teledysk)"
+    ];
+    for p in &patterns {
+        cleaned = cleaned.replace(p, "");
+    }
+    cleaned = cleaned.trim().to_string();
+    if cleaned.is_empty() {
+        title.to_string()
+    } else {
+        cleaned
+    }
+}
+
 #[tauri::command]
 pub async fn fetch_lyrics(
     artist: String,
     title: String,
     album_name: Option<String>,
-    duration: Option<f64>,
+    _duration: Option<f64>,
 ) -> Result<serde_json::Value, String> {
     let client = reqwest::Client::builder()
         .user_agent("YTMD-Desktop/1.0 (https://github.com/dachluczaj/ytmd)")
         .build()
         .map_err(|e| e.to_string())?;
 
-    let mut url = format!(
+    let clean_title = clean_track_name(&title);
+    let clean_artist = artist.trim();
+
+    // 1. Try exact get without rigid duration filter
+    let mut get_url = format!(
         "https://lrclib.net/api/get?artist_name={}&track_name={}",
-        urlencoding::encode(&artist),
-        urlencoding::encode(&title)
+        urlencoding::encode(clean_artist),
+        urlencoding::encode(&clean_title)
     );
-
-    if let Some(album) = album_name {
-        url.push_str(&format!("&album_name={}", urlencoding::encode(&album)));
-    }
-    if let Some(dur) = duration {
-        url.push_str(&format!("&duration={}", dur as u64));
+    if let Some(album) = &album_name {
+        if !album.is_empty() {
+            get_url.push_str(&format!("&album_name={}", urlencoding::encode(album)));
+        }
     }
 
-    let res = client.get(&url).send().await;
-    match res {
-        Ok(response) => {
-            if response.status().is_success() {
-                let val: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
-                Ok(val)
-            } else {
-                // Try search API if exact match not found
-                let search_url = format!(
-                    "https://lrclib.net/api/search?q={}+{}",
-                    urlencoding::encode(&artist),
-                    urlencoding::encode(&title)
-                );
-                let search_res = client.get(&search_url).send().await.map_err(|e| e.to_string())?;
-                if search_res.status().is_success() {
-                    let items: serde_json::Value = search_res.json().await.map_err(|e| e.to_string())?;
-                    if let Some(first) = items.as_array().and_then(|a| a.first()) {
+    if let Ok(res) = client.get(&get_url).send().await {
+        if res.status().is_success() {
+            if let Ok(val) = res.json::<serde_json::Value>().await {
+                if val.get("syncedLyrics").is_some() || val.get("plainLyrics").is_some() {
+                    return Ok(val);
+                }
+            }
+        }
+    }
+
+    // 2. Try structured search API
+    let search_url = format!(
+        "https://lrclib.net/api/search?track_name={}&artist_name={}",
+        urlencoding::encode(&clean_title),
+        urlencoding::encode(clean_artist)
+    );
+    if let Ok(search_res) = client.get(&search_url).send().await {
+        if search_res.status().is_success() {
+            if let Ok(items) = search_res.json::<serde_json::Value>().await {
+                if let Some(arr) = items.as_array() {
+                    // Prefer item with synced lyrics first
+                    if let Some(synced) = arr.iter().find(|it| it.get("syncedLyrics").and_then(|s| s.as_str()).map(|s| !s.is_empty()).unwrap_or(false)) {
+                        return Ok(synced.clone());
+                    }
+                    if let Some(first) = arr.first() {
                         return Ok(first.clone());
                     }
                 }
-                Err("Lyrics not found".to_string())
             }
         }
-        Err(e) => Err(e.to_string()),
     }
+
+    // 3. Try broad text search API query
+    let broad_url = format!(
+        "https://lrclib.net/api/search?q={}+{}",
+        urlencoding::encode(clean_artist),
+        urlencoding::encode(&clean_title)
+    );
+    if let Ok(broad_res) = client.get(&broad_url).send().await {
+        if broad_res.status().is_success() {
+            if let Ok(items) = broad_res.json::<serde_json::Value>().await {
+                if let Some(arr) = items.as_array() {
+                    if let Some(synced) = arr.iter().find(|it| it.get("syncedLyrics").and_then(|s| s.as_str()).map(|s| !s.is_empty()).unwrap_or(false)) {
+                        return Ok(synced.clone());
+                    }
+                    if let Some(first) = arr.first() {
+                        return Ok(first.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    Err("Lyrics not found in database".to_string())
 }
 
 #[tauri::command]
