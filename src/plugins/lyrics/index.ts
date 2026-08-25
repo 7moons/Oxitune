@@ -1,5 +1,5 @@
 import { YTMDPlugin, PluginContext, TrackInfo } from '../types';
-import { setSafeHTML } from '../../utils/dom';
+import { createEl } from '../../utils/dom';
 
 interface LrcLine {
   timeSecs: number;
@@ -17,17 +17,19 @@ export const LyricsPlugin: YTMDPlugin = {
     (this as any)._currentActiveIdx = -1;
 
     // Create lyrics sidebar overlay container
-    const container = document.createElement('div');
-    container.id = 'ytmd-lyrics-container';
-    setSafeHTML(container, `
-      <div class="ytmd-lyrics-header">
-        <span class="ytmd-lyrics-title">Synchronized Lyrics</span>
-        <button id="ytmd-lyrics-close">✕</button>
-      </div>
-      <div class="ytmd-lyrics-body" id="ytmd-lyrics-body">
-        <div class="ytmd-lyrics-placeholder">Play a song to load lyrics</div>
-      </div>
-    `);
+    const container = createEl('div', { id: 'ytmd-lyrics-container' });
+    const header = createEl('div', { className: 'ytmd-lyrics-header' });
+    const title = createEl('span', { className: 'ytmd-lyrics-title', text: 'Synchronized Lyrics' });
+    const closeBtn = createEl('button', { id: 'ytmd-lyrics-close', text: '✕' });
+    header.appendChild(title);
+    header.appendChild(closeBtn);
+
+    const body = createEl('div', { id: 'ytmd-lyrics-body', className: 'ytmd-lyrics-body' });
+    const placeholder = createEl('div', { className: 'ytmd-lyrics-placeholder', text: 'Play a song to load lyrics' });
+    body.appendChild(placeholder);
+
+    container.appendChild(header);
+    container.appendChild(body);
 
     const style = document.createElement('style');
     style.id = 'ytmd-lyrics-styles';
@@ -41,91 +43,111 @@ export const LyricsPlugin: YTMDPlugin = {
         background: #111113;
         border: 1px solid #27272a;
         border-radius: 12px;
-        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
-        z-index: 99999;
-        display: flex;
+        box-shadow: 0 16px 36px rgba(0,0,0,0.6);
+        z-index: 9999;
+        display: none;
         flex-direction: column;
         overflow: hidden;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-        color: #f4f4f5;
-        transition: opacity 0.2s ease, transform 0.2s ease;
-      }
-      #ytmd-lyrics-container.hidden {
-        display: none;
+        font-family: inherit;
+        backdrop-filter: blur(12px);
       }
       .ytmd-lyrics-header {
         display: flex;
         align-items: center;
         justify-content: space-between;
         padding: 12px 16px;
-        border-bottom: 1px solid #27272a;
         background: #18181b;
+        border-bottom: 1px solid #27272a;
       }
       .ytmd-lyrics-title {
-        font-size: 13px;
         font-weight: 600;
-        letter-spacing: 0.5px;
-        text-transform: uppercase;
-        color: #a1a1aa;
+        font-size: 13px;
+        color: #f4f4f5;
       }
       #ytmd-lyrics-close {
         background: none;
         border: none;
-        color: #71717a;
+        color: #a1a1aa;
         cursor: pointer;
         font-size: 14px;
-        padding: 4px 8px;
-        border-radius: 4px;
+        padding: 2px 6px;
       }
       #ytmd-lyrics-close:hover {
-        background: #27272a;
         color: #fff;
       }
       .ytmd-lyrics-body {
-        padding: 16px;
-        overflow-y: auto;
         flex: 1;
+        overflow-y: auto;
+        padding: 16px;
         display: flex;
         flex-direction: column;
         gap: 12px;
-        scroll-behavior: smooth;
       }
       .ytmd-lyric-line {
         font-size: 15px;
-        line-height: 1.5;
+        line-height: 1.4;
         color: #71717a;
         cursor: pointer;
-        padding: 4px 8px;
-        border-radius: 6px;
-        transition: color 0.15s ease, background-color 0.15s ease, transform 0.15s ease;
+        transition: color 0.15s ease, transform 0.15s ease;
+        padding: 4px 6px;
+        border-radius: 4px;
       }
       .ytmd-lyric-line:hover {
-        color: #e4e4e7;
-        background: #1c1c20;
+        color: #d4d4d8;
+        background: rgba(255,255,255,0.04);
       }
       .ytmd-lyric-line.active {
-        color: #ffffff;
+        color: #38bdf8;
         font-weight: 600;
-        font-size: 17px;
-        background: #27272a;
+        transform: scale(1.02);
       }
       .ytmd-lyrics-placeholder {
         color: #71717a;
-        font-size: 14px;
+        font-size: 13px;
         text-align: center;
-        margin: auto;
+        margin-top: 40px;
       }
     `;
 
     document.head.appendChild(style);
     document.body.appendChild(container);
 
-    const closeBtn = document.getElementById('ytmd-lyrics-close');
-    if (closeBtn) {
-      closeBtn.addEventListener('click', () => {
-        container.classList.toggle('hidden');
-      });
-    }
+    closeBtn.addEventListener('click', () => {
+      container.style.display = 'none';
+    });
+
+    const injectLyricsButton = () => {
+      if (document.getElementById('ytmd-lyrics-nav-btn')) return;
+
+      const playerBarMiddle = document.querySelector(
+        'ytmusic-player-bar .middle-controls-buttons, ytmusic-player-bar .right-controls-buttons'
+      );
+
+      if (playerBarMiddle) {
+        const lyricsBtn = createEl('button', {
+          id: 'ytmd-lyrics-nav-btn',
+          title: 'Synced Lyrics',
+          style: 'background:none; border:none; color:#a1a1aa; cursor:pointer; padding:6px; font-size:13px; font-weight:700;'
+        });
+        lyricsBtn.textContent = 'LRC';
+
+        lyricsBtn.addEventListener('mouseenter', () => {
+          lyricsBtn.style.color = '#fff';
+        });
+        lyricsBtn.addEventListener('mouseleave', () => {
+          lyricsBtn.style.color = '#a1a1aa';
+        });
+
+        lyricsBtn.addEventListener('click', () => {
+          container.style.display = container.style.display === 'flex' ? 'none' : 'flex';
+        });
+
+        playerBarMiddle.appendChild(lyricsBtn);
+      }
+    };
+
+    setInterval(injectLyricsButton, 1000);
+    injectLyricsButton();
 
     (this as any)._cleanup = () => {
       style.remove();
@@ -136,7 +158,7 @@ export const LyricsPlugin: YTMDPlugin = {
   async onTrackChange(track: TrackInfo, ctx: PluginContext) {
     const body = document.getElementById('ytmd-lyrics-body');
     if (body) {
-      setSafeHTML(body, '<div class="ytmd-lyrics-placeholder">Loading synced lyrics...</div>');
+      body.replaceChildren(createEl('div', { className: 'ytmd-lyrics-placeholder', text: 'Loading synced lyrics...' }));
     }
     (this as any)._lines = [];
     (this as any)._currentActiveIdx = -1;
@@ -157,22 +179,17 @@ export const LyricsPlugin: YTMDPlugin = {
         if (body) {
           const lines = lyricsData.plainLyrics.split('\n');
           body.replaceChildren(
-            ...lines.map((line) => {
-              const div = document.createElement('div');
-              div.className = 'ytmd-lyric-line';
-              div.textContent = line;
-              return div;
-            })
+            ...lines.map((line) => createEl('div', { className: 'ytmd-lyric-line', text: line }))
           );
         }
       } else {
         if (body) {
-          setSafeHTML(body, '<div class="ytmd-lyrics-placeholder">No lyrics available for this song.</div>');
+          body.replaceChildren(createEl('div', { className: 'ytmd-lyrics-placeholder', text: 'No lyrics available for this song.' }));
         }
       }
     } catch {
       if (body) {
-        setSafeHTML(body, '<div class="ytmd-lyrics-placeholder">Lyrics not found.</div>');
+        body.replaceChildren(createEl('div', { className: 'ytmd-lyrics-placeholder', text: 'Lyrics not found.' }));
       }
     }
   },
@@ -190,34 +207,31 @@ export const LyricsPlugin: YTMDPlugin = {
       }
     }
 
-    if (activeIdx !== (this as any)._currentActiveIdx) {
+    if (activeIdx !== (this as any)._currentActiveIdx && activeIdx >= 0) {
       (this as any)._currentActiveIdx = activeIdx;
-      const elements = document.querySelectorAll('.ytmd-lyric-line');
-      elements.forEach((el, idx) => {
-        if (idx === activeIdx) {
-          el.classList.add('active');
-          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        } else {
-          el.classList.remove('active');
-        }
-      });
-    }
-  },
-
-  onDestroy() {
-    if ((this as any)._cleanup) {
-      (this as any)._cleanup();
+      const body = document.getElementById('ytmd-lyrics-body');
+      if (body) {
+        const lineEls = body.querySelectorAll('.ytmd-lyric-line');
+        lineEls.forEach((el, idx) => {
+          if (idx === activeIdx) {
+            el.classList.add('active');
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          } else {
+            el.classList.remove('active');
+          }
+        });
+      }
     }
   }
 };
 
-function parseLrc(lrcText: string): LrcLine[] {
-  const lines = lrcText.split('\n');
+function parseLrc(lrcContent: string): LrcLine[] {
+  const lines = lrcContent.split('\n');
   const result: LrcLine[] = [];
-  const timeRegex = /\[(\d{2}):(\d{2})\.(\d{2,3})\](.*)/;
+  const regex = /\[(\d{2}):(\d{2})\.(\d{2,3})\](.*)/;
 
   for (const line of lines) {
-    const match = line.match(timeRegex);
+    const match = regex.exec(line.trim());
     if (match) {
       const minutes = parseInt(match[1], 10);
       const seconds = parseInt(match[2], 10);
@@ -237,17 +251,16 @@ function renderLyrics(lines: LrcLine[], ctx: PluginContext): void {
   const body = document.getElementById('ytmd-lyrics-body');
   if (!body) return;
 
-  body.replaceChildren();
-  lines.forEach((line) => {
-    const el = document.createElement('div');
-    el.className = 'ytmd-lyric-line';
-    el.textContent = line.text;
-    el.addEventListener('click', () => {
-      const video = ctx.getVideoElement();
-      if (video) {
-        video.currentTime = line.timeSecs;
-      }
-    });
-    body.appendChild(el);
-  });
+  body.replaceChildren(
+    ...lines.map((line) => {
+      const el = createEl('div', { className: 'ytmd-lyric-line', text: line.text });
+      el.addEventListener('click', () => {
+        const video = ctx.getVideoElement();
+        if (video) {
+          video.currentTime = line.timeSecs;
+        }
+      });
+      return el;
+    })
+  );
 }

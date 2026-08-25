@@ -1,5 +1,5 @@
 import { YTMDPlugin, PluginContext, TrackInfo } from '../types';
-import { setSafeHTML } from '../../utils/dom';
+import { createEl, createSvg } from '../../utils/dom';
 
 export const DownloaderPlugin: YTMDPlugin = {
   id: 'downloader',
@@ -19,14 +19,14 @@ export const DownloaderPlugin: YTMDPlugin = {
       );
 
       if (playerBarMiddle) {
-        const downloadBtn = document.createElement('button');
-        downloadBtn.id = 'ytmd-download-btn';
-        downloadBtn.title = 'Download Track (MP3/FLAC with ID3 Tags & Lyrics)';
-        setSafeHTML(downloadBtn, `
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z"/>
-          </svg>
-        `);
+        const downloadBtn = createEl('button', {
+          id: 'ytmd-download-btn',
+          title: 'Download Track (MP3/FLAC with ID3 Tags & Lyrics)',
+          style: 'background:none; border:none; color:#a1a1aa; cursor:pointer; padding:6px; border-radius:6px; display:flex; align-items:center; justify-content:center; margin:0 4px; transition:color 0.15s ease, background-color 0.15s ease;'
+        });
+
+        const downloadIcon = createSvg('M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z', 20, 20);
+        downloadBtn.appendChild(downloadIcon);
         downloadBtn.style.cssText = `
           background: none;
           border: none;

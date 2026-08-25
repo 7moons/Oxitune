@@ -1,30 +1,43 @@
 /**
- * DOM utility for Trusted Types safe HTML insertion on YouTube Music.
- * Uses DOMParser and document.importNode with replaceChildren to completely bypass Trusted Types.
+ * Pure DOM Element Builders.
+ * Uses ONLY native DOM methods (createElement, createElementNS, textContent, setAttribute, appendChild)
+ * to guarantee 100% immunity to Trusted Types CSP restrictions on YouTube Music.
  */
 
-export function setSafeHTML(element: HTMLElement, htmlString: string): void {
-  try {
-    const trimmed = htmlString.trim();
+export function createSvg(
+  pathD: string,
+  width = 18,
+  height = 18,
+  viewBox = '0 0 24 24'
+): SVGSVGElement {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('width', String(width));
+  svg.setAttribute('height', String(height));
+  svg.setAttribute('viewBox', viewBox);
+  svg.setAttribute('fill', 'currentColor');
 
-    // Check if it's an SVG string
-    if (trimmed.startsWith('<svg') || trimmed.includes('<svg')) {
-      const xmlParser = new DOMParser();
-      const xmlDoc = xmlParser.parseFromString(htmlString, 'image/svg+xml');
-      const svgElement = xmlDoc.documentElement;
-      if (svgElement && svgElement.nodeName.toLowerCase() === 'svg') {
-        const imported = document.importNode(svgElement, true);
-        element.replaceChildren(imported);
-        return;
-      }
-    }
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('d', pathD);
+  svg.appendChild(path);
 
-    // HTML elements
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(htmlString, 'text/html');
-    const nodes = Array.from(doc.body.childNodes).map((n) => document.importNode(n, true));
-    element.replaceChildren(...nodes);
-  } catch (e) {
-    console.warn('[YTMD] Safe DOM insertion error:', e);
+  return svg;
+}
+
+export function createEl<K extends keyof HTMLElementTagNameMap>(
+  tag: K,
+  attrs?: {
+    id?: string;
+    className?: string;
+    text?: string;
+    title?: string;
+    style?: string;
   }
+): HTMLElementTagNameMap[K] {
+  const el = document.createElement(tag);
+  if (attrs?.id) el.id = attrs.id;
+  if (attrs?.className) el.className = attrs.className;
+  if (attrs?.text !== undefined) el.textContent = attrs.text;
+  if (attrs?.title) el.title = attrs.title;
+  if (attrs?.style) el.style.cssText = attrs.style;
+  return el;
 }
