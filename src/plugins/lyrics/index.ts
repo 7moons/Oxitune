@@ -1,4 +1,5 @@
 import { YTMDPlugin, PluginContext, TrackInfo } from '../types';
+import { setSafeHTML } from '../../utils/dom';
 
 interface LrcLine {
   timeSecs: number;
@@ -18,7 +19,7 @@ export const LyricsPlugin: YTMDPlugin = {
     // Create lyrics sidebar overlay container
     const container = document.createElement('div');
     container.id = 'ytmd-lyrics-container';
-    container.innerHTML = `
+    setSafeHTML(container, `
       <div class="ytmd-lyrics-header">
         <span class="ytmd-lyrics-title">Synchronized Lyrics</span>
         <button id="ytmd-lyrics-close">✕</button>
@@ -26,7 +27,7 @@ export const LyricsPlugin: YTMDPlugin = {
       <div class="ytmd-lyrics-body" id="ytmd-lyrics-body">
         <div class="ytmd-lyrics-placeholder">Play a song to load lyrics</div>
       </div>
-    `;
+    `);
 
     const style = document.createElement('style');
     style.id = 'ytmd-lyrics-styles';
@@ -135,7 +136,7 @@ export const LyricsPlugin: YTMDPlugin = {
   async onTrackChange(track: TrackInfo, ctx: PluginContext) {
     const body = document.getElementById('ytmd-lyrics-body');
     if (body) {
-      body.innerHTML = '<div class="ytmd-lyrics-placeholder">Loading synced lyrics...</div>';
+      setSafeHTML(body, '<div class="ytmd-lyrics-placeholder">Loading synced lyrics...</div>');
     }
     (this as any)._lines = [];
     (this as any)._currentActiveIdx = -1;
@@ -154,19 +155,24 @@ export const LyricsPlugin: YTMDPlugin = {
         renderLyrics(parsed, ctx);
       } else if (lyricsData?.plainLyrics) {
         if (body) {
-          body.innerHTML = lyricsData.plainLyrics
-            .split('\n')
-            .map((line) => `<div class="ytmd-lyric-line">${escapeHtml(line)}</div>`)
-            .join('');
+          const lines = lyricsData.plainLyrics.split('\n');
+          body.replaceChildren(
+            ...lines.map((line) => {
+              const div = document.createElement('div');
+              div.className = 'ytmd-lyric-line';
+              div.textContent = line;
+              return div;
+            })
+          );
         }
       } else {
         if (body) {
-          body.innerHTML = '<div class="ytmd-lyrics-placeholder">No lyrics available for this song.</div>';
+          setSafeHTML(body, '<div class="ytmd-lyrics-placeholder">No lyrics available for this song.</div>');
         }
       }
-    } catch (e) {
+    } catch {
       if (body) {
-        body.innerHTML = '<div class="ytmd-lyrics-placeholder">Lyrics not found.</div>';
+        setSafeHTML(body, '<div class="ytmd-lyrics-placeholder">Lyrics not found.</div>');
       }
     }
   },
@@ -231,7 +237,7 @@ function renderLyrics(lines: LrcLine[], ctx: PluginContext): void {
   const body = document.getElementById('ytmd-lyrics-body');
   if (!body) return;
 
-  body.innerHTML = '';
+  body.replaceChildren();
   lines.forEach((line) => {
     const el = document.createElement('div');
     el.className = 'ytmd-lyric-line';
@@ -244,10 +250,4 @@ function renderLyrics(lines: LrcLine[], ctx: PluginContext): void {
     });
     body.appendChild(el);
   });
-}
-
-function escapeHtml(text: string): string {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
 }

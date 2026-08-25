@@ -1,5 +1,6 @@
 import { YTMDPlugin, PluginContext, TrackInfo } from '../types';
 import { extractPalette } from './color';
+import { setSafeHTML } from '../../utils/dom';
 
 export const AmbientLightingPlugin: YTMDPlugin = {
   id: 'ambient_lighting',
@@ -62,10 +63,10 @@ export const AmbientLightingPlugin: YTMDPlugin = {
     `;
     document.head.appendChild(style);
 
-    backdrop.innerHTML = `
+    setSafeHTML(backdrop, `
       <div id="ytmd-orb-1" class="ytmd-ambient-orb"></div>
       <div id="ytmd-orb-2" class="ytmd-ambient-orb"></div>
-    `;
+    `);
 
     (this as any)._setIntensity = (val: number) => {
       if (backdrop) backdrop.style.opacity = String(val);

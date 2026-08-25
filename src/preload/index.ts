@@ -18,6 +18,7 @@ import { SyncRoomPlugin } from '../plugins/sync-room';
 import { PowerPlugin } from '../plugins/power';
 import { RemotePlugin } from '../plugins/remote';
 import { PluginContext, TrackInfo } from '../plugins/types';
+import { setSafeHTML } from '../utils/dom';
 
 let currentActiveTrack: TrackInfo | null = null;
 
@@ -48,12 +49,12 @@ function injectBurgerMenu(config: Record<string, unknown>) {
   const burgerBtn = document.createElement('button');
   burgerBtn.id = 'ytmd-burger-btn';
   burgerBtn.title = 'YTMD Menu (Ctrl+,)';
-  burgerBtn.innerHTML = `
+  setSafeHTML(burgerBtn, `
     <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
       <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>
     </svg>
     <span style="font-size: 12px; font-weight: 700; letter-spacing: -0.2px;">YTMD</span>
-  `;
+  `);
   burgerBtn.style.cssText = `
     position: fixed !important;
     top: 10px !important;
@@ -123,13 +124,13 @@ function injectBurgerMenu(config: Record<string, unknown>) {
         text-align: left !important;
         transition: background 0.12s ease, color 0.12s ease !important;
       `;
-      item.innerHTML = `
+      setSafeHTML(item, `
         <span style="display:flex; align-items:center; gap:10px;">
           <span style="font-size: 15px;">${icon}</span>
           <span style="font-weight: 500;">${label}</span>
         </span>
         <span style="font-size: 11px; color: #71717a; font-family: monospace;">${shortcut}</span>
-      `;
+      `);
       item.addEventListener('mouseenter', () => {
         item.style.background = '#27272a';
         item.style.color = '#ffffff';

@@ -1,4 +1,5 @@
 import { YTMDPlugin, PluginContext } from '../types';
+import { setSafeHTML } from '../../utils/dom';
 
 interface RemoteInfo {
   ip: string;
@@ -22,12 +23,12 @@ export const RemotePlugin: YTMDPlugin = {
         const remoteBtn = document.createElement('button');
         remoteBtn.id = 'ytmd-remote-nav-btn';
         remoteBtn.title = 'Mobile Web Remote (QR Code)';
-        remoteBtn.innerHTML = `
+        setSafeHTML(remoteBtn, `
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
             <path d="M17 1.01L7 1c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-1.99-2-1.99zM17 19H7V5h10v14z"/>
           </svg>
           <span style="margin-left: 6px; font-size: 13px; font-weight: 500;">Remote</span>
-        `;
+        `);
         remoteBtn.style.cssText = `
           display: inline-flex;
           align-items: center;
@@ -87,7 +88,7 @@ async function showQrModal(ctx: PluginContext) {
   }
 
   modal.style.display = 'flex';
-  modal.innerHTML = `
+  setSafeHTML(modal, `
     <div style="background: #18181b; border: 1px solid #27272a; border-radius: 12px; padding: 24px; max-width: 360px; width: 90%; text-align: center; color: #fafafa; font-family: inherit; box-shadow: 0 20px 40px rgba(0,0,0,0.6);">
       <h3 style="margin: 0 0 8px 0; font-size: 18px;">Mobile Web Remote</h3>
       <p style="font-size: 13px; color: #a1a1aa; margin-bottom: 16px;">Scan with your phone camera on the same Wi-Fi network:</p>
@@ -97,7 +98,7 @@ async function showQrModal(ctx: PluginContext) {
       <div id="ytmd-remote-url" style="font-family: monospace; font-size: 13px; color: #38bdf8; margin-bottom: 20px; word-break: break-all;"></div>
       <button id="ytmd-remote-close-btn" style="background: #dc2626; color: #fff; border: none; border-radius: 6px; padding: 8px 20px; font-weight: 600; cursor: pointer; font-size: 13px;">Close</button>
     </div>
-  `;
+  `);
 
   const closeBtn = document.getElementById('ytmd-remote-close-btn');
   if (closeBtn) {
@@ -112,7 +113,7 @@ async function showQrModal(ctx: PluginContext) {
     const urlContainer = document.getElementById('ytmd-remote-url');
 
     if (qrContainer && info.qr_svg) {
-      qrContainer.innerHTML = info.qr_svg;
+      setSafeHTML(qrContainer, info.qr_svg);
       const svg = qrContainer.querySelector('svg');
       if (svg) {
         svg.style.width = '180px';
