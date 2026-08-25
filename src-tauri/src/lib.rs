@@ -4,6 +4,7 @@ pub mod discord_rpc;
 pub mod downloader;
 pub mod local_files;
 pub mod mpris;
+pub mod p2p_sync;
 pub mod power_manager;
 pub mod remote_server;
 pub mod shortcuts;

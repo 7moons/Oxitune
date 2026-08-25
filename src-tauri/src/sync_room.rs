@@ -71,8 +71,12 @@ pub struct RoomState {
 /// The objective, shared part of room state that actually goes over the
 /// network. Both peers agree on this; only the viewer-relative fields above
 /// differ between them.
+///
+/// `pub(crate)` (rather than private) because `p2p_sync.rs` carries this same
+/// struct over its libp2p request-response protocol instead of raw TCP —
+/// both transports speak the exact same wire vocabulary.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct RoomStateWire {
+pub(crate) struct RoomStateWire {
     room_code: String,
     members: Vec<RoomMember>,
     playback_state: Option<SyncPlaybackState>,
@@ -89,7 +93,7 @@ impl From<&RoomState> for RoomStateWire {
 }
 
 impl RoomStateWire {
-    fn into_local_view(self, is_host: bool, current_user_id: String) -> RoomState {
+    pub(crate) fn into_local_view(self, is_host: bool, current_user_id: String) -> RoomState {
         RoomState {
             room_code: self.room_code,
             is_host,
@@ -100,12 +104,19 @@ impl RoomStateWire {
     }
 }
 
+/// `pub(crate)`: shared verbatim between the LAN TCP transport (this file)
+/// and the libp2p transport (`p2p_sync.rs`) — same JSON vocabulary either
+/// way, only the bytes' route differs. `Ack` exists only for the libp2p side:
+/// libp2p's request-response protocol requires every request to get a
+/// response, unlike the LAN transport's fire-and-forget newline stream, so
+/// pushed `State`/`Playback` messages there get acknowledged with it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
-enum WireMessage {
+pub(crate) enum WireMessage {
     Join { user_id: String, nickname: String },
     State { room: RoomStateWire },
     Playback { state: SyncPlaybackState },
+    Ack,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -141,7 +152,12 @@ impl SyncEventSink for AppHandle {
 struct HostSession {
     accept_task: tauri::async_runtime::JoinHandle<()>,
     beacon_task: tauri::async_runtime::JoinHandle<()>,
-    peers: Arc<Mutex<HashMap<String, mpsc::UnboundedSender<WireMessage>>>>,
+    /// The libp2p rendezvous+relay event loop (see `p2p_sync.rs`), started
+    /// alongside the LAN beacon so a guest on a different network can find
+    /// this room through the public DHT while a same-LAN guest still gets
+    /// the faster UDP beacon path. `None` if the P2P swarm failed to start
+    /// (e.g. no usable transport) — LAN hosting still works without it.
+    p2p_task: Option<tauri::async_runtime::JoinHandle<()>>,
     /// The TCP port this instance is listening on. Real guests never need
     /// this directly (they learn it from the UDP beacon); it exists so
     /// `SyncRoomManager::host_port` can hand it to tests that connect over
@@ -155,13 +171,25 @@ struct GuestSession {
     /// stream's write half immediately shuts down that direction (sends
     /// FIN), which the host reads as EOF and treats as a disconnect — so
     /// this must not be dropped until the guest actually leaves.
-    _write_half: tokio::net::tcp::OwnedWriteHalf,
+    ///
+    /// `None` for a P2P session (`p2p_sync.rs`): there `reader_task` owns
+    /// the whole libp2p swarm itself, so aborting it already tears down the
+    /// connection — no separate handle needs keeping alive.
+    _write_half: Option<tokio::net::tcp::OwnedWriteHalf>,
 }
 
 pub struct SyncRoomManager {
     state: Mutex<Option<RoomState>>,
     host: Mutex<Option<HostSession>>,
     guest: Mutex<Option<GuestSession>>,
+    /// Registered senders for every connected guest, keyed by member id —
+    /// used by `broadcast_to_peers` to fan out `State`/`Playback` updates.
+    /// Lives here rather than inside `HostSession` because it's transport-
+    /// agnostic: both the TCP `peer_task` and `p2p_sync.rs`'s host loop
+    /// register into the same map regardless of which (or how many)
+    /// transports are currently hosting, so a broadcast reaches every
+    /// connected guest — LAN and internet alike — through one call.
+    peers: Mutex<HashMap<String, mpsc::UnboundedSender<WireMessage>>>,
 }
 
 impl SyncRoomManager {
@@ -170,6 +198,7 @@ impl SyncRoomManager {
             state: Mutex::new(None),
             host: Mutex::new(None),
             guest: Mutex::new(None),
+            peers: Mutex::new(HashMap::new()),
         }
     }
 
@@ -186,7 +215,10 @@ impl SyncRoomManager {
         self.host.lock().as_ref().map(|h| h.port)
     }
 
-    fn add_member(&self, member_id: String, nickname: String) -> Result<RoomState, &'static str> {
+    /// `pub(crate)`: called by both the TCP `peer_task` below and by
+    /// `p2p_sync.rs`'s host loop when a peer's `Join` arrives — the
+    /// membership/capacity logic is transport-agnostic.
+    pub(crate) fn add_member(&self, member_id: String, nickname: String) -> Result<RoomState, &'static str> {
         let mut guard = self.state.lock();
         let room = guard.as_mut().ok_or("Room closed")?;
         if room.members.len() >= MAX_MEMBERS {
@@ -201,34 +233,83 @@ impl SyncRoomManager {
         Ok(room.clone())
     }
 
-    fn remove_member(&self, member_id: &str) -> Option<RoomState> {
+    pub(crate) fn remove_member(&self, member_id: &str) -> Option<RoomState> {
         let mut guard = self.state.lock();
         let room = guard.as_mut()?;
         room.members.retain(|m| m.id != member_id);
         Some(room.clone())
     }
 
-    fn register_peer(&self, member_id: String, tx: mpsc::UnboundedSender<WireMessage>) {
-        if let Some(host) = self.host.lock().as_ref() {
-            host.peers.lock().insert(member_id, tx);
+    /// `pub(crate)`: `p2p_sync.rs`'s host loop registers each joined libp2p
+    /// peer here too, under the same `peers` map the TCP path uses — so
+    /// `broadcast_to_peers` below fans out to LAN and internet guests
+    /// identically without either transport knowing about the other.
+    pub(crate) fn register_peer(&self, member_id: String, tx: mpsc::UnboundedSender<WireMessage>) {
+        self.peers.lock().insert(member_id, tx);
+    }
+
+    pub(crate) fn unregister_peer(&self, member_id: &str) {
+        self.peers.lock().remove(member_id);
+    }
+
+    pub(crate) fn broadcast_to_peers(&self, msg: &WireMessage) {
+        let peers = self.peers.lock();
+        for tx in peers.values() {
+            let _ = tx.send(msg.clone());
         }
     }
 
-    fn unregister_peer(&self, member_id: &str) {
-        if let Some(host) = self.host.lock().as_ref() {
-            host.peers.lock().remove(member_id);
+    /// Attaches the libp2p host event loop's task handle to the current
+    /// host session, if one exists, so `leave_room` can abort it alongside
+    /// the LAN accept/beacon tasks. A no-op if this instance isn't hosting
+    /// (e.g. `create_room` failed before this ran) or already left.
+    pub(crate) fn attach_p2p_host_task(&self, task: tauri::async_runtime::JoinHandle<()>) {
+        if let Some(host) = self.host.lock().as_mut() {
+            host.p2p_task = Some(task);
         }
     }
 
-    fn broadcast_to_peers(&self, msg: &WireMessage) {
-        if let Some(host) = self.host.lock().as_ref() {
-            let peers = host.peers.lock();
-            for tx in peers.values() {
-                let _ = tx.send(msg.clone());
-            }
+    /// Records that this instance is now a guest of a room reached via
+    /// libp2p, mirroring what `connect_to_host` does for a TCP guest
+    /// session. `reader_task` owns the swarm and must be aborted (by
+    /// `leave_room`) to actually disconnect.
+    pub(crate) fn set_p2p_guest_session(&self, reader_task: tauri::async_runtime::JoinHandle<()>) {
+        *self.guest.lock() = Some(GuestSession {
+            reader_task,
+            _write_half: None,
+        });
+    }
+
+    pub(crate) fn set_local_room(&self, room: RoomState) {
+        *self.state.lock() = Some(room);
+    }
+
+    /// Applies a `State` push received from the host (guest side) and
+    /// returns the resulting local view, mirroring the TCP
+    /// `guest_reader_loop`'s handling of `WireMessage::State`. Also used for
+    /// the initial state handed back in the `Join` response, since the
+    /// semantics (store + return the local view) are identical.
+    pub(crate) fn apply_remote_room_update(&self, wire: RoomStateWire, current_user_id: &str) -> RoomState {
+        let local = wire.into_local_view(false, current_user_id.to_string());
+        *self.state.lock() = Some(local.clone());
+        local
+    }
+
+    /// Applies a `Playback` push received from the host (guest side),
+    /// mirroring the TCP `guest_reader_loop`'s handling of
+    /// `WireMessage::Playback`.
+    pub(crate) fn apply_remote_playback(&self, state: SyncPlaybackState) {
+        if let Some(r) = self.state.lock().as_mut() {
+            r.playback_state = Some(state);
         }
     }
 
+    /// Clears guest-side state after the P2P connection to the host drops,
+    /// mirroring the tail of the TCP `guest_reader_loop`.
+    pub(crate) fn clear_guest(&self) {
+        *self.state.lock() = None;
+        *self.guest.lock() = None;
+    }
 }
 
 fn now_ms() -> u64 {
@@ -238,17 +319,23 @@ fn now_ms() -> u64 {
         .as_millis() as u64
 }
 
+/// 10 chars from a 33-char alphabet is ~50 bits of entropy. 6 chars (~30
+/// bits) was fine when the room code's only reach was a Wi-Fi broadcast
+/// domain; now that `p2p_sync.rs` makes the same code look-up-able from a
+/// globally queryable DHT, brute-forcing it needs to be "practically
+/// impossible", not just "impractical on a LAN". Same alphabet (no
+/// visually-confusable chars) keeps it just as easy to read aloud or type.
 pub fn generate_room_code() -> String {
     use rand::Rng;
     const CHARS: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     let mut rng = rand::rng();
-    let code: String = (0..6)
+    let code: String = (0..10)
         .map(|_| CHARS[rng.random_range(0..CHARS.len())] as char)
         .collect();
     format!("YTMD-{}", code)
 }
 
-fn generate_user_id() -> String {
+pub(crate) fn generate_user_id() -> String {
     use rand::Rng;
     let n: u64 = rand::rng().random();
     format!("user-{:x}", n & 0xFFFF_FFFF)
@@ -292,21 +379,30 @@ pub async fn create_room(
         playback_state: None,
     };
     *manager.state.lock() = Some(room.clone());
-
-    let peers = Arc::new(Mutex::new(HashMap::new()));
+    manager.peers.lock().clear(); // defensive: leave_room already clears this, but never start with stale entries
 
     let accept_manager = manager.clone();
     let accept_sink = sink.clone();
     let accept_task = tauri::async_runtime::spawn(accept_loop(listener, accept_manager, accept_sink));
 
-    let beacon_task = tauri::async_runtime::spawn(beacon_loop(room_code, nickname, tcp_port));
+    let beacon_task = tauri::async_runtime::spawn(beacon_loop(room_code.clone(), nickname, tcp_port));
 
     *manager.host.lock() = Some(HostSession {
         accept_task,
         beacon_task,
-        peers,
+        p2p_task: None,
         port: tcp_port,
     });
+
+    // Announce in the public DHT alongside the LAN beacon (not instead of
+    // it) so a same-network guest still gets the near-instant UDP path,
+    // while a guest on a different network can still find this room. Best
+    // effort: if the P2P swarm can't start (e.g. no usable transport on
+    // this platform), LAN hosting still works fine without it.
+    match crate::p2p_sync::host_provide(manager.clone(), sink, room_code).await {
+        Ok(task) => manager.attach_p2p_host_task(task),
+        Err(e) => log::warn!("Listen Together: internet (P2P) hosting unavailable: {e}"),
+    }
 
     Ok(room)
 }
@@ -455,8 +551,16 @@ pub async fn join_room(
         return Err("Room code is required.".to_string());
     }
 
-    let host_addr = discover_host(&clean_code).await?;
-    connect_to_host(manager, sink, host_addr, nickname).await
+    // Try the fast path first: a LAN beacon reply means the host is on this
+    // same network, so we can skip the DHT entirely. Only fall back to the
+    // (much slower — DHT lookup, possibly NAT hole-punching or relay) P2P
+    // path once LAN discovery has definitively failed.
+    match discover_host(&clean_code).await {
+        Ok(host_addr) => connect_to_host(manager, sink, host_addr, nickname).await,
+        Err(_lan_err) => {
+            crate::p2p_sync::join_room(manager, sink, clean_code, nickname).await
+        }
+    }
 }
 
 /// The actual TCP join handshake, split out from `join_room` so it can be
@@ -516,7 +620,7 @@ async fn connect_to_host(
 
     *manager.guest.lock() = Some(GuestSession {
         reader_task,
-        _write_half: write_half,
+        _write_half: Some(write_half),
     });
 
     Ok(local_room)
@@ -550,6 +654,7 @@ async fn guest_reader_loop(
                         sink.playback_updated(&state);
                     }
                     WireMessage::Join { .. } => {} // guests never receive Join
+                    WireMessage::Ack => {} // Ack only exists on the libp2p transport (p2p_sync.rs)
                 }
             }
         }
@@ -618,10 +723,15 @@ pub fn leave_room(manager: &Arc<SyncRoomManager>) {
     if let Some(host) = manager.host.lock().take() {
         host.accept_task.abort();
         host.beacon_task.abort();
+        if let Some(p2p_task) = host.p2p_task {
+            p2p_task.abort();
+        }
         // Dropping every registered peer's sender closes their mpsc
-        // channel; each peer_task's select! loop sees `rx.recv() == None`
-        // and exits on its own, closing that TCP connection cleanly.
-        host.peers.lock().clear();
+        // channel; each peer_task's/P2P host loop's per-peer forwarder sees
+        // the channel end and exits on its own, closing that connection
+        // cleanly (TCP: peer_task's select! sees `rx.recv() == None`; P2P:
+        // aborting `p2p_task` above already tore the whole swarm down).
+        manager.peers.lock().clear();
     }
     if let Some(guest) = manager.guest.lock().take() {
         guest.reader_task.abort();
@@ -662,7 +772,7 @@ mod tests {
     fn test_generate_room_code_format() {
         let code = generate_room_code();
         assert!(code.starts_with("YTMD-"));
-        assert_eq!(code.len(), 11);
+        assert_eq!(code.len(), 15);
         assert!(code[5..].chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit()));
     }
 
