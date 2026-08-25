@@ -157,13 +157,32 @@ pub struct ConfigManager {
 
 impl ConfigManager {
     pub fn new() -> Self {
-        let base_dir = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
-        let app_dir = base_dir.join("ytmd");
+        let app_dir = dirs::home_dir()
+            .map(|h| h.join(".ytmd"))
+            .unwrap_or_else(|| dirs::config_dir().unwrap_or_else(|| PathBuf::from(".")).join(".ytmd"));
+
         if !app_dir.exists() {
             let _ = fs::create_dir_all(&app_dir);
         }
         let config_path = app_dir.join("config.json");
+
+        // If new config at ~/.ytmd/config.json does not exist yet, check legacy ~/.config/ytmd/config.json
+        if !config_path.exists() {
+            if let Some(legacy_dir) = dirs::config_dir() {
+                let legacy_path = legacy_dir.join("ytmd").join("config.json");
+                if legacy_path.exists() {
+                    if let Ok(content) = fs::read_to_string(&legacy_path) {
+                        let _ = fs::write(&config_path, content);
+                    }
+                }
+            }
+        }
+
         Self { config_path }
+    }
+
+    pub fn config_path(&self) -> &PathBuf {
+        &self.config_path
     }
 
     pub fn load(&self) -> AppConfig {
@@ -253,6 +272,13 @@ mod tests {
         manager.save(&config).expect("save should succeed");
         let loaded = manager.load();
         assert_eq!(loaded.remote_port, AppConfig::default().remote_port);
+    }
+
+    #[test]
+    fn test_config_manager_new_initializes_path() {
+        let manager = ConfigManager::new();
+        assert!(manager.config_path().to_string_lossy().contains(".ytmd"));
+        assert!(manager.config_path().to_string_lossy().ends_with("config.json"));
     }
 
     #[test]
