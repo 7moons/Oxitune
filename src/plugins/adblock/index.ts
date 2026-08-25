@@ -65,6 +65,21 @@ export function setupNetworkHooks() {
   if (typeof originalFetch === 'function') {
     (window as any).fetch = async function (input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url;
+
+      if (
+        url &&
+        (url.includes('doubleclick.net') ||
+          url.includes('googleads') ||
+          url.includes('googlesyndication.com') ||
+          url.includes('/pagead/'))
+      ) {
+        return new Response('{}', {
+          status: 200,
+          statusText: 'OK',
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
       const response = await originalFetch.call(this, input, init);
 
       if (url && (url.includes('/youtubei/v1/player') || url.includes('/youtubei/v1/next') || url.includes('/youtubei/v1/browse'))) {
@@ -104,8 +119,30 @@ export function setupNetworkHooks() {
     this: XMLHttpRequest & { _ytmd_url?: string },
     _body?: Document | XMLHttpRequestBodyInit | null
   ) {
-    const url = this._ytmd_url;
-    if (url && (url.includes('/youtubei/v1/player') || url.includes('/youtubei/v1/next'))) {
+    const url = this._ytmd_url || '';
+
+    if (
+      url.includes('doubleclick.net') ||
+      url.includes('googleads') ||
+      url.includes('googlesyndication.com') ||
+      url.includes('/pagead/')
+    ) {
+      setTimeout(() => {
+        try {
+          Object.defineProperty(this, 'readyState', { value: 4, configurable: true });
+          Object.defineProperty(this, 'status', { value: 200, configurable: true });
+          Object.defineProperty(this, 'statusText', { value: 'OK', configurable: true });
+          Object.defineProperty(this, 'responseText', { value: '{}', configurable: true });
+          Object.defineProperty(this, 'response', { value: '{}', configurable: true });
+          this.dispatchEvent(new Event('readystatechange'));
+          this.dispatchEvent(new Event('load'));
+          this.dispatchEvent(new Event('loadend'));
+        } catch (_) {}
+      }, 0);
+      return;
+    }
+
+    if (url.includes('/youtubei/v1/player') || url.includes('/youtubei/v1/next') || url.includes('/youtubei/v1/browse')) {
       this.addEventListener('readystatechange', () => {
         if (this.readyState === 4 && this.status === 200) {
           try {

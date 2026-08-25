@@ -50,8 +50,11 @@ fn is_ad_request(uri: &str) -> bool {
 
 /// Headers sent with synthetic adblock responses to satisfy browser CORS checks
 /// and prevent ERR_FAILED / CORS policy violations in the webview console.
+/// Note: Must specify exact origin (not wildcard '*') and Allow-Credentials
+/// because YouTube's Polymer scripts send credentialed (withCredentials=true)
+/// requests to endpoints like googleads.g.doubleclick.net/pagead/id.
 const CORS_RESPONSE_HEADERS: windows::core::PCWSTR =
-    w!("Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS, PUT, DELETE\r\nAccess-Control-Allow-Headers: *\r\nContent-Type: text/plain\r\n");
+    w!("Access-Control-Allow-Origin: https://music.youtube.com\r\nAccess-Control-Allow-Credentials: true\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS, PUT, DELETE\r\nAccess-Control-Allow-Headers: *\r\nContent-Type: text/plain\r\n");
 
 /// Registers the request filter on the given window's live WebView2 instance.
 /// Must be called after the webview has been created (e.g. once

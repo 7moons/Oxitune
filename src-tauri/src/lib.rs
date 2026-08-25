@@ -267,6 +267,7 @@ pub fn run() {
             // margin and got visibly clipped on their left edge.
             .min_inner_size(700.0, 500.0)
             .resizable(true)
+            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36")
             .initialization_script(include_str!("../inject/preload.js"));
 
             if let Ok(icon) = tauri::image::Image::from_bytes(include_bytes!("../icons/icon.png")) {
