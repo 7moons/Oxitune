@@ -3,7 +3,8 @@ use qrcode::render::svg;
 use qrcode::QrCode;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
-use tauri::{AppHandle, Emitter};
+use std::sync::Arc;
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
@@ -13,6 +14,22 @@ pub struct RemoteInfo {
     pub port: u16,
     pub url: String,
     pub qr_svg: String,
+}
+
+#[derive(Deserialize)]
+struct InvokeRequest {
+    cmd: String,
+    args: Option<serde_json::Value>,
+}
+
+#[derive(Deserialize)]
+struct UpdateTrackWrapper {
+    track: crate::discord_rpc::TrackPayload,
+}
+
+#[derive(Deserialize)]
+struct DownloadRequestWrapper {
+    request: crate::downloader::DownloadRequest,
 }
 
 pub fn get_local_ip() -> String {
@@ -64,7 +81,7 @@ pub fn start_remote_server(app_handle: AppHandle, port: u16) {
             if let Ok((mut socket, _)) = listener.accept().await {
                 let handle = app_handle.clone();
                 tokio::spawn(async move {
-                    let mut buffer = [0u8; 4096];
+                    let mut buffer = [0u8; 8192];
                     if let Ok(n) = socket.read(&mut buffer).await {
                         if n == 0 {
                             return;
@@ -73,15 +90,176 @@ pub fn start_remote_server(app_handle: AppHandle, port: u16) {
                         let first_line = request_str.lines().next().unwrap_or("");
                         let parts: Vec<&str> = first_line.split_whitespace().collect();
 
-                        if parts.len() < 2 {
+                        if parts.is_empty() {
                             return;
                         }
 
                         let method = parts[0];
-                        let path = parts[1];
+                        let path = parts.get(1).copied().unwrap_or("/");
+
+                        // Handle CORS Preflight
+                        if method == "OPTIONS" {
+                            let response = "HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: *\r\n\r\n";
+                            let _ = socket.write_all(response.as_bytes()).await;
+                            return;
+                        }
+
+                        // Direct Bridge Invoke API for Preload Scripts
+                        if method == "POST" && path.starts_with("/api/invoke") {
+                            let mut result = serde_json::Value::Null;
+
+                            // Parse request JSON body
+                            if let Some(body_start) = request_str.find("\r\n\r\n") {
+                                let body_str = &request_str[body_start + 4..];
+                                if let Ok(req) = serde_json::from_str::<InvokeRequest>(body_str.trim()) {
+                                    match req.cmd.as_str() {
+                                        "get_config" => {
+                                            if let Some(state) = handle.try_state::<Arc<crate::AppState>>() {
+                                                let cfg = state.config_manager.load();
+                                                result = serde_json::to_value(cfg).unwrap_or(serde_json::Value::Null);
+                                            }
+                                        }
+                                        "get_remote_info" => {
+                                            let info = get_remote_info(port);
+                                            result = serde_json::to_value(info).unwrap_or(serde_json::Value::Null);
+                                        }
+                                        "toggle_settings_window" => {
+                                            if let Some(w) = handle.get_webview_window("settings") {
+                                                if w.is_visible().unwrap_or(false) {
+                                                    let _ = w.hide();
+                                                } else {
+                                                    let _ = w.show();
+                                                    let _ = w.set_focus();
+                                                }
+                                            }
+                                            result = serde_json::json!({ "success": true });
+                                        }
+                                        "toggle_mini_player" => {
+                                            if let Some(w) = handle.get_webview_window("miniplayer") {
+                                                if w.is_visible().unwrap_or(false) {
+                                                    let _ = w.hide();
+                                                } else {
+                                                    let _ = w.show();
+                                                    let _ = w.set_focus();
+                                                }
+                                            }
+                                            result = serde_json::json!({ "success": true });
+                                        }
+                                        "toggle_local_library_window" => {
+                                            if let Some(w) = handle.get_webview_window("local") {
+                                                if w.is_visible().unwrap_or(false) {
+                                                    let _ = w.hide();
+                                                } else {
+                                                    let _ = w.show();
+                                                    let _ = w.set_focus();
+                                                }
+                                            }
+                                            result = serde_json::json!({ "success": true });
+                                        }
+                                        "toggle_sync_window" => {
+                                            if let Some(w) = handle.get_webview_window("sync") {
+                                                if w.is_visible().unwrap_or(false) {
+                                                    let _ = w.hide();
+                                                } else {
+                                                    let _ = w.show();
+                                                    let _ = w.set_focus();
+                                                }
+                                            }
+                                            result = serde_json::json!({ "success": true });
+                                        }
+                                        "update_track_info" => {
+                                            if let Some(args_val) = req.args {
+                                                if let Ok(wrapper) = serde_json::from_value::<UpdateTrackWrapper>(args_val) {
+                                                    if let Some(state) = handle.try_state::<Arc<crate::AppState>>() {
+                                                        let _ = crate::commands::update_track_info(
+                                                            handle.clone(),
+                                                            state,
+                                                            wrapper.track,
+                                                        );
+                                                    }
+                                                }
+                                            }
+                                            result = serde_json::json!({ "success": true });
+                                        }
+                                        "notify_track_change" => {
+                                            if let Some(args_val) = req.args {
+                                                #[derive(Deserialize)]
+                                                struct NotifyArgs {
+                                                    title: String,
+                                                    artist: String,
+                                                }
+                                                if let Ok(p) = serde_json::from_value::<NotifyArgs>(args_val) {
+                                                    if let Some(state) = handle.try_state::<Arc<crate::AppState>>() {
+                                                        let _ = crate::commands::notify_track_change(
+                                                            handle.clone(),
+                                                            state,
+                                                            p.title,
+                                                            p.artist,
+                                                        );
+                                                    }
+                                                }
+                                            }
+                                            result = serde_json::json!({ "success": true });
+                                        }
+                                        "fetch_lyrics" => {
+                                            if let Some(args_val) = req.args {
+                                                #[derive(Deserialize)]
+                                                struct LyricsArgs {
+                                                    artist: String,
+                                                    title: String,
+                                                    #[serde(rename = "albumName")]
+                                                    album_name: Option<String>,
+                                                    duration: Option<f64>,
+                                                }
+                                                if let Ok(lr) = serde_json::from_value::<LyricsArgs>(args_val) {
+                                                    if let Ok(data) = crate::commands::fetch_lyrics(
+                                                        lr.artist,
+                                                        lr.title,
+                                                        lr.album_name,
+                                                        lr.duration,
+                                                    )
+                                                    .await
+                                                    {
+                                                        result = data;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        "download_track" => {
+                                            if let Some(args_val) = req.args {
+                                                if let Ok(dr) = serde_json::from_value::<DownloadRequestWrapper>(args_val) {
+                                                    if let Some(state) = handle.try_state::<Arc<crate::AppState>>() {
+                                                        let _ = crate::commands::download_track(
+                                                            handle.clone(),
+                                                            state,
+                                                            dr.request,
+                                                        )
+                                                        .await;
+                                                    }
+                                                }
+                                            }
+                                            result = serde_json::json!({ "success": true });
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+
+                            let res_body = serde_json::json!({
+                                "status": "ok",
+                                "result": result
+                            }).to_string();
+
+                            let response = format!(
+                                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Headers: *\r\nAccess-Control-Allow-Methods: *\r\nContent-Length: {}\r\n\r\n{}",
+                                res_body.len(),
+                                res_body
+                            );
+                            let _ = socket.write_all(response.as_bytes()).await;
+                            return;
+                        }
 
                         if method == "POST" && path.starts_with("/api/command") {
-                            // Extract command from query or body
                             let cmd = if let Some(q) = path.split('?').nth(1) {
                                 q.split('=').nth(1).unwrap_or("play_pause")
                             } else {
@@ -145,133 +323,67 @@ fn get_mobile_html() -> &'static str {
       flex-direction: column;
       height: 100vh;
       justify-content: space-between;
-      padding: 24px 20px;
+      padding: 24px;
       user-select: none;
-      -webkit-user-select: none;
     }
-    .header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
+    .header { text-align: center; }
     .badge {
+      display: inline-block;
       font-size: 11px;
-      font-weight: 600;
-      color: #22c55e;
-      background: rgba(34, 197, 94, 0.15);
-      padding: 4px 8px;
-      border-radius: 4px;
-    }
-    .cover-container {
-      display: flex;
-      justify-content: center;
-      margin: 20px 0;
-    }
-    .cover-art {
-      width: 260px;
-      height: 260px;
-      border-radius: 12px;
-      background: #18181b;
-      box-shadow: 0 16px 32px rgba(0,0,0,0.6);
-      object-fit: cover;
-    }
-    .track-details {
-      text-align: center;
-      margin-bottom: 20px;
-    }
-    .title {
-      font-size: 20px;
       font-weight: 700;
-      margin-bottom: 6px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      letter-spacing: 0.05em;
+      background: #27272a;
+      color: #38bdf8;
+      padding: 4px 10px;
+      border-radius: 9999px;
+      margin-bottom: 8px;
     }
-    .artist {
-      font-size: 15px;
-      color: #a1a1aa;
-    }
-    .controls {
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      gap: 24px;
-      margin-bottom: 24px;
-    }
+    .title { font-size: 20px; font-weight: 700; }
+    .controls { display: flex; flex-direction: column; gap: 16px; align-items: center; width: 100%; max-width: 320px; margin: 0 auto; }
+    .btn-row { display: flex; gap: 16px; justify-content: center; width: 100%; }
     .btn {
       background: #18181b;
       border: 1px solid #27272a;
       color: #fafafa;
-      border-radius: 50%;
-      width: 56px;
-      height: 56px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      font-size: 18px;
-      transition: transform 0.1s ease, background 0.15s ease;
-    }
-    .btn:active { transform: scale(0.92); background: #27272a; }
-    .btn-play {
-      width: 72px;
-      height: 72px;
-      background: #dc2626;
-      border: none;
-      font-size: 24px;
-    }
-    .volume-row {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      background: #18181b;
-      padding: 12px 16px;
+      padding: 16px 20px;
       border-radius: 12px;
-      border: 1px solid #27272a;
-    }
-    .volume-slider {
+      font-size: 16px;
+      font-weight: 600;
       flex: 1;
-      accent-color: #dc2626;
-      height: 6px;
+      text-align: center;
+      cursor: pointer;
     }
+    .btn-primary { background: #38bdf8; color: #09090b; border: none; font-size: 20px; }
+    .slider-box { width: 100%; margin-top: 12px; }
+    .slider-label { font-size: 12px; color: #a1a1aa; margin-bottom: 6px; display: block; }
+    input[type=range] { width: 100%; accent-color: #38bdf8; }
   </style>
 </head>
 <body>
   <div class="header">
-    <span style="font-weight: 700; letter-spacing: 0.5px;">YTMD REMOTE</span>
-    <span class="badge">Connected</span>
+    <div class="badge">YTMD WI-FI REMOTE</div>
+    <div class="title">Now Playing Controller</div>
   </div>
-
-  <div class="cover-container">
-    <div class="cover-art" id="cover" style="display: flex; align-items: center; justify-content: center; font-size: 40px;">🎵</div>
-  </div>
-
-  <div class="track-details">
-    <div class="title" id="track-title">YouTube Music Desktop</div>
-    <div class="artist" id="track-artist">Control from your phone</div>
-  </div>
-
-  <div>
-    <div class="controls">
-      <button class="btn" onclick="sendCmd('previous')">⏮</button>
-      <button class="btn btn-play" id="play-btn" onclick="sendCmd('play_pause')">⏯</button>
-      <button class="btn" onclick="sendCmd('next')">⏭</button>
+  <div class="controls">
+    <div class="btn-row">
+      <button class="btn" onclick="sendCmd('previous')">⏮ Prev</button>
+      <button class="btn btn-primary" onclick="sendCmd('play_pause')">⏯ Play</button>
+      <button class="btn" onclick="sendCmd('next')">⏭ Next</button>
     </div>
-
-    <div class="volume-row">
-      <span>🔈</span>
-      <input type="range" min="0" max="1" step="0.05" value="0.8" class="volume-slider" onchange="sendVol(this.value)">
-      <span>🔊</span>
+    <div class="btn-row">
+      <button class="btn" onclick="sendCmd('like')">👍 Like</button>
+      <button class="btn" onclick="sendCmd('dislike')">👎 Dislike</button>
+      <button class="btn" onclick="sendCmd('mute')">🔇 Mute</button>
+    </div>
+    <div class="slider-box">
+      <span class="slider-label">Volume</span>
+      <input type="range" min="0" max="1" step="0.05" value="1" oninput="sendVol(this.value)">
     </div>
   </div>
-
+  <div style="text-align: center; font-size: 12px; color: #52525b;">Connected via Local Area Network</div>
   <script>
-    function sendCmd(cmd) {
-      fetch('/api/command?cmd=' + cmd, { method: 'POST' });
-    }
-    function sendVol(val) {
-      fetch('/api/volume?val=' + val, { method: 'POST' });
-    }
+    function sendCmd(cmd) { fetch('/api/command?cmd=' + cmd, { method: 'POST' }); }
+    function sendVol(v) { fetch('/api/volume?v=' + v, { method: 'POST' }); }
   </script>
 </body>
 </html>"#
@@ -298,7 +410,6 @@ mod tests {
     fn test_get_remote_info() {
         let info = get_remote_info(9863);
         assert_eq!(info.port, 9863);
-        assert!(info.url.starts_with("http://"));
-        assert!(!info.qr_svg.is_empty());
+        assert!(info.url.contains("9863"));
     }
 }

@@ -24,17 +24,27 @@ let currentActiveTrack: TrackInfo | null = null;
 let currentPluginContext: PluginContext | null = null;
 
 const invokeBackend = async (cmd: string, args: Record<string, unknown> = {}): Promise<unknown> => {
+  try {
+    const res = await fetch('http://127.0.0.1:9863/api/invoke', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cmd, args })
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return data?.result ?? null;
+    }
+  } catch {}
+
   const pluginCmd = cmd.startsWith('plugin:') ? cmd : `plugin:ytmd|${cmd}`;
   const internals = (window as any).__TAURI_INTERNALS__;
   if (internals && typeof internals.invoke === 'function') {
     try {
       return await internals.invoke(pluginCmd, args);
-    } catch (err1) {
+    } catch {
       try {
         return await internals.invoke(cmd, args);
-      } catch (err2) {
-        console.error(`[YTMD IPC] Execution of '${cmd}' failed:`, err1);
-      }
+      } catch {}
     }
     return null;
   }
@@ -46,14 +56,11 @@ const invokeBackend = async (cmd: string, args: Record<string, unknown> = {}): P
     } catch {
       try {
         return await tauri.core.invoke(cmd, args);
-      } catch (err) {
-        console.error(`[YTMD IPC] Execution of '${cmd}' failed:`, err);
-      }
+      } catch {}
     }
     return null;
   }
 
-  console.warn(`[YTMD IPC] Bridge not ready for command: ${cmd}`);
   return null;
 };
 

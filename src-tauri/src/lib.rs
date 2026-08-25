@@ -79,7 +79,6 @@ pub fn run() {
     });
 
     let app_state_for_setup = app_state.clone();
-    let remote_enabled = initial_config.remote_enabled;
     let remote_port = initial_config.remote_port;
 
     tauri::Builder::default()
@@ -102,10 +101,8 @@ pub fn run() {
             // Initialize Global Shortcuts
             let _ = shortcuts::setup_shortcuts(&handle);
 
-            // Start Mobile Web Remote Server if enabled
-            if remote_enabled {
-                remote_server::start_remote_server(handle.clone(), remote_port);
-            }
+            // Start Local Bridge & Mobile Web Remote Server
+            remote_server::start_remote_server(handle.clone(), remote_port);
 
             // Build main window with embedded initialization script
             let _main_win = WebviewWindowBuilder::new(
