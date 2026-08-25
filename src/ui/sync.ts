@@ -16,6 +16,14 @@ interface RoomState {
 
 let activeRoom: RoomState | null = null;
 
+function getInitials(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  if (parts.length >= 2) {
+    return (parts[0][0] + parts[1][0]).toUpperCase();
+  }
+  return name.slice(0, 2).toUpperCase() || 'U';
+}
+
 function renderRoomView(room: RoomState | null) {
   const setupView = document.getElementById('setup-view');
   const activeView = document.getElementById('active-room-view');
@@ -46,8 +54,13 @@ function renderRoomView(room: RoomState | null) {
     room.members.forEach((m) => {
       const item = document.createElement('div');
       item.className = 'member-item';
+      const initials = getInitials(m.nickname);
+
       item.innerHTML = `
-        <span style="font-weight: 500;">${escapeHtml(m.nickname)}</span>
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <div class="member-avatar">${escapeHtml(initials)}</div>
+          <span style="font-weight: 500; color: var(--text-primary);">${escapeHtml(m.nickname)}</span>
+        </div>
         ${m.is_host ? '<span class="badge-host">Host</span>' : '<span style="color: var(--text-muted); font-size: 11px;">Listener</span>'}
       `;
       listEl.appendChild(item);
@@ -101,18 +114,23 @@ document.addEventListener('DOMContentLoaded', () => {
   // Create Room
   const createBtn = document.getElementById('create-room-btn');
   const hostNickInput = document.getElementById('host-nickname') as HTMLInputElement;
-  if (createBtn && hostNickInput) {
-    createBtn.addEventListener('click', async () => {
-      const nick = hostNickInput.value.trim() || 'Host';
-      if (window.__TAURI__?.core) {
-        try {
-          const room = (await window.__TAURI__.core.invoke('create_sync_room', { nickname: nick })) as RoomState;
-          activeRoom = room;
-          renderRoomView(room);
-        } catch (e) {
-          console.error('[YTMD Sync] Failed to create room:', e);
-        }
+  const handleCreateRoom = async () => {
+    const nick = hostNickInput?.value.trim() || 'Host';
+    if (window.__TAURI__?.core) {
+      try {
+        const room = (await window.__TAURI__.core.invoke('create_sync_room', { nickname: nick })) as RoomState;
+        activeRoom = room;
+        renderRoomView(room);
+      } catch (e) {
+        console.error('[YTMD Sync] Failed to create room:', e);
       }
+    }
+  };
+
+  if (createBtn) createBtn.addEventListener('click', handleCreateRoom);
+  if (hostNickInput) {
+    hostNickInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') handleCreateRoom();
     });
   }
 
@@ -120,24 +138,35 @@ document.addEventListener('DOMContentLoaded', () => {
   const joinBtn = document.getElementById('join-room-btn');
   const joinCodeInput = document.getElementById('join-code') as HTMLInputElement;
   const guestNickInput = document.getElementById('guest-nickname') as HTMLInputElement;
-  if (joinBtn && joinCodeInput && guestNickInput) {
-    joinBtn.addEventListener('click', async () => {
-      const code = joinCodeInput.value.trim().toUpperCase();
-      const nick = guestNickInput.value.trim() || 'Friend';
-      if (!code) return;
 
-      if (window.__TAURI__?.core) {
-        try {
-          const room = (await window.__TAURI__.core.invoke('join_sync_room', {
-            roomCode: code,
-            nickname: nick
-          })) as RoomState;
-          activeRoom = room;
-          renderRoomView(room);
-        } catch (e) {
-          console.error('[YTMD Sync] Failed to join room:', e);
-        }
+  const handleJoinRoom = async () => {
+    const code = joinCodeInput?.value.trim().toUpperCase();
+    const nick = guestNickInput?.value.trim() || 'Friend';
+    if (!code) return;
+
+    if (window.__TAURI__?.core) {
+      try {
+        const room = (await window.__TAURI__.core.invoke('join_sync_room', {
+          roomCode: code,
+          nickname: nick
+        })) as RoomState;
+        activeRoom = room;
+        renderRoomView(room);
+      } catch (e) {
+        console.error('[YTMD Sync] Failed to join room:', e);
       }
+    }
+  };
+
+  if (joinBtn) joinBtn.addEventListener('click', handleJoinRoom);
+  if (joinCodeInput) {
+    joinCodeInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') handleJoinRoom();
+    });
+  }
+  if (guestNickInput) {
+    guestNickInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') handleJoinRoom();
     });
   }
 
@@ -147,10 +176,14 @@ document.addEventListener('DOMContentLoaded', () => {
     copyBtn.addEventListener('click', () => {
       if (activeRoom) {
         navigator.clipboard.writeText(activeRoom.room_code);
-        copyBtn.textContent = 'Copied!';
+        const originalHtml = copyBtn.innerHTML;
+        copyBtn.innerHTML = `
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+          <span style="color: #22c55e;">Copied!</span>
+        `;
         setTimeout(() => {
-          copyBtn.textContent = 'Copy Code';
-        }, 1500);
+          copyBtn.innerHTML = originalHtml;
+        }, 1800);
       }
     });
   }

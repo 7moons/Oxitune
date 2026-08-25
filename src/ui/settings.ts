@@ -62,6 +62,17 @@ function formatCrossfade(secs: number): string {
   return `${secs.toFixed(1)}s`;
 }
 
+function updateBadgeClass(badge: HTMLElement, val: number) {
+  badge.classList.remove('positive', 'negative', 'zero');
+  if (val > 0) {
+    badge.classList.add('positive');
+  } else if (val < 0) {
+    badge.classList.add('negative');
+  } else {
+    badge.classList.add('zero');
+  }
+}
+
 function renderEqSliders() {
   const container = document.getElementById('eq-faders-grid');
   if (!container) return;
@@ -72,10 +83,12 @@ function renderEqSliders() {
     const col = document.createElement('div');
     col.className = 'eq-band-col';
 
+    const val = currentGains[idx] || 0;
     const valBadge = document.createElement('span');
     valBadge.className = 'eq-gain-badge';
+    updateBadgeClass(valBadge, val);
     valBadge.id = `eq-val-${idx}`;
-    valBadge.textContent = formatDb(currentGains[idx] || 0);
+    valBadge.textContent = formatDb(val);
 
     const sliderWrapper = document.createElement('div');
     sliderWrapper.className = 'eq-slider-wrapper';
@@ -87,19 +100,20 @@ function renderEqSliders() {
     slider.min = '-12';
     slider.max = '12';
     slider.step = '0.5';
-    slider.value = String(currentGains[idx] || 0);
+    slider.value = String(val);
 
     slider.addEventListener('input', () => {
-      const val = parseFloat(slider.value);
-      currentGains[idx] = val;
-      valBadge.textContent = formatDb(val);
+      const v = parseFloat(slider.value);
+      currentGains[idx] = v;
+      valBadge.textContent = formatDb(v);
+      updateBadgeClass(valBadge, v);
 
       const presetSelect = document.getElementById('eq_preset') as HTMLSelectElement;
       if (presetSelect && presetSelect.value !== 'custom') {
         presetSelect.value = 'custom';
       }
 
-      emitLiveEvent('set-eq-band', { bandIndex: idx, gain: val });
+      emitLiveEvent('set-eq-band', { bandIndex: idx, gain: v });
     });
 
     sliderWrapper.appendChild(slider);
@@ -121,7 +135,25 @@ function updateSlidersFromGains(gains: number[]) {
     const slider = document.getElementById(`eq-slider-${idx}`) as HTMLInputElement;
     const badge = document.getElementById(`eq-val-${idx}`);
     if (slider) slider.value = String(gain);
-    if (badge) badge.textContent = formatDb(gain);
+    if (badge) {
+      badge.textContent = formatDb(gain);
+      updateBadgeClass(badge, gain);
+    }
+  });
+}
+
+function updateSpeedPresetButtons(currentSpeed: number) {
+  document.querySelectorAll<HTMLButtonElement>('.speed-preset-btn').forEach((btn) => {
+    const speed = parseFloat(btn.dataset.speed || '1.0');
+    if (Math.abs(speed - currentSpeed) < 0.01) {
+      btn.style.background = 'var(--accent)';
+      btn.style.color = '#ffffff';
+      btn.style.borderColor = 'var(--accent)';
+    } else {
+      btn.style.background = 'var(--bg-subtle)';
+      btn.style.color = 'var(--text-primary)';
+      btn.style.borderColor = 'var(--border)';
+    }
   });
 }
 
@@ -215,12 +247,14 @@ async function loadSettings() {
       // Playback speed slider
       const speedSlider = document.getElementById('playback_speed') as HTMLInputElement;
       const speedVal = document.getElementById('speed_val');
+      const initialSpeed = config.playback_speed || 1.0;
       if (speedSlider) {
-        speedSlider.value = String(config.playback_speed || 1.0);
+        speedSlider.value = String(initialSpeed);
       }
       if (speedVal) {
-        speedVal.textContent = `${(config.playback_speed || 1.0).toFixed(2)}x`;
+        speedVal.textContent = `${initialSpeed.toFixed(2)}x`;
       }
+      updateSpeedPresetButtons(initialSpeed);
 
       // Equalizer preset & gains
       const presetSelect = document.getElementById('eq_preset') as HTMLSelectElement;
@@ -376,6 +410,7 @@ document.addEventListener('DOMContentLoaded', () => {
     speedSlider.addEventListener('input', () => {
       const val = parseFloat(speedSlider.value);
       speedVal.textContent = `${val.toFixed(2)}x`;
+      updateSpeedPresetButtons(val);
       emitLiveEvent('set-playback-rate', val);
     });
   }
@@ -386,6 +421,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const speed = parseFloat(btn.dataset.speed || '1.0');
       if (speedSlider) speedSlider.value = String(speed);
       if (speedVal) speedVal.textContent = `${speed.toFixed(2)}x`;
+      updateSpeedPresetButtons(speed);
       emitLiveEvent('set-playback-rate', speed);
     });
   });

@@ -31,13 +31,16 @@
       <div class="settings-grid">
         
         <!-- Audio Engine & DSP -->
-        <div class="section-title">Audio Engine & DSP</div>
+        <div class="section-title">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+          <span>Audio Engine & Studio DSP</span>
+        </div>
 
         <div class="eq-container">
           <div class="eq-header">
             <div>
               <div class="setting-label">10-Band Graphic Equalizer</div>
-              <div class="setting-desc">Parametric studio filter chain</div>
+              <div class="setting-desc">Studio-grade parametric filter chain</div>
             </div>
             <div class="eq-controls-top">
               <select id="eq_preset" class="eq-select">
@@ -85,7 +88,7 @@
         <div class="setting-card">
           <div class="setting-info">
             <span class="setting-label">Skip Silence</span>
-            <span class="setting-desc">Automatically cut dead silence at the start and end of tracks (&lt; -50 dB)</span>
+            <span class="setting-desc">Automatically cuts dead silence at the start and end of tracks (&lt; -50 dB)</span>
           </div>
           <label class="switch">
             <input type="checkbox" id="skip_silence_enabled" />
@@ -97,7 +100,7 @@
         <div class="setting-card">
           <div class="setting-info">
             <span class="setting-label">Loudness Normalization (Auto-Gain)</span>
-            <span class="setting-desc">Smooth out volume peaks and prevent loud volume jumps between YouTube videos</span>
+            <span class="setting-desc">Smooths volume peaks and eliminates jumps between YouTube tracks</span>
           </div>
           <label class="switch">
             <input type="checkbox" id="loudness_normalization" />
@@ -110,7 +113,7 @@
           <div style="display: flex; justify-content: space-between; align-items: center;">
             <div>
               <span class="setting-label">Playback Speed & Pitch</span>
-              <div class="setting-desc">Adjust tempo with pitch lock or Nightcore mode</div>
+              <div class="setting-desc">Adjust playback rate with optional pitch preservation</div>
             </div>
             <div style="display: flex; align-items: center; gap: 10px;">
               <label style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); cursor: pointer;">
@@ -122,15 +125,18 @@
           </div>
           <input type="range" id="playback_speed" min="0.5" max="2.0" step="0.05" value="1.0" class="preamp-slider" style="width: 100%;" />
           <div style="display: flex; gap: 6px;">
-            <button class="btn-secondary speed-preset-btn" data-speed="0.8" style="padding: 3px 8px; font-size: 11px;">0.8x</button>
-            <button class="btn-secondary speed-preset-btn" data-speed="1.0" style="padding: 3px 8px; font-size: 11px;">1.0x</button>
-            <button class="btn-secondary speed-preset-btn" data-speed="1.25" style="padding: 3px 8px; font-size: 11px;">1.25x</button>
-            <button class="btn-secondary speed-preset-btn" data-speed="1.5" style="padding: 3px 8px; font-size: 11px;">1.5x</button>
+            <button class="btn-secondary speed-preset-btn" data-speed="0.8" style="padding: 4px 10px; font-size: 11px;">0.8x</button>
+            <button class="btn-secondary speed-preset-btn" data-speed="1.0" style="padding: 4px 10px; font-size: 11px;">1.0x</button>
+            <button class="btn-secondary speed-preset-btn" data-speed="1.25" style="padding: 4px 10px; font-size: 11px;">1.25x</button>
+            <button class="btn-secondary speed-preset-btn" data-speed="1.5" style="padding: 4px 10px; font-size: 11px;">1.5x</button>
           </div>
         </div>
 
         <!-- Visuals & Ambient Lighting -->
-        <div class="section-title">Visuals & Ambient Glow</div>
+        <div class="section-title">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+          <span>Visuals & Ambient Glow</span>
+        </div>
 
         <div class="setting-card">
           <div class="setting-info">
@@ -154,7 +160,10 @@
         </div>
 
         <!-- Themes & Custom CSS -->
-        <div class="section-title">Themes & Live CSS Editor</div>
+        <div class="section-title">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></svg>
+          <span>Themes & Live CSS Editor</span>
+        </div>
 
         <div class="setting-card">
           <div class="setting-info">
@@ -183,12 +192,15 @@
         </div>
 
         <!-- Integrations -->
-        <div class="section-title">System & Integrations</div>
+        <div class="section-title">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>
+          <span>System & Integrations</span>
+        </div>
         
         <div class="setting-card">
           <div class="setting-info">
             <span class="setting-label">Discord Rich Presence</span>
-            <span class="setting-desc">Display active song title, artist, duration and play status in Discord</span>
+            <span class="setting-desc">Displays active song title, artist, duration and play status in Discord</span>
           </div>
           <label class="switch">
             <input type="checkbox" id="discord_rpc_enabled" />
@@ -199,7 +211,7 @@
         <div class="setting-card">
           <div class="setting-info">
             <span class="setting-label">MPRIS / Media Controls (Linux/D-Bus)</span>
-            <span class="setting-desc">Enable native OS media keys, notifications, lock screen and sound widget integration</span>
+            <span class="setting-desc">Enables native OS media keys, notifications, lock screen and sound widget integration</span>
           </div>
           <label class="switch">
             <input type="checkbox" id="mpris_enabled" />
@@ -210,7 +222,7 @@
         <div class="setting-card">
           <div class="setting-info">
             <span class="setting-label">Track Notifications</span>
-            <span class="setting-desc">Show native desktop notification when song changes</span>
+            <span class="setting-desc">Shows native desktop notification on song change</span>
           </div>
           <label class="switch">
             <input type="checkbox" id="notifications_enabled" />
@@ -230,12 +242,15 @@
         </div>
 
         <!-- Plugins & Enhancements -->
-        <div class="section-title">Plugins & Addons</div>
+        <div class="section-title">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></svg>
+          <span>Plugins & Addons</span>
+        </div>
 
         <div class="setting-card">
           <div class="setting-info">
             <span class="setting-label">AdBlock & Anti-Nag</span>
-            <span class="setting-desc">Skip video ads automatically and dismiss premium promotion popups</span>
+            <span class="setting-desc">Skips video ads automatically and dismisses premium promotion popups</span>
           </div>
           <label class="switch">
             <input type="checkbox" id="adblock_enabled" />
@@ -246,7 +261,7 @@
         <div class="setting-card">
           <div class="setting-info">
             <span class="setting-label">SponsorBlock for Music</span>
-            <span class="setting-desc">Skip non-music music video intros, outros, and sponsor segments</span>
+            <span class="setting-desc">Skips non-music music video intros, outros, and sponsor segments</span>
           </div>
           <label class="switch">
             <input type="checkbox" id="sponsorblock_enabled" />
@@ -266,7 +281,10 @@
         </div>
 
         <!-- Audio Downloader -->
-        <div class="section-title">Built-in Downloader</div>
+        <div class="section-title">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+          <span>Built-in Downloader</span>
+        </div>
 
         <div class="setting-card">
           <div class="setting-info">
@@ -283,7 +301,7 @@
         <div class="setting-card">
           <div class="setting-info">
             <span class="setting-label">Embed Synced Lyrics & Art</span>
-            <span class="setting-desc">Embed LRC lyrics and 1080p square album artwork into ID3 tags</span>
+            <span class="setting-desc">Embeds LRC lyrics and 1080p square album artwork into ID3 tags</span>
           </div>
           <label class="switch">
             <input type="checkbox" id="embed_lyrics" />
@@ -293,20 +311,26 @@
 
         <div class="setting-card" style="flex-direction: column; align-items: stretch; gap: 6px;">
           <span class="setting-label">Download Output Folder</span>
-          <input type="text" id="download_dir" class="search-box" style="width: 100%; max-width: 100%;" placeholder="~/Music/YTMD" />
+          <input type="text" id="download_dir" class="search-box" style="width: 100%;" placeholder="~/Music/YTMD" />
         </div>
 
         <!-- Local Music Library -->
-        <div class="section-title">Local Music Library</div>
+        <div class="section-title">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+          <span>Local Music Library</span>
+        </div>
 
         <div class="setting-card" style="flex-direction: column; align-items: stretch; gap: 6px;">
           <span class="setting-label">Local Music Directory</span>
-          <input type="text" id="local_music_dir" class="search-box" style="width: 100%; max-width: 100%;" placeholder="~/Music" />
+          <input type="text" id="local_music_dir" class="search-box" style="width: 100%;" placeholder="~/Music" />
           <span class="setting-desc">Scans MP3, FLAC, M4A, OGG, OPUS, WAV files</span>
         </div>
 
         <!-- Web Remote -->
-        <div class="section-title">Mobile Web Remote (Wi-Fi)</div>
+        <div class="section-title">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/></svg>
+          <span>Mobile Web Remote (Wi-Fi)</span>
+        </div>
 
         <div class="setting-card">
           <div class="setting-info">
@@ -328,7 +352,10 @@
         </div>
 
         <!-- Smart Power & Sleep -->
-        <div class="section-title">Smart Power & Screen Lock</div>
+        <div class="section-title">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" x2="12" y1="2" y2="12"/></svg>
+          <span>Smart Power & Screen Lock</span>
+        </div>
 
         <div class="setting-card">
           <div class="setting-info">
@@ -344,7 +371,7 @@
         <div class="setting-card">
           <div class="setting-info">
             <span class="setting-label">Pause on Screen Lock</span>
-            <span class="setting-desc">Automatically pause playback when locking your workstation</span>
+            <span class="setting-desc">Automatically pauses playback when locking your workstation</span>
           </div>
           <label class="switch">
             <input type="checkbox" id="pause_on_lock" />

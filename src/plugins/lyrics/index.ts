@@ -50,50 +50,53 @@ export const LyricsPlugin: YTMDPlugin = {
       #ytmd-native-lyrics-wrapper {
         display: flex;
         flex-direction: column;
-        gap: 16px;
-        padding: 32px 20px 140px 20px;
+        gap: 14px;
+        padding: 40px 24px 160px 24px;
         max-width: 760px;
         margin: 0 auto;
         box-sizing: border-box;
-        font-family: inherit;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
         width: 100%;
       }
       .ytmd-native-lyric-line {
         font-size: 22px;
         font-weight: 700;
-        line-height: 1.5;
-        color: rgba(255, 255, 255, 0.28);
+        line-height: 1.45;
+        color: rgba(255, 255, 255, 0.32);
         cursor: pointer;
-        padding: 8px 12px;
+        padding: 6px 12px;
         border-radius: 8px;
-        transition: color 0.2s cubic-bezier(0.4, 0, 0.2, 1), transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), font-size 0.2s ease;
+        transition: color 0.2s cubic-bezier(0.16, 1, 0.3, 1), transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), font-size 0.2s cubic-bezier(0.16, 1, 0.3, 1);
         user-select: none;
         word-break: break-word;
+        letter-spacing: -0.2px;
       }
       .ytmd-native-lyric-line:hover {
-        color: rgba(255, 255, 255, 0.85);
-        background: rgba(255, 255, 255, 0.05);
+        color: rgba(255, 255, 255, 0.8);
+        background: rgba(255, 255, 255, 0.04);
       }
       .ytmd-native-lyric-line.active {
         color: #ffffff !important;
-        font-size: 26px !important;
+        font-size: 25px !important;
+        font-weight: 800 !important;
         transform: scale(1.02);
         transform-origin: left center;
-        text-shadow: 0 0 28px rgba(255, 255, 255, 0.4);
+        opacity: 1 !important;
       }
       .ytmd-native-lyrics-footer {
         margin-top: 48px;
         padding: 16px 12px;
-        border-top: 1px solid rgba(255, 255, 255, 0.1);
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
         font-size: 11px;
         color: #71717a;
         text-transform: uppercase;
         letter-spacing: 0.8px;
+        font-weight: 600;
       }
       .ytmd-native-lyrics-status {
-        padding: 48px 20px;
+        padding: 60px 20px;
         color: #71717a;
-        font-size: 15px;
+        font-size: 14px;
         font-weight: 500;
         text-align: center;
       }

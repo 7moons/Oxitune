@@ -10,8 +10,8 @@
         padding: 24px 28px;
         display: flex;
         flex-direction: column;
-        gap: 20px;
-        min-height: 100vh;
+        gap: 18px;
+        min-height: calc(100vh - 42px);
         box-sizing: border-box;
       }
       .tabs-header {
@@ -25,12 +25,12 @@
         border: none;
         color: var(--text-secondary);
         font-family: inherit;
-        font-size: 13px;
+        font-size: 12.5px;
         font-weight: 500;
         padding: 6px 14px;
         border-radius: 6px;
         cursor: pointer;
-        transition: all 0.15s ease;
+        transition: background-color 0.12s ease, color 0.12s ease;
       }
       .tab-btn.active {
         background: var(--bg-subtle);
@@ -57,10 +57,10 @@
       }
       .code-text {
         font-family: var(--font-mono);
-        font-size: 20px;
+        font-size: 18px;
         font-weight: 700;
         letter-spacing: 2px;
-        color: var(--accent);
+        color: var(--text-primary);
       }
       .member-list {
         display: flex;
@@ -74,13 +74,27 @@
         padding: 8px 12px;
         background: var(--bg-subtle);
         border-radius: 6px;
-        font-size: 13px;
+        font-size: 12.5px;
+      }
+      .member-avatar {
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        background: var(--bg-card-hover);
+        border: 1px solid var(--border);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--text-secondary);
       }
       .badge-host {
         font-size: 10px;
         font-weight: 600;
-        background: #f59e0b;
-        color: #000;
+        background: rgba(245, 158, 11, 0.15);
+        color: #f59e0b;
+        border: 1px solid rgba(245, 158, 11, 0.3);
         padding: 2px 6px;
         border-radius: 4px;
         text-transform: uppercase;
@@ -90,20 +104,22 @@
         align-items: center;
         gap: 6px;
         font-size: 12px;
-        color: #22c55e;
+        color: var(--success);
+        font-weight: 500;
       }
       .status-dot {
-        width: 8px;
-        height: 8px;
+        width: 7px;
+        height: 7px;
         border-radius: 50%;
-        background-color: #22c55e;
+        background-color: var(--success);
+        box-shadow: 0 0 8px rgba(34, 197, 94, 0.4);
       }
     </style>
   </head>
   <body>
     <header class="app-header" data-tauri-drag-region>
       <div class="brand" data-tauri-drag-region>
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
         <span>Listen Together</span>
       </div>
       <div class="window-controls">
@@ -123,8 +139,8 @@
       <!-- Room Setup Mode -->
       <div id="setup-view">
         <div style="margin-bottom: 16px;">
-          <h2 style="font-size: 18px; margin: 0 0 6px 0;">Listen Together (Room Sync)</h2>
-          <span style="color: var(--text-secondary); font-size: 13px;">Synchronize your YouTube Music queue and playback with friends in real-time.</span>
+          <h2 style="font-size: 16px; font-weight: 700; margin: 0 0 4px 0; color: var(--text-primary);">Listen Together (P2P Room Sync)</h2>
+          <span style="color: var(--text-secondary); font-size: 12.5px;">Synchronize your YouTube Music queue and playback with friends in real time.</span>
         </div>
 
         <div class="tabs-header">
@@ -135,23 +151,23 @@
         <!-- Create Room Panel -->
         <div id="panel-host" class="room-card" style="margin-top: 14px;">
           <div style="display: flex; flex-direction: column; gap: 6px;">
-            <label style="font-size: 12px; color: var(--text-secondary);">Your Display Nickname</label>
-            <input type="text" id="host-nickname" class="search-box" style="max-width: 100%;" placeholder="e.g. Kacper" value="Host" />
+            <label style="font-size: 12px; font-weight: 500; color: var(--text-secondary);">Your Display Nickname</label>
+            <input type="text" id="host-nickname" class="search-box" style="width: 100%;" placeholder="e.g. Kacper" value="Host" />
           </div>
-          <button id="create-room-btn" class="btn-primary">Create Listening Room</button>
+          <button id="create-room-btn" class="btn-primary" style="align-self: flex-start;">Create Listening Room</button>
         </div>
 
         <!-- Join Room Panel -->
         <div id="panel-guest" class="room-card" style="margin-top: 14px; display: none;">
           <div style="display: flex; flex-direction: column; gap: 6px;">
-            <label style="font-size: 12px; color: var(--text-secondary);">Room Code</label>
-            <input type="text" id="join-code" class="search-box" style="max-width: 100%; font-family: var(--font-mono); text-transform: uppercase;" placeholder="YTMD-ABC123" />
+            <label style="font-size: 12px; font-weight: 500; color: var(--text-secondary);">Room Code</label>
+            <input type="text" id="join-code" class="search-box" style="width: 100%; font-family: var(--font-mono); text-transform: uppercase;" placeholder="YTMD-ABC123" />
           </div>
           <div style="display: flex; flex-direction: column; gap: 6px;">
-            <label style="font-size: 12px; color: var(--text-secondary);">Your Display Nickname</label>
-            <input type="text" id="guest-nickname" class="search-box" style="max-width: 100%;" placeholder="e.g. Friend" value="Friend" />
+            <label style="font-size: 12px; font-weight: 500; color: var(--text-secondary);">Your Display Nickname</label>
+            <input type="text" id="guest-nickname" class="search-box" style="width: 100%;" placeholder="e.g. Friend" value="Friend" />
           </div>
-          <button id="join-room-btn" class="btn-primary">Join Listening Room</button>
+          <button id="join-room-btn" class="btn-primary" style="align-self: flex-start;">Join Listening Room</button>
         </div>
       </div>
 
@@ -159,28 +175,31 @@
       <div id="active-room-view" style="display: none; flex-direction: column; gap: 16px;">
         <div style="display: flex; justify-content: space-between; align-items: center;">
           <div>
-            <h2 style="font-size: 18px; margin: 0 0 4px 0;">Active Listening Room</h2>
+            <h2 style="font-size: 16px; font-weight: 700; margin: 0 0 4px 0; color: var(--text-primary);">Active Listening Room</h2>
             <div class="status-pill">
               <span class="status-dot"></span>
               <span id="sync-status-label">Synchronized</span>
             </div>
           </div>
-          <button id="leave-room-btn" class="btn-secondary" style="color: #ef4444; border-color: #7f1d1d;">Leave Room</button>
+          <button id="leave-room-btn" class="btn-secondary" style="color: #ef4444; border-color: rgba(239, 68, 68, 0.3);">Leave Room</button>
         </div>
 
         <div class="room-card">
           <div>
-            <span style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.5px;">Shareable Room Code</span>
+            <span style="font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.5px;">Shareable Room Code</span>
             <div class="code-display" style="margin-top: 6px;">
               <span class="code-text" id="room-code-display">YTMD-XXXX</span>
-              <button id="copy-code-btn" class="btn-secondary" style="font-size: 11px; padding: 4px 10px;">Copy Code</button>
+              <button id="copy-code-btn" class="btn-secondary" style="font-size: 11px; padding: 4px 10px;">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+                <span>Copy Code</span>
+              </button>
             </div>
           </div>
 
           <div>
             <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
               <span style="font-size: 12px; font-weight: 600; color: var(--text-primary);">Connected Listeners</span>
-              <span id="member-count" style="font-size: 12px; color: var(--text-muted);">1 listener</span>
+              <span id="member-count" style="font-size: 12px; color: var(--text-muted); font-family: var(--font-mono);">1 listener</span>
             </div>
             <div class="member-list" id="members-list">
               <!-- Dynamically populated -->
