@@ -126,14 +126,13 @@ export async function showQrModal(ctx: PluginContext) {
     const urlContainer = document.getElementById('ytmd-remote-url');
 
     if (info && info.qr_svg && qrContainer) {
-      const xmlDoc = new DOMParser().parseFromString(info.qr_svg, 'image/svg+xml');
-      const svg = xmlDoc.documentElement;
-      if (svg) {
-        svg.setAttribute('width', '180');
-        svg.setAttribute('height', '180');
-        svg.style.display = 'block';
-        qrContainer.replaceChildren(document.importNode(svg, true));
-      }
+      const img = createEl('img');
+      img.src = `data:image/svg+xml;utf8,${encodeURIComponent(info.qr_svg)}`;
+      img.width = 180;
+      img.height = 180;
+      img.style.display = 'block';
+      img.alt = 'Mobile Remote QR Code';
+      qrContainer.replaceChildren(img);
     } else if (qrContainer) {
       qrContainer.replaceChildren(
         createEl('span', { text: 'Remote server starting...', style: 'color: #71717a; font-size: 12px;' })
