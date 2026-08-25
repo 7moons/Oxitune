@@ -47,14 +47,21 @@ export class PlayerObserver {
       }
     };
 
-    // 3. MutationObserver on the player bar
-    const observer = new MutationObserver(() => {
-      this.checkTrackUpdate();
-    });
+    // 3. MutationObserver throttled via requestAnimationFrame
+    let isChecking = false;
+    const throttledCheck = () => {
+      if (isChecking) return;
+      isChecking = true;
+      requestAnimationFrame(() => {
+        this.checkTrackUpdate();
+        isChecking = false;
+      });
+    };
 
-    const target = document.body;
+    const observer = new MutationObserver(throttledCheck);
+    const target = document.querySelector('ytmusic-player-bar') || document.body;
     if (target) {
-      observer.observe(target, { childList: true, subtree: true });
+      observer.observe(target, { childList: true, subtree: true, characterData: true });
     }
 
     setupVideoListeners();

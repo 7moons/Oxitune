@@ -31,30 +31,14 @@ export const AmbientLightingPlugin: YTMDPlugin = {
         pointer-events: none;
         z-index: 0;
         opacity: ${isEnabled ? intensity : 0};
-        transition: opacity 0.8s ease, filter 0.8s ease;
+        transition: opacity 0.8s ease;
         overflow: hidden;
-        filter: blur(90px);
-        transform: scale(1.2);
-        will-change: transform, opacity;
+        background: radial-gradient(circle at 80% 20%, rgba(24, 24, 27, 0.4) 0%, transparent 60%),
+                    radial-gradient(circle at 20% 80%, rgba(9, 9, 11, 0.4) 0%, transparent 60%);
+        will-change: opacity;
       }
       .ytmd-ambient-orb {
-        position: absolute;
-        border-radius: 50%;
-        transition: all 1.2s cubic-bezier(0.4, 0, 0.2, 1);
-      }
-      #ytmd-orb-1 {
-        width: 60vw;
-        height: 60vh;
-        top: -10vh;
-        right: -10vw;
-        background: #18181b;
-      }
-      #ytmd-orb-2 {
-        width: 55vw;
-        height: 55vh;
-        bottom: 5vh;
-        left: -10vw;
-        background: #09090b;
+        display: none;
       }
       /* Ensure YouTube Music transparent backgrounds let ambient glow pass through subtly */
       ytmusic-app-layout, #browse-page, ytmusic-browse-response {
@@ -91,13 +75,15 @@ export const AmbientLightingPlugin: YTMDPlugin = {
 
     try {
       const palette = await extractPalette(track.coverUrl);
-      const orb1 = document.getElementById('ytmd-orb-1');
-      const orb2 = document.getElementById('ytmd-orb-2');
-
-      if (orb1) orb1.style.background = palette.primary;
-      if (orb2) orb2.style.background = palette.secondary;
+      const backdrop = document.getElementById('ytmd-ambient-backdrop');
+      if (backdrop) {
+        backdrop.style.background = `
+          radial-gradient(circle at 80% 20%, ${palette.primary}66 0%, transparent 60%),
+          radial-gradient(circle at 20% 80%, ${palette.secondary}66 0%, transparent 60%)
+        `;
+      }
     } catch {
       // Fallback
     }
-  }
+  },
 };
