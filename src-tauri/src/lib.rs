@@ -28,7 +28,7 @@ pub struct AppState {
     pub power_manager: PowerManager,
 }
 
-fn ytmd_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
+fn ytmd_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
     tauri::plugin::Builder::new("ytmd")
         .invoke_handler(tauri::generate_handler![
             commands::get_config,
