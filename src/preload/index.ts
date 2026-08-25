@@ -23,45 +23,37 @@ import { createEl, createSvg } from '../utils/dom';
 let currentActiveTrack: TrackInfo | null = null;
 let currentPluginContext: PluginContext | null = null;
 
-const invokeBackend = async (cmd: string, args: Record<string, unknown> = {}): Promise<unknown> => {
-  try {
-    const res = await fetch('http://127.0.0.1:9863/api/invoke', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cmd, args })
-    });
-    if (res.ok) {
-      const data = await res.json();
-      return data?.result ?? null;
+const invokeBackend = (cmd: string, args: Record<string, unknown> = {}): Promise<unknown> => {
+  return new Promise((resolve) => {
+    const tauri = (window as any).__TAURI__;
+    if (!tauri?.event?.emit) {
+      resolve(null);
+      return;
     }
-  } catch {}
 
-  const pluginCmd = cmd.startsWith('plugin:') ? cmd : `plugin:ytmd|${cmd}`;
-  const internals = (window as any).__TAURI_INTERNALS__;
-  if (internals && typeof internals.invoke === 'function') {
-    try {
-      return await internals.invoke(pluginCmd, args);
-    } catch {
-      try {
-        return await internals.invoke(cmd, args);
-      } catch {}
-    }
-    return null;
-  }
+    const id = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    let unlisten: (() => void) | null = null;
 
-  const tauri = (window as any).__TAURI__;
-  if (tauri?.core && typeof tauri.core.invoke === 'function') {
-    try {
-      return await tauri.core.invoke(pluginCmd, args);
-    } catch {
-      try {
-        return await tauri.core.invoke(cmd, args);
-      } catch {}
-    }
-    return null;
-  }
+    const timer = setTimeout(() => {
+      if (unlisten) unlisten();
+      resolve(null);
+    }, 4000);
 
-  return null;
+    tauri.event
+      .listen(`ytmd-response-${id}`, (event: any) => {
+        clearTimeout(timer);
+        if (unlisten) unlisten();
+        resolve(event.payload);
+      })
+      .then((unlistenFn: any) => {
+        unlisten = unlistenFn;
+        tauri.event.emit('ytmd-invoke', { id, cmd, args });
+      })
+      .catch(() => {
+        clearTimeout(timer);
+        resolve(null);
+      });
+  });
 };
 
 // Pure DOM YTMD Navbar Menu

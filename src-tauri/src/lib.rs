@@ -15,9 +15,10 @@ use discord_rpc::{DiscordRpcHandle, TrackPayload};
 use mpris::MprisManager;
 use parking_lot::Mutex;
 use power_manager::PowerManager;
+use serde::Deserialize;
 use std::sync::Arc;
 use sync_room::SyncRoomManager;
-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri::{Emitter, Listener, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 
 pub struct AppState {
     pub config_manager: ConfigManager,
@@ -26,6 +27,38 @@ pub struct AppState {
     pub current_track: Mutex<Option<TrackPayload>>,
     pub sync_room: SyncRoomManager,
     pub power_manager: PowerManager,
+}
+
+#[derive(Deserialize)]
+struct BridgeInvoke {
+    id: String,
+    cmd: String,
+    args: Option<serde_json::Value>,
+}
+
+#[derive(Deserialize)]
+struct UpdateTrackWrapper {
+    track: TrackPayload,
+}
+
+#[derive(Deserialize)]
+struct DownloadRequestWrapper {
+    request: downloader::DownloadRequest,
+}
+
+#[derive(Deserialize)]
+struct NotifyArgs {
+    title: String,
+    artist: String,
+}
+
+#[derive(Deserialize)]
+struct LyricsArgs {
+    artist: String,
+    title: String,
+    #[serde(rename = "albumName")]
+    album_name: Option<String>,
+    duration: Option<f64>,
 }
 
 fn ytmd_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
@@ -103,6 +136,110 @@ pub fn run() {
 
             // Start Local Bridge & Mobile Web Remote Server
             remote_server::start_remote_server(handle.clone(), remote_port);
+
+            // Native Event-based IPC Bridge (100% permitted under core:event without CORS or Mixed Content)
+            let handle_for_bridge = handle.clone();
+            let app_state_for_bridge = app_state_for_setup.clone();
+            handle.listen("ytmd-invoke", move |event| {
+                if let Ok(req) = serde_json::from_str::<BridgeInvoke>(event.payload()) {
+                    let h = handle_for_bridge.clone();
+                    let state = app_state_for_bridge.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let mut result = serde_json::Value::Null;
+                        match req.cmd.as_str() {
+                            "get_config" => {
+                                let cfg = state.config_manager.load();
+                                result = serde_json::to_value(cfg).unwrap_or(serde_json::Value::Null);
+                            }
+                            "save_config" => {
+                                if let Some(args_val) = req.args {
+                                    if let Ok(cfg) = serde_json::from_value::<config::AppConfig>(args_val) {
+                                        let _ = state.config_manager.save(&cfg);
+                                    }
+                                }
+                                result = serde_json::json!({ "success": true });
+                            }
+                            "get_remote_info" => {
+                                let cfg = state.config_manager.load();
+                                let info = remote_server::get_remote_info(cfg.remote_port);
+                                result = serde_json::to_value(info).unwrap_or(serde_json::Value::Null);
+                            }
+                            "toggle_settings_window" => {
+                                let _ = commands::toggle_settings_window(h.clone());
+                                result = serde_json::json!({ "success": true });
+                            }
+                            "toggle_mini_player" => {
+                                let _ = commands::toggle_mini_player(h.clone());
+                                result = serde_json::json!({ "success": true });
+                            }
+                            "toggle_local_library_window" => {
+                                let _ = commands::toggle_local_library_window(h.clone());
+                                result = serde_json::json!({ "success": true });
+                            }
+                            "toggle_sync_window" => {
+                                let _ = commands::toggle_sync_window(h.clone());
+                                result = serde_json::json!({ "success": true });
+                            }
+                            "update_track_info" => {
+                                if let Some(args_val) = req.args {
+                                    if let Ok(wrapper) = serde_json::from_value::<UpdateTrackWrapper>(args_val) {
+                                        let _ = commands::update_track_info(
+                                            h.clone(),
+                                            state.clone(),
+                                            wrapper.track,
+                                        );
+                                    }
+                                }
+                                result = serde_json::json!({ "success": true });
+                            }
+                            "notify_track_change" => {
+                                if let Some(args_val) = req.args {
+                                    if let Ok(p) = serde_json::from_value::<NotifyArgs>(args_val) {
+                                        let _ = commands::notify_track_change(
+                                            h.clone(),
+                                            state.clone(),
+                                            p.title,
+                                            p.artist,
+                                        );
+                                    }
+                                }
+                                result = serde_json::json!({ "success": true });
+                            }
+                            "fetch_lyrics" => {
+                                if let Some(args_val) = req.args {
+                                    if let Ok(lr) = serde_json::from_value::<LyricsArgs>(args_val) {
+                                        if let Ok(data) = commands::fetch_lyrics(
+                                            lr.artist,
+                                            lr.title,
+                                            lr.album_name,
+                                            lr.duration,
+                                        )
+                                        .await
+                                        {
+                                            result = data;
+                                        }
+                                    }
+                                }
+                            }
+                            "download_track" => {
+                                if let Some(args_val) = req.args {
+                                    if let Ok(dr) = serde_json::from_value::<DownloadRequestWrapper>(args_val) {
+                                        let _ = commands::download_track(
+                                            h.clone(),
+                                            state.clone(),
+                                            dr.request,
+                                        )
+                                        .await;
+                                    }
+                                }
+                                result = serde_json::json!({ "success": true });
+                            }
+                            _ => {}
+                        }
+                        let _ = h.emit(&format!("ytmd-response-{}", req.id), result);
+                    });
+                }
+            });
 
             // Build main window with embedded initialization script
             let _main_win = WebviewWindowBuilder::new(
