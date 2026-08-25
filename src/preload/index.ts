@@ -16,11 +16,12 @@ import { DownloaderPlugin } from '../plugins/downloader';
 import { LocalFilesPlugin } from '../plugins/local-files';
 import { SyncRoomPlugin } from '../plugins/sync-room';
 import { PowerPlugin } from '../plugins/power';
-import { RemotePlugin } from '../plugins/remote';
+import { RemotePlugin, showQrModal } from '../plugins/remote';
 import { PluginContext, TrackInfo } from '../plugins/types';
 import { setSafeHTML } from '../utils/dom';
 
 let currentActiveTrack: TrackInfo | null = null;
+let currentPluginContext: PluginContext | null = null;
 
 const invokeBackend = async (cmd: string, args: Record<string, unknown> = {}): Promise<unknown> => {
   try {
@@ -38,49 +39,53 @@ const invokeBackend = async (cmd: string, args: Record<string, unknown> = {}): P
   return null;
 };
 
-// Fixed Floating Menu
+// Seamless YTMD Navbar Menu
 function injectBurgerMenu(config: Record<string, unknown>) {
-  const container = document.body || document.documentElement;
-  if (!container) return;
-
   if (document.getElementById('ytmd-burger-btn')) return;
+
+  const leftContent = document.querySelector('ytmusic-nav-bar .left-content, ytmusic-nav-bar #left-content');
+  const rightContent = document.querySelector('ytmusic-nav-bar .right-content, ytmusic-nav-bar #right-content');
+  const navBar = document.querySelector('ytmusic-nav-bar');
+  const fallbackContainer = document.body || document.documentElement;
+
+  if (!leftContent && !rightContent && !fallbackContainer) return;
 
   // Burger Button
   const burgerBtn = document.createElement('button');
   burgerBtn.id = 'ytmd-burger-btn';
-  burgerBtn.title = 'YTMD Menu (Ctrl+,)';
+  burgerBtn.title = 'YTMD Desktop Menu (Ctrl+,)';
   setSafeHTML(burgerBtn, `
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
       <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>
     </svg>
-    <span style="font-size: 12px; font-weight: 700; letter-spacing: -0.2px;">YTMD</span>
+    <span style="font-size: 12px; font-weight: 700; letter-spacing: 0.3px;">YTMD</span>
   `);
   burgerBtn.style.cssText = `
-    position: fixed !important;
-    top: 10px !important;
-    right: 76px !important;
     display: inline-flex !important;
     align-items: center !important;
     gap: 6px !important;
-    background: #18181b !important;
-    color: #fafafa !important;
-    border: 1px solid #3f3f46 !important;
-    padding: 6px 12px !important;
-    border-radius: 8px !important;
+    background: rgba(255, 255, 255, 0.08) !important;
+    color: #f4f4f5 !important;
+    border: 1px solid rgba(255, 255, 255, 0.12) !important;
+    padding: 5px 12px !important;
+    border-radius: 16px !important;
     cursor: pointer !important;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
-    z-index: 2147483647 !important;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.6) !important;
-    transition: background 0.15s ease, border-color 0.15s ease !important;
+    font-family: inherit !important;
+    margin-left: 12px !important;
+    flex-shrink: 0 !important;
+    z-index: 1000 !important;
+    transition: all 0.15s ease !important;
   `;
 
   burgerBtn.addEventListener('mouseenter', () => {
-    burgerBtn.style.background = '#27272a';
-    burgerBtn.style.borderColor = '#52525b';
+    burgerBtn.style.background = 'rgba(255, 255, 255, 0.16)';
+    burgerBtn.style.borderColor = 'rgba(255, 255, 255, 0.25)';
+    burgerBtn.style.color = '#ffffff';
   });
   burgerBtn.addEventListener('mouseleave', () => {
-    burgerBtn.style.background = '#18181b';
-    burgerBtn.style.borderColor = '#3f3f46';
+    burgerBtn.style.background = 'rgba(255, 255, 255, 0.08)';
+    burgerBtn.style.borderColor = 'rgba(255, 255, 255, 0.12)';
+    burgerBtn.style.color = '#f4f4f5';
   });
 
   // Dropdown Popover Menu
@@ -90,8 +95,8 @@ function injectBurgerMenu(config: Record<string, unknown>) {
     popover.id = 'ytmd-burger-popover';
     popover.style.cssText = `
       position: fixed !important;
-      top: 52px !important;
-      right: 76px !important;
+      top: 56px !important;
+      left: 16px !important;
       width: 290px !important;
       background: #121215 !important;
       border: 1px solid #27272a !important;
@@ -165,9 +170,9 @@ function injectBurgerMenu(config: Record<string, unknown>) {
     }));
 
     popover.appendChild(createMenuItem('📱', 'Mobile Web Remote', '', () => {
-      const remoteBtn = document.getElementById('ytmd-remote-nav-btn');
-      if (remoteBtn) remoteBtn.click();
-      else invokeBackend('toggle_settings_window');
+      if (currentPluginContext) {
+        showQrModal(currentPluginContext);
+      }
     }));
 
     popover.appendChild(createMenuItem('🗖', 'Mini Player', '', () => {
@@ -231,7 +236,7 @@ function injectBurgerMenu(config: Record<string, unknown>) {
 
     popover.appendChild(themeRow);
 
-    container.appendChild(popover);
+    document.body.appendChild(popover);
 
     // Close on outside click
     document.addEventListener('click', (e) => {
@@ -246,11 +251,25 @@ function injectBurgerMenu(config: Record<string, unknown>) {
   burgerBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     if (popover) {
+      const rect = burgerBtn.getBoundingClientRect();
+      popover.style.top = `${rect.bottom + 8}px`;
+      popover.style.left = `${Math.max(12, rect.left)}px`;
       popover.style.display = popover.style.display === 'flex' ? 'none' : 'flex';
     }
   });
 
-  container.appendChild(burgerBtn);
+  if (leftContent) {
+    leftContent.appendChild(burgerBtn);
+  } else if (rightContent) {
+    rightContent.prepend(burgerBtn);
+  } else if (navBar) {
+    navBar.prepend(burgerBtn);
+  } else {
+    burgerBtn.style.position = 'fixed';
+    burgerBtn.style.top = '10px';
+    burgerBtn.style.left = '16px';
+    fallbackContainer.appendChild(burgerBtn);
+  }
 }
 
 async function initYTMD() {
@@ -278,6 +297,8 @@ async function initYTMD() {
     },
     getVideoElement: () => PlayerBridge.getVideo()
   };
+
+  currentPluginContext = context;
 
   // Initialize plugins safely
   const registry = new PluginRegistry(context);

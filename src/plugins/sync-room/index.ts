@@ -1,6 +1,5 @@
 import { YTMDPlugin, PluginContext, TrackInfo } from '../types';
 import { PlayerBridge } from '../../preload/bridge';
-import { setSafeHTML } from '../../utils/dom';
 
 export interface SyncPlaybackPayload {
   video_id: string;
@@ -93,55 +92,6 @@ export const SyncRoomPlugin: YTMDPlugin = {
   onInit(ctx: PluginContext) {
     const controller = new RoomSyncController();
     (this as any)._controller = controller;
-
-    const injectListenTogetherBtn = () => {
-      if (document.getElementById('ytmd-sync-nav-btn')) return;
-
-      const navBarRight = document.querySelector('ytmusic-nav-bar .right-content');
-      if (navBarRight) {
-        const syncBtn = document.createElement('button');
-        syncBtn.id = 'ytmd-sync-nav-btn';
-        syncBtn.title = 'Listen Together (Room Sync)';
-        setSafeHTML(syncBtn, `
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/>
-          </svg>
-          <span style="margin-left: 6px; font-size: 13px; font-weight: 500;">Listen Together</span>
-        `);
-        syncBtn.style.cssText = `
-          display: inline-flex;
-          align-items: center;
-          background: #18181b;
-          border: 1px solid #27272a;
-          color: #d4d4d8;
-          padding: 6px 12px;
-          border-radius: 6px;
-          cursor: pointer;
-          margin-right: 8px;
-          font-family: inherit;
-          transition: background-color 0.15s ease, border-color 0.15s ease;
-        `;
-        syncBtn.addEventListener('mouseenter', () => {
-          syncBtn.style.background = '#27272a';
-          syncBtn.style.borderColor = '#3f3f46';
-          syncBtn.style.color = '#fafafa';
-        });
-        syncBtn.addEventListener('mouseleave', () => {
-          syncBtn.style.background = '#18181b';
-          syncBtn.style.borderColor = '#27272a';
-          syncBtn.style.color = '#d4d4d8';
-        });
-
-        syncBtn.addEventListener('click', async () => {
-          await ctx.invoke('toggle_sync_window');
-        });
-
-        navBarRight.prepend(syncBtn);
-      }
-    };
-
-    setInterval(injectListenTogetherBtn, 1000);
-    injectListenTogetherBtn();
 
     if (window.__TAURI__?.event) {
       window.__TAURI__.event.listen<{ room_code: string; is_host: boolean }>('sync-room-updated', (e) => {
