@@ -127,6 +127,9 @@ pub fn run() {
             commands::broadcast_sync_state,
             commands::get_remote_info,
             commands::set_inhibit_sleep,
+            commands::minimize_window,
+            commands::toggle_maximize_window,
+            commands::close_window,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -183,4 +183,13 @@ document.addEventListener('DOMContentLoaded', () => {
       renderRoomView(null);
     });
   }
+
+  // Window Controls
+  const minBtn = document.getElementById('win-min-btn');
+  const maxBtn = document.getElementById('win-max-btn');
+  const closeBtn = document.getElementById('win-close-btn');
+
+  if (minBtn) minBtn.addEventListener('click', () => window.__TAURI__?.core.invoke('minimize_window'));
+  if (maxBtn) maxBtn.addEventListener('click', () => window.__TAURI__?.core.invoke('toggle_maximize_window'));
+  if (closeBtn) closeBtn.addEventListener('click', () => window.__TAURI__?.core.invoke('close_window'));
 });

@@ -191,7 +191,39 @@ async function initYTMD() {
     }
   });
 
-  // Inject Settings and Mini Player buttons into YouTube Music UI
+  // Inject unified toolbar into YouTube Music UI
+  const createNavButton = (label: string, title: string, onClick: () => void) => {
+    const btn = document.createElement('button');
+    btn.className = 'ytmd-navbar-action-btn';
+    btn.textContent = label;
+    btn.title = title;
+    btn.style.cssText = `
+      background: #18181b;
+      color: #e4e4e7;
+      border: 1px solid #27272a;
+      padding: 5px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      font-family: inherit;
+      white-space: nowrap;
+      transition: background 0.15s ease, border-color 0.15s ease;
+    `;
+    btn.addEventListener('mouseenter', () => {
+      btn.style.background = '#27272a';
+      btn.style.borderColor = '#3f3f46';
+      btn.style.color = '#ffffff';
+    });
+    btn.addEventListener('mouseleave', () => {
+      btn.style.background = '#18181b';
+      btn.style.borderColor = '#27272a';
+      btn.style.color = '#e4e4e7';
+    });
+    btn.addEventListener('click', onClick);
+    return btn;
+  };
+
   const injectNavbarControls = () => {
     if (document.getElementById('ytmd-nav-controls')) return;
 
@@ -199,22 +231,40 @@ async function initYTMD() {
     if (rightContent) {
       const btnWrapper = document.createElement('div');
       btnWrapper.id = 'ytmd-nav-controls';
-      btnWrapper.style.cssText = 'display:flex;align-items:center;gap:8px;margin-right:12px;';
+      btnWrapper.style.cssText = 'display:flex;align-items:center;gap:6px;margin-right:12px;';
 
-      const miniBtn = document.createElement('button');
-      miniBtn.textContent = 'Mini Player';
-      miniBtn.title = 'Toggle Mini Player Window';
-      miniBtn.style.cssText = 'background:#18181b;color:#e4e4e7;border:1px solid #27272a;padding:5px 10px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;';
-      miniBtn.addEventListener('click', () => invokeBackend('toggle_mini_player'));
+      const localBtn = createNavButton('🎵 Local', 'Open Local Music Library', () => {
+        invokeBackend('toggle_local_library_window');
+      });
 
-      const settingsBtn = document.createElement('button');
-      settingsBtn.textContent = '⚙ Settings';
-      settingsBtn.title = 'Open YTMD Preferences (Ctrl+,)';
-      settingsBtn.style.cssText = 'background:#18181b;color:#e4e4e7;border:1px solid #27272a;padding:5px 10px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;';
-      settingsBtn.addEventListener('click', () => invokeBackend('toggle_settings_window'));
+      const syncBtn = createNavButton('👥 Sync', 'Listen Together (P2P Room Sync)', () => {
+        invokeBackend('toggle_sync_window');
+      });
 
+      const remoteBtn = createNavButton('📱 Remote', 'Mobile Web Remote (QR Code)', () => {
+        const modal = document.getElementById('ytmd-remote-nav-btn');
+        if (modal) {
+          modal.click();
+        } else {
+          // Open settings or trigger remote QR modal
+          invokeBackend('toggle_settings_window');
+        }
+      });
+
+      const miniBtn = createNavButton('🗖 Mini', 'Toggle Mini Player Window', () => {
+        invokeBackend('toggle_mini_player');
+      });
+
+      const settingsBtn = createNavButton('⚙ Settings', 'Open YTMD Preferences (Ctrl+,)', () => {
+        invokeBackend('toggle_settings_window');
+      });
+
+      btnWrapper.appendChild(localBtn);
+      btnWrapper.appendChild(syncBtn);
+      btnWrapper.appendChild(remoteBtn);
       btnWrapper.appendChild(miniBtn);
       btnWrapper.appendChild(settingsBtn);
+
       rightContent.insertBefore(btnWrapper, rightContent.firstChild);
     }
   };

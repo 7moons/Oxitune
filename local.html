@@ -96,13 +96,18 @@
     </style>
   </head>
   <body>
-    <div class="local-header">
-      <div style="display: flex; align-items: center; gap: 14px; flex: 1;">
-        <span style="font-weight: 600; font-size: 16px;">Local Music Library</span>
+    <div class="local-header" data-tauri-drag-region>
+      <div style="display: flex; align-items: center; gap: 14px; flex: 1;" data-tauri-drag-region>
+        <span style="font-weight: 600; font-size: 15px;">🎵 Local Music Library</span>
         <input type="text" id="search-input" class="search-box" placeholder="Search title, artist or album..." />
       </div>
-      <div style="display: flex; gap: 8px;">
-        <button id="rescan-btn" class="btn-secondary" style="font-size: 12px; padding: 6px 12px;">Rescan Folder</button>
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <button id="rescan-btn" class="btn-secondary" style="font-size: 12px; padding: 6px 12px;">Rescan</button>
+        <div class="window-controls">
+          <button id="win-min-btn" class="window-btn" title="Minimize">🗕</button>
+          <button id="win-max-btn" class="window-btn" title="Maximize">🗖</button>
+          <button id="win-close-btn" class="window-btn close" title="Close">✕</button>
+        </div>
       </div>
     </div>
 

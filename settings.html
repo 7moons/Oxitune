@@ -7,11 +7,18 @@
     <link rel="stylesheet" href="./src/ui/styles.css" />
   </head>
   <body>
-    <header class="app-header">
-      <div class="brand">
-        <span>YTMD Preferences</span>
+    <header class="app-header" data-tauri-drag-region>
+      <div class="brand" data-tauri-drag-region>
+        <span>⚙ YTMD Preferences</span>
       </div>
-      <button id="save-btn" class="btn-primary">Save Changes</button>
+      <div class="header-actions">
+        <button id="save-btn" class="btn-primary">Save Changes</button>
+        <div class="window-controls">
+          <button id="win-min-btn" class="window-btn" title="Minimize">🗕</button>
+          <button id="win-max-btn" class="window-btn" title="Maximize">🗖</button>
+          <button id="win-close-btn" class="window-btn close" title="Close">✕</button>
+        </div>
+      </div>
     </header>
     <main class="container">
       <div class="settings-grid">

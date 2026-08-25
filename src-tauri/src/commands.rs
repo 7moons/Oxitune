@@ -288,6 +288,30 @@ pub fn set_inhibit_sleep(
     Ok(())
 }
 
+#[tauri::command]
+pub fn minimize_window(window: tauri::Window) -> Result<(), String> {
+    let _ = window.minimize();
+    Ok(())
+}
+
+#[tauri::command]
+pub fn toggle_maximize_window(window: tauri::Window) -> Result<(), String> {
+    if let Ok(max) = window.is_maximized() {
+        if max {
+            let _ = window.unmaximize();
+        } else {
+            let _ = window.maximize();
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn close_window(window: tauri::Window) -> Result<(), String> {
+    let _ = window.hide();
+    Ok(())
+}
+
 mod urlencoding {
     pub fn encode(s: &str) -> String {
         url::form_urlencoded::byte_serialize(s.as_bytes()).collect()

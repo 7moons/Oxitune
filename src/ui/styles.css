@@ -54,9 +54,10 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 16px;
+  padding: 0 12px 0 16px;
   background-color: var(--bg-surface);
   border-bottom: 1px solid var(--border);
+  user-select: none;
 }
 
 .brand {
@@ -66,6 +67,43 @@ body {
   font-size: 14px;
   font-weight: 700;
   letter-spacing: -0.2px;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.window-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.window-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.window-btn:hover {
+  background-color: var(--bg-subtle);
+  color: var(--text-primary);
+}
+
+.window-btn.close:hover {
+  background-color: #dc2626;
+  color: #ffffff;
 }
 
 /* Common Layouts */
