@@ -174,7 +174,7 @@ pub async fn fetch_lyrics(
         }
     }
 
-    // 3. Try broad text search API query
+    // 3. Try broad text search API query with clean artist + clean title
     let broad_url = format!(
         "https://lrclib.net/api/search?q={}+{}",
         urlencoding::encode(clean_artist),
@@ -183,6 +183,26 @@ pub async fn fetch_lyrics(
     if let Ok(broad_res) = client.get(&broad_url).send().await {
         if broad_res.status().is_success() {
             if let Ok(items) = broad_res.json::<serde_json::Value>().await {
+                if let Some(arr) = items.as_array() {
+                    if let Some(synced) = arr.iter().find(|it| it.get("syncedLyrics").and_then(|s| s.as_str()).map(|s| !s.is_empty()).unwrap_or(false)) {
+                        return Ok(synced.clone());
+                    }
+                    if let Some(first) = arr.first() {
+                        return Ok(first.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    // 4. Try raw title query as listed on YouTube
+    let raw_url = format!(
+        "https://lrclib.net/api/search?q={}",
+        urlencoding::encode(&title)
+    );
+    if let Ok(raw_res) = client.get(&raw_url).send().await {
+        if raw_res.status().is_success() {
+            if let Ok(items) = raw_res.json::<serde_json::Value>().await {
                 if let Some(arr) = items.as_array() {
                     if let Some(synced) = arr.iter().find(|it| it.get("syncedLyrics").and_then(|s| s.as_str()).map(|s| !s.is_empty()).unwrap_or(false)) {
                         return Ok(synced.clone());

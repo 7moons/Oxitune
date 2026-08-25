@@ -101,6 +101,82 @@ export const LyricsPlugin: YTMDPlugin = {
     `;
     document.head.appendChild(style);
 
+    // Handle clicks on tab buttons cleanly
+    document.addEventListener('click', (e) => {
+      const target = (e.target as HTMLElement | null)?.closest(
+        'tp-yt-paper-tab, ytmusic-tab-header-renderer, .tab-header'
+      ) as HTMLElement | null;
+
+      if (target) {
+        const text = target.textContent?.toLowerCase() || '';
+        if (
+          text.includes('tekst') ||
+          text.includes('lyrics') ||
+          text.includes('paroles') ||
+          text.includes('letras')
+        ) {
+          // Switch to lyrics tab
+          const tabRenderers = document.querySelectorAll<HTMLElement>('ytmusic-player-page ytmusic-tab-renderer');
+          tabRenderers.forEach((tr, idx) => {
+            if (tr.getAttribute('page-type') === 'MUSIC_PAGE_TYPE_TRACK_LYRICS' || idx === 1) {
+              tr.removeAttribute('hidden');
+              tr.style.display = 'block';
+            } else {
+              tr.setAttribute('hidden', '');
+              tr.style.display = 'none';
+            }
+          });
+
+          // Highlight paper-tab
+          const allTabs = document.querySelectorAll('ytmusic-player-page tp-yt-paper-tab, ytmusic-tab-header-shelf-renderer tp-yt-paper-tab');
+          allTabs.forEach((t) => t.classList.remove('iron-selected'));
+          target.classList.add('iron-selected');
+
+          ensureLyricsMounted(ctx);
+        } else if (
+          text.includes('następny') ||
+          text.includes('up next') ||
+          text.includes('kolejka') ||
+          text.includes('queue')
+        ) {
+          const tabRenderers = document.querySelectorAll<HTMLElement>('ytmusic-player-page ytmusic-tab-renderer');
+          tabRenderers.forEach((tr, idx) => {
+            if (tr.getAttribute('page-type') === 'MUSIC_PAGE_TYPE_TRACK_UP_NEXT' || idx === 0) {
+              tr.removeAttribute('hidden');
+              tr.style.display = 'block';
+            } else {
+              tr.setAttribute('hidden', '');
+              tr.style.display = 'none';
+            }
+          });
+
+          const allTabs = document.querySelectorAll('ytmusic-player-page tp-yt-paper-tab, ytmusic-tab-header-shelf-renderer tp-yt-paper-tab');
+          allTabs.forEach((t) => t.classList.remove('iron-selected'));
+          target.classList.add('iron-selected');
+        } else if (
+          text.includes('podobne') ||
+          text.includes('related') ||
+          text.includes('komentarze') ||
+          text.includes('comments')
+        ) {
+          const tabRenderers = document.querySelectorAll<HTMLElement>('ytmusic-player-page ytmusic-tab-renderer');
+          tabRenderers.forEach((tr, idx) => {
+            if (tr.getAttribute('page-type') === 'MUSIC_PAGE_TYPE_TRACK_RELATED' || idx >= 2) {
+              tr.removeAttribute('hidden');
+              tr.style.display = 'block';
+            } else {
+              tr.setAttribute('hidden', '');
+              tr.style.display = 'none';
+            }
+          });
+
+          const allTabs = document.querySelectorAll('ytmusic-player-page tp-yt-paper-tab, ytmusic-tab-header-shelf-renderer tp-yt-paper-tab');
+          allTabs.forEach((t) => t.classList.remove('iron-selected'));
+          target.classList.add('iron-selected');
+        }
+      }
+    });
+
     const checkTabButtons = () => {
       enableLyricsTabButton();
       ensureLyricsMounted(ctx);
