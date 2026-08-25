@@ -22,6 +22,8 @@ export function sanitizePlayerResponse<T>(data: T): T {
     'instreamAdPlayerConfig',
     'adParams',
     'adTagUrl',
+    'adBreakConfig',
+    'instreamAdConfig',
   ];
 
   for (const key of adKeys) {
@@ -34,132 +36,66 @@ export function sanitizePlayerResponse<T>(data: T): T {
     sanitizePlayerResponse(obj.playerResponse);
   }
 
+  if (obj.playerConfig && typeof obj.playerConfig === 'object') {
+    delete obj.playerConfig.adBreakConfig;
+    delete obj.playerConfig.instreamAdConfig;
+  }
+
   return data;
 }
 
-export function setupNetworkHooks() {
-  if (typeof window === 'undefined') return;
-  if ((window as any).__ytmd_network_hooks_installed) return;
-  (window as any).__ytmd_network_hooks_installed = true;
+// In-engine JSON response & ytInitialPlayerResponse interceptor (uBlock Origin style)
+let interceptorsInstalled = false;
 
-  // 1. Hook window.ytInitialPlayerResponse
+function installJsonInterceptors() {
+  if (interceptorsInstalled || typeof window === 'undefined') return;
+  interceptorsInstalled = true;
+
   try {
-    let initialPlayerResponse = (window as any).ytInitialPlayerResponse;
-    if (initialPlayerResponse) {
-      sanitizePlayerResponse(initialPlayerResponse);
+    // 1. Intercept JSON.parse
+    const origParse = JSON.parse;
+    JSON.parse = function (text: string, reviver?: any) {
+      const data = origParse.call(this, text, reviver);
+      if (data && typeof data === 'object') {
+        if (data.adPlacements || data.playerAds || data.adSlots || data.playerResponse?.adPlacements) {
+          return sanitizePlayerResponse(data);
+        }
+      }
+      return data;
+    };
+
+    // 2. Intercept Response.prototype.json
+    if (typeof Response !== 'undefined' && Response.prototype.json) {
+      const origJson = Response.prototype.json;
+      Response.prototype.json = async function () {
+        const data = await origJson.call(this);
+        if (data && typeof data === 'object') {
+          if (data.adPlacements || data.playerAds || data.adSlots || data.playerResponse?.adPlacements) {
+            return sanitizePlayerResponse(data);
+          }
+        }
+        return data;
+      };
     }
+
+    // 3. Intercept window.ytInitialPlayerResponse
+    let initialResponse = (window as any).ytInitialPlayerResponse;
     Object.defineProperty(window, 'ytInitialPlayerResponse', {
-      configurable: true,
-      enumerable: true,
       get() {
-        return initialPlayerResponse;
+        return initialResponse;
       },
       set(val) {
-        initialPlayerResponse = sanitizePlayerResponse(val);
-      }
+        initialResponse = sanitizePlayerResponse(val);
+      },
+      configurable: true,
+      enumerable: true
     });
-  } catch (_) {}
-
-  // 2. Hook window.fetch to prune ads from InnerTube responses before the player sees them
-  const originalFetch = window.fetch;
-  if (typeof originalFetch === 'function') {
-    (window as any).fetch = async function (input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url;
-
-      if (
-        url &&
-        (url.includes('doubleclick.net') ||
-          url.includes('googleads') ||
-          url.includes('googlesyndication.com') ||
-          url.includes('/pagead/'))
-      ) {
-        return new Response('{}', {
-          status: 200,
-          statusText: 'OK',
-          headers: { 'Content-Type': 'application/json' }
-        });
-      }
-
-      const response = await originalFetch.call(this, input, init);
-
-      if (url && (url.includes('/youtubei/v1/player') || url.includes('/youtubei/v1/next') || url.includes('/youtubei/v1/browse'))) {
-        try {
-          const clone = response.clone();
-          const json = await clone.json();
-          sanitizePlayerResponse(json);
-          const sanitizedBody = JSON.stringify(json);
-          return new Response(sanitizedBody, {
-            status: response.status,
-            statusText: response.statusText,
-            headers: response.headers
-          });
-        } catch (_) {
-          return response;
-        }
-      }
-
-      return response;
-    };
+    if (initialResponse) {
+      (window as any).ytInitialPlayerResponse = sanitizePlayerResponse(initialResponse);
+    }
+  } catch (e) {
+    console.warn('[YTMD Adblock] Failed to install JSON interceptors:', e);
   }
-
-  // 3. Hook XMLHttpRequest
-  const originalOpen = XMLHttpRequest.prototype.open;
-  const originalSend = XMLHttpRequest.prototype.send;
-
-  XMLHttpRequest.prototype.open = function (
-    this: XMLHttpRequest & { _ytmd_url?: string },
-    _method: string,
-    url: string | URL
-  ) {
-    this._ytmd_url = typeof url === 'string' ? url : url.href;
-    return originalOpen.apply(this, arguments as any);
-  };
-
-  XMLHttpRequest.prototype.send = function (
-    this: XMLHttpRequest & { _ytmd_url?: string },
-    _body?: Document | XMLHttpRequestBodyInit | null
-  ) {
-    const url = this._ytmd_url || '';
-
-    if (
-      url.includes('doubleclick.net') ||
-      url.includes('googleads') ||
-      url.includes('googlesyndication.com') ||
-      url.includes('/pagead/')
-    ) {
-      setTimeout(() => {
-        try {
-          Object.defineProperty(this, 'readyState', { value: 4, configurable: true });
-          Object.defineProperty(this, 'status', { value: 200, configurable: true });
-          Object.defineProperty(this, 'statusText', { value: 'OK', configurable: true });
-          Object.defineProperty(this, 'responseText', { value: '{}', configurable: true });
-          Object.defineProperty(this, 'response', { value: '{}', configurable: true });
-          this.dispatchEvent(new Event('readystatechange'));
-          this.dispatchEvent(new Event('load'));
-          this.dispatchEvent(new Event('loadend'));
-        } catch (_) {}
-      }, 0);
-      return;
-    }
-
-    if (url.includes('/youtubei/v1/player') || url.includes('/youtubei/v1/next') || url.includes('/youtubei/v1/browse')) {
-      this.addEventListener('readystatechange', () => {
-        if (this.readyState === 4 && this.status === 200) {
-          try {
-            const rawText = this.responseText;
-            if (rawText) {
-              const json = JSON.parse(rawText);
-              sanitizePlayerResponse(json);
-              const sanitized = JSON.stringify(json);
-              Object.defineProperty(this, 'responseText', { value: sanitized, configurable: true });
-              Object.defineProperty(this, 'response', { value: sanitized, configurable: true });
-            }
-          } catch (_) {}
-        }
-      });
-    }
-    return originalSend.apply(this, arguments as any);
-  };
 }
 
 export const AdblockPlugin: YTMDPlugin = {
@@ -169,65 +105,53 @@ export const AdblockPlugin: YTMDPlugin = {
   defaultEnabled: true,
 
   onInit(ctx: PluginContext) {
-    setupNetworkHooks();
     if (typeof document === 'undefined') return;
+    installJsonInterceptors();
 
     let adCheckInterval: number | null = null;
     let adHandled = false;
-    let savedPlaybackRate = 1;
     let savedMuted = false;
 
     const blockAds = () => {
       const video = ctx.getVideoElement();
       const moviePlayer = document.getElementById('movie_player') as any;
 
-      if (moviePlayer) {
-        if (typeof moviePlayer.getAdState === 'function' && moviePlayer.getAdState() === 1) {
-          try {
-            moviePlayer.skipAd?.();
-          } catch (_) {}
-        }
-        if (typeof moviePlayer.isAdPlaying === 'function' && moviePlayer.isAdPlaying()) {
-          try {
-            moviePlayer.skipAd?.();
-          } catch (_) {}
-        }
-      }
-
-      const isAdShowing = Boolean(
-        document.querySelector('.ad-showing, .ad-interrupting, .ytp-ad-player-overlay, .ytp-ad-module') !== null ||
-        moviePlayer?.classList?.contains('ad-showing') ||
-        moviePlayer?.classList?.contains('ad-interrupting')
+      const isAdActive = Boolean(
+        moviePlayer && (
+          (typeof moviePlayer.getAdState === 'function' && moviePlayer.getAdState() === 1) ||
+          (typeof moviePlayer.isAdPlaying === 'function' && moviePlayer.isAdPlaying()) ||
+          moviePlayer.classList?.contains('ad-showing') ||
+          moviePlayer.classList?.contains('ad-interrupting')
+        )
       );
 
-      if (isAdShowing && video) {
-        if (!adHandled) {
-          savedPlaybackRate = video.playbackRate;
-          savedMuted = video.muted;
+      if (isAdActive) {
+        try {
+          if (moviePlayer && typeof moviePlayer.skipAd === 'function') {
+            moviePlayer.skipAd(true);
+          }
+        } catch (_) {}
+
+        const skipButtons = document.querySelectorAll<HTMLElement>(
+          '.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button, button.ytp-ad-skip-button, .ytp-ad-skip-button-container button, .ytp-ad-skip-button-slot button, .ytp-ad-overlay-close-button'
+        );
+        skipButtons.forEach((btn) => btn.click());
+
+        if (video) {
+          if (!adHandled) {
+            savedMuted = video.muted;
+          }
+          video.muted = true;
+          adHandled = true;
         }
-        video.muted = true;
-        video.playbackRate = 16.0;
-        if (video.duration && isFinite(video.duration)) {
-          video.currentTime = video.duration;
-        } else {
-          video.currentTime = 99999;
-        }
-        adHandled = true;
-      } else if (!isAdShowing && adHandled) {
+      } else if (adHandled) {
         if (video) {
           video.muted = savedMuted;
-          video.playbackRate = savedPlaybackRate;
         }
         adHandled = false;
       }
 
-      // 2. Click skip buttons
-      const skipButtons = document.querySelectorAll<HTMLElement>(
-        '.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button, button.ytp-ad-skip-button, .ytp-ad-skip-button-container button, .ytp-ad-skip-button-slot button, .ytp-ad-overlay-close-button'
-      );
-      skipButtons.forEach((btn) => btn.click());
-
-      // 3. Remove popup modals & banners
+      // Remove popup modals & banners
       const banners = document.querySelectorAll<HTMLElement>(
         'ytmusic-mealbar-promo-renderer, ytmusic-upsell-dialog-renderer, ytd-popup-container ytmusic-mealbar-promo-renderer, tp-yt-paper-dialog:has(ytmusic-upsell-dialog-renderer)'
       );

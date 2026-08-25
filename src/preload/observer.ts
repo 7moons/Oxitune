@@ -78,11 +78,16 @@ export class PlayerObserver {
 
   private extractTrackInfo(): TrackInfo | null {
     const video = document.querySelector('video');
+    const moviePlayer = document.getElementById('movie_player') as any;
     
     // Ignore ads completely
     const isAd = Boolean(
-      document.querySelector('.ad-showing, .ad-interrupting, .ytp-ad-player-overlay, .ytp-ad-text') ||
-      video?.closest('.ad-showing')
+      moviePlayer && (
+        (typeof moviePlayer.getAdState === 'function' && moviePlayer.getAdState() === 1) ||
+        (typeof moviePlayer.isAdPlaying === 'function' && moviePlayer.isAdPlaying()) ||
+        moviePlayer.classList?.contains('ad-showing') ||
+        moviePlayer.classList?.contains('ad-interrupting')
+      )
     );
     if (isAd) return null;
 

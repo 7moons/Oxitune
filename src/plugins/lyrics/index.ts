@@ -10,6 +10,7 @@ let pluginLines: LrcLine[] = [];
 let currentActiveIdx = -1;
 let cachedLyricsData: { syncedLyrics?: string; plainLyrics?: string } | null = null;
 let currentSongKey = '';
+let fetchInProgressKey = '';
 
 export const LyricsPlugin: YTMDPlugin = {
   id: 'lyrics',
@@ -22,6 +23,7 @@ export const LyricsPlugin: YTMDPlugin = {
     currentActiveIdx = -1;
     cachedLyricsData = null;
     currentSongKey = '';
+    fetchInProgressKey = '';
 
     // Inject CSS for Native Lyrics Tab styling
     const style = document.createElement('style');
@@ -39,16 +41,18 @@ export const LyricsPlugin: YTMDPlugin = {
         color: #d4d4d8 !important;
       }
 
-      /* Hide default un-synced text and unavailable messages inside lyrics tab ONLY */
+      /* Hide default un-synced text, spinners and unavailable messages inside lyrics tab ONLY */
       #tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"] ytmusic-description-shelf-renderer,
       #tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"] ytmusic-message-renderer,
+      #tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"] tp-yt-paper-spinner,
       ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"] ytmusic-description-shelf-renderer,
-      ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"] ytmusic-message-renderer {
+      ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"] ytmusic-message-renderer,
+      ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"] tp-yt-paper-spinner {
         display: none !important;
       }
 
       #ytmd-native-lyrics-wrapper {
-        display: flex;
+        display: none !important;
         flex-direction: column;
         gap: 14px;
         padding: 40px 24px 160px 24px;
@@ -57,6 +61,20 @@ export const LyricsPlugin: YTMDPlugin = {
         box-sizing: border-box;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
         width: 100%;
+      }
+
+      /* Strict visibility: show ONLY inside the active lyrics tab renderer */
+      ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"].iron-selected #ytmd-native-lyrics-wrapper,
+      ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"]:not([hidden]):not([aria-hidden="true"]) #ytmd-native-lyrics-wrapper {
+        display: flex !important;
+      }
+
+      /* Never show inside queue / related / hidden tabs */
+      ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"][hidden] #ytmd-native-lyrics-wrapper,
+      ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"][aria-hidden="true"] #ytmd-native-lyrics-wrapper,
+      ytmusic-tab-renderer:not([page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"]) #ytmd-native-lyrics-wrapper,
+      ytmusic-player-page ytmusic-tab-renderer:not(.iron-selected) #ytmd-native-lyrics-wrapper {
+        display: none !important;
       }
       .ytmd-native-lyric-line {
         font-size: 22px;
@@ -93,11 +111,47 @@ export const LyricsPlugin: YTMDPlugin = {
         letter-spacing: 0.8px;
         font-weight: 600;
       }
-      .ytmd-native-lyrics-status {
-        padding: 60px 20px;
-        color: #71717a;
-        font-size: 14px;
-        font-weight: 500;
+      .ytmd-native-lyrics-sync-bar {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        margin-top: 24px;
+        padding: 10px 16px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 20px;
+        width: fit-content;
+        margin-left: auto;
+        margin-right: auto;
+      }
+      .ytmd-sync-label {
+        font-size: 11px;
+        color: #a1a1aa;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+      .ytmd-sync-btn {
+        background: #27272a;
+        color: #f4f4f5;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        padding: 3px 8px;
+        border-radius: 12px;
+        font-size: 11px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 0.15s ease, transform 0.1s ease;
+      }
+      .ytmd-sync-btn:hover {
+        background: #3f3f46;
+        transform: scale(1.05);
+      }
+      .ytmd-sync-val {
+        font-size: 12px;
+        font-weight: 700;
+        color: #38bdf8;
+        min-width: 42px;
         text-align: center;
       }
     `;
@@ -108,32 +162,24 @@ export const LyricsPlugin: YTMDPlugin = {
       ensureLyricsMounted(ctx);
     };
 
+    const onTabClick = () => {
+      setTimeout(() => {
+        unlockLyricsTabHeader();
+        updateLyricsVisibility();
+      }, 50);
+      setTimeout(() => {
+        updateLyricsVisibility();
+      }, 250);
+    };
+
+    document.addEventListener('click', onTabClick, true);
+
     const pollInterval = window.setInterval(checkTab, 600);
     checkTab();
 
-    // YouTube Music's own tab-switch machinery can throw when its backend
-    // request for the newly-selected tab's content fails (seen both as a
-    // null-endpoint dereference and as a MutationObserver/Polymer render
-    // race) — sometimes caused by YouTube's own API returning errors for
-    // reasons unrelated to us. We can't prevent that from inside YT's own
-    // code, but we don't have to wait up to 600ms to recover from it either:
-    // re-run the mount/unlock immediately so the panel self-heals within the
-    // same tick instead of sitting blank until the next poll.
-    const onWindowError = (e: ErrorEvent) => {
-      const msg = e.message || '';
-      const looksLikeYtTabCrash =
-        msg.includes('toCommand') ||
-        msg.includes('no longer a child of this node') ||
-        (typeof e.error?.stack === 'string' && e.error.stack.includes('onCurrentTabIndexChanged'));
-      if (looksLikeYtTabCrash) {
-        checkTab();
-      }
-    };
-    window.addEventListener('error', onWindowError);
-
     (this as any)._cleanup = () => {
       clearInterval(pollInterval);
-      window.removeEventListener('error', onWindowError);
+      document.removeEventListener('click', onTabClick, true);
       style.remove();
       const wrappers = document.querySelectorAll('#ytmd-native-lyrics-wrapper');
       wrappers.forEach((w) => w.remove());
@@ -142,11 +188,12 @@ export const LyricsPlugin: YTMDPlugin = {
 
   async onTrackChange(track: TrackInfo, ctx: PluginContext) {
     const songKey = `${track.title} - ${track.artist}`;
-    if (currentSongKey === songKey && pluginLines.length > 0) {
+    if ((currentSongKey === songKey && pluginLines.length > 0) || fetchInProgressKey === songKey) {
       return;
     }
 
     currentSongKey = songKey;
+    fetchInProgressKey = songKey;
     pluginLines = [];
     currentActiveIdx = -1;
     cachedLyricsData = null;
@@ -168,6 +215,10 @@ export const LyricsPlugin: YTMDPlugin = {
         duration: track.durationSecs || null
       })) as { syncedLyrics?: string; plainLyrics?: string };
 
+      if (currentSongKey !== songKey) {
+        return;
+      }
+
       cachedLyricsData = lyricsData;
 
       if (lyricsData?.syncedLyrics) {
@@ -179,10 +230,14 @@ export const LyricsPlugin: YTMDPlugin = {
       ensureLyricsMounted(ctx);
       renderCurrentLyrics(ctx);
     } catch {
-      if (wrapper) {
+      if (currentSongKey === songKey && wrapper) {
         wrapper.replaceChildren(
           createEl('div', { className: 'ytmd-native-lyrics-status', text: 'No lyrics available for this track.' })
         );
+      }
+    } finally {
+      if (fetchInProgressKey === songKey) {
+        fetchInProgressKey = '';
       }
     }
   },
@@ -190,9 +245,12 @@ export const LyricsPlugin: YTMDPlugin = {
   onTick(currentTimeSecs: number) {
     if (!pluginLines || pluginLines.length === 0) return;
 
+    const savedOffset = getTrackSyncOffset(currentSongKey);
+    const effectiveTime = currentTimeSecs + savedOffset;
+
     let activeIdx = -1;
     for (let i = 0; i < pluginLines.length; i++) {
-      if (currentTimeSecs >= pluginLines[i].timeSecs) {
+      if (effectiveTime >= pluginLines[i].timeSecs) {
         activeIdx = i;
       } else {
         break;
@@ -218,13 +276,6 @@ export const LyricsPlugin: YTMDPlugin = {
         if (lyricsTab && isElementVisible(lyricsTab)) {
           const activeEl = lineEls[activeIdx];
           if (activeEl) {
-            // 'nearest' (not 'center'): scrollIntoView walks up to the
-            // nearest scrollable ancestor, which — since our wrapper has no
-            // bounded height of its own — is the whole right-side panel.
-            // 'center' would re-center on every line change, dragging the
-            // Następny/Tekst/Komentarze/Podobne tab strip out of view;
-            // 'nearest' only nudges the scroll when the line isn't already
-            // visible.
             activeEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
           }
         }
@@ -238,6 +289,16 @@ export const LyricsPlugin: YTMDPlugin = {
     }
   }
 };
+
+const syncOffsetMap = new Map<string, number>();
+
+function getTrackSyncOffset(songKey: string): number {
+  return syncOffsetMap.get(songKey) || 0;
+}
+
+function setTrackSyncOffset(songKey: string, offsetSecs: number): void {
+  syncOffsetMap.set(songKey, offsetSecs);
+}
 
 function isElementVisible(el: HTMLElement): boolean {
   if (!el || el.offsetParent === null || el.hasAttribute('hidden')) return false;
@@ -264,36 +325,84 @@ function unlockLyricsTabHeader(): void {
       tab.classList.add('ytmd-lyrics-tab-unlocked');
       tab.style.pointerEvents = 'auto';
       tab.style.cursor = 'pointer';
+
+      // Supply a dummy endpoint so Polymer's toCommand() never crashes when selecting the tab on songs without native lyrics
+      const dummyEndpoint = {
+        toCommand: () => ({}),
+        browseEndpoint: { browseId: 'FEmusic_lyrics' }
+      };
+      if (!(tab as any).endpoint) {
+        (tab as any).endpoint = dummyEndpoint;
+      }
+      if ((tab as any).data && !(tab as any).data.endpoint) {
+        (tab as any).data.endpoint = dummyEndpoint;
+      }
     }
   });
 }
 
-function ensureLyricsMounted(ctx: PluginContext): void {
-  const tabRenderer = document.querySelector<HTMLElement>(
-    '#tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"], ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"]'
+function isLyricsTabSelected(): boolean {
+  const tabs = document.querySelectorAll<HTMLElement>(
+    '#tabsContent > .tab-header, ytmusic-player-page tp-yt-paper-tab, ytmusic-tab-header-renderer'
   );
-  if (!tabRenderer) {
-    // Not on the lyrics tab right now. If our wrapper is still attached from
-    // before the user switched away, remove it — otherwise it stays a child
-    // of whatever container YouTube Music reuses for the newly-active tab
-    // (Następny/Komentarze/Podobne), bleeding lyrics text onto them.
-    document.querySelectorAll('#ytmd-native-lyrics-wrapper').forEach((w) => w.remove());
-    return;
+  for (const tab of Array.from(tabs)) {
+    const text = tab.textContent?.toLowerCase() || '';
+    if (
+      text.includes('tekst') ||
+      text.includes('lyrics') ||
+      text.includes('paroles') ||
+      text.includes('letras')
+    ) {
+      if (
+        tab.classList.contains('iron-selected') ||
+        tab.getAttribute('aria-selected') === 'true' ||
+        tab.classList.contains('selected')
+      ) {
+        return true;
+      }
+    }
   }
 
-  // Hide default description or unavailable messages inside this tab renderer
-  const defaultDesc = tabRenderer.querySelector('ytmusic-description-shelf-renderer, ytmusic-message-renderer');
-  if (defaultDesc) {
-    (defaultDesc as HTMLElement).style.display = 'none';
+  const tabRenderer = document.querySelector<HTMLElement>(
+    'ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"]'
+  );
+  if (tabRenderer) {
+    if (
+      (tabRenderer.classList.contains('iron-selected') || !tabRenderer.hasAttribute('hidden')) &&
+      tabRenderer.getAttribute('aria-hidden') !== 'true'
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function updateLyricsVisibility(): void {
+  const wrapper = document.getElementById('ytmd-native-lyrics-wrapper');
+  if (!wrapper) return;
+  const isSelected = isLyricsTabSelected();
+  wrapper.style.setProperty('display', isSelected ? 'flex' : 'none', 'important');
+}
+
+function ensureLyricsMounted(ctx: PluginContext): void {
+  const tabRenderer = document.querySelector<HTMLElement>(
+    'ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"]'
+  );
+  if (!tabRenderer) {
+    return;
   }
 
   let wrapper = document.getElementById('ytmd-native-lyrics-wrapper');
   if (!wrapper || !tabRenderer.contains(wrapper)) {
-    if (wrapper) wrapper.remove();
-    wrapper = createEl('div', { id: 'ytmd-native-lyrics-wrapper' });
+    if (!wrapper) {
+      wrapper = createEl('div', { id: 'ytmd-native-lyrics-wrapper' });
+    }
     tabRenderer.appendChild(wrapper);
     renderCurrentLyrics(ctx);
   }
+
+  updateLyricsVisibility();
 }
 
 function renderCurrentLyrics(ctx: PluginContext): void {
@@ -301,6 +410,41 @@ function renderCurrentLyrics(ctx: PluginContext): void {
   if (!wrapper) return;
 
   if (pluginLines && pluginLines.length > 0) {
+    const currentOffset = getTrackSyncOffset(currentSongKey);
+
+    const syncBar = createEl('div', { className: 'ytmd-native-lyrics-sync-bar' });
+    const label = createEl('span', { className: 'ytmd-sync-label', text: 'Sync:' });
+    const minusBtn = createEl('button', { className: 'ytmd-sync-btn', text: '-0.5s', title: 'Shift lyrics 0.5s earlier' });
+    const valDisplay = createEl('span', {
+      className: 'ytmd-sync-val',
+      text: `${currentOffset >= 0 ? '+' : ''}${currentOffset.toFixed(1)}s`
+    });
+    const plusBtn = createEl('button', { className: 'ytmd-sync-btn', text: '+0.5s', title: 'Shift lyrics 0.5s later' });
+    const resetBtn = createEl('button', { className: 'ytmd-sync-btn', text: 'Reset', title: 'Reset offset to 0.0s' });
+
+    minusBtn.addEventListener('click', () => {
+      const newOff = Math.round((getTrackSyncOffset(currentSongKey) - 0.5) * 10) / 10;
+      setTrackSyncOffset(currentSongKey, newOff);
+      valDisplay.textContent = `${newOff >= 0 ? '+' : ''}${newOff.toFixed(1)}s`;
+    });
+
+    plusBtn.addEventListener('click', () => {
+      const newOff = Math.round((getTrackSyncOffset(currentSongKey) + 0.5) * 10) / 10;
+      setTrackSyncOffset(currentSongKey, newOff);
+      valDisplay.textContent = `${newOff >= 0 ? '+' : ''}${newOff.toFixed(1)}s`;
+    });
+
+    resetBtn.addEventListener('click', () => {
+      setTrackSyncOffset(currentSongKey, 0);
+      valDisplay.textContent = '+0.0s';
+    });
+
+    syncBar.appendChild(label);
+    syncBar.appendChild(minusBtn);
+    syncBar.appendChild(valDisplay);
+    syncBar.appendChild(plusBtn);
+    syncBar.appendChild(resetBtn);
+
     wrapper.replaceChildren(
       ...pluginLines.map((line, idx) => {
         const el = createEl('div', {
@@ -310,11 +454,13 @@ function renderCurrentLyrics(ctx: PluginContext): void {
         el.addEventListener('click', () => {
           const video = ctx.getVideoElement();
           if (video) {
-            video.currentTime = line.timeSecs;
+            const curOffset = getTrackSyncOffset(currentSongKey);
+            video.currentTime = Math.max(0, line.timeSecs - curOffset);
           }
         });
         return el;
       }),
+      syncBar,
       createEl('div', {
         className: 'ytmd-native-lyrics-footer',
         text: 'Lyrics provided by LRCLIB'
@@ -342,23 +488,49 @@ function renderCurrentLyrics(ctx: PluginContext): void {
 }
 
 export function parseLrc(lrcContent: string): LrcLine[] {
-  const lines = lrcContent.split('\n');
-  const result: LrcLine[] = [];
-  const regex = /\[(\d{2}):(\d{2})\.(\d{2,3})\](.*)/;
+  const rawLines = lrcContent.split('\n');
+  const lines: LrcLine[] = [];
+  let globalOffsetSecs = 0;
 
-  for (const line of lines) {
-    const match = regex.exec(line.trim());
-    if (match) {
-      const minutes = parseInt(match[1], 10);
-      const seconds = parseInt(match[2], 10);
-      const millis = parseInt(match[3].padEnd(3, '0').slice(0, 3), 10);
-      const timeSecs = minutes * 60 + seconds + millis / 1000;
-      const text = match[4].trim();
+  const timeTagRegex = /\[(\d{1,2}):(\d{2})(?:[.:](\d{2,3}))?\]/g;
+  const offsetRegex = /\[offset:\s*([+-]?\d+)\s*\]/i;
+
+  for (const rawLine of rawLines) {
+    const trimmed = rawLine.trim();
+    if (!trimmed) continue;
+
+    const offsetMatch = offsetRegex.exec(trimmed);
+    if (offsetMatch) {
+      const ms = parseInt(offsetMatch[1], 10);
+      if (!isNaN(ms)) {
+        globalOffsetSecs = ms / 1000;
+      }
+      continue;
+    }
+
+    const timestamps: number[] = [];
+    let match: RegExpExecArray | null;
+    timeTagRegex.lastIndex = 0;
+
+    while ((match = timeTagRegex.exec(trimmed)) !== null) {
+      const mins = parseInt(match[1], 10);
+      const secs = parseInt(match[2], 10);
+      let millis = 0;
+      if (match[3]) {
+        millis = parseInt(match[3].padEnd(3, '0').slice(0, 3), 10);
+      }
+      timestamps.push(mins * 60 + secs + millis / 1000);
+    }
+
+    if (timestamps.length > 0) {
+      const text = trimmed.replace(timeTagRegex, '').trim();
       if (text) {
-        result.push({ timeSecs, text });
+        for (const t of timestamps) {
+          lines.push({ timeSecs: Math.max(0, t - globalOffsetSecs), text });
+        }
       }
     }
   }
 
-  return result.sort((a, b) => a.timeSecs - b.timeSecs);
+  return lines.sort((a, b) => a.timeSecs - b.timeSecs);
 }

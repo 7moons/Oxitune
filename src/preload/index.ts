@@ -1,7 +1,7 @@
 import { PlayerObserver } from './observer';
 import { PlayerBridge } from './bridge';
 import { PluginRegistry } from '../plugins/registry';
-import { AdblockPlugin, setupNetworkHooks } from '../plugins/adblock';
+import { AdblockPlugin } from '../plugins/adblock';
 import { SponsorblockPlugin } from '../plugins/sponsorblock';
 import { LyricsPlugin } from '../plugins/lyrics';
 import { VolumePlugin } from '../plugins/volume';
@@ -405,8 +405,8 @@ async function initYTMD() {
           artist: track.artist,
           album: track.album || null,
           cover_url: track.coverUrl || null,
-          duration_secs: track.durationSecs,
-          current_time_secs: track.currentTimeSecs,
+          duration_secs: Math.round(track.durationSecs || 0),
+          current_time_secs: Math.round(track.currentTimeSecs || 0),
           is_playing: track.isPlaying,
           video_id: track.videoId || null
         }
@@ -428,8 +428,8 @@ async function initYTMD() {
             artist: track.artist,
             album: track.album || null,
             cover_url: track.coverUrl || null,
-            duration_secs: track.durationSecs,
-            current_time_secs: track.currentTimeSecs,
+            duration_secs: Math.round(track.durationSecs || 0),
+            current_time_secs: Math.round(track.currentTimeSecs || 0),
             is_playing: isPlaying,
             video_id: track.videoId || null
           }
@@ -512,7 +512,6 @@ const isTopLevelYTMFrame =
   window.self === window.top && /(^|\.)music\.youtube\.com$/.test(location.hostname);
 
 if (isTopLevelYTMFrame) {
-  setupNetworkHooks();
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => initYTMD());
   } else {
