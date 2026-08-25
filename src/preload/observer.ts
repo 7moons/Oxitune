@@ -41,7 +41,7 @@ export class PlayerObserver {
         video.addEventListener('pause', () => this.handlePlaybackChange(false));
         video.addEventListener('ended', () => this.handlePlaybackChange(false));
         video.addEventListener('timeupdate', () => {
-          const current = Math.floor(video.currentTime);
+          const current = video.currentTime;
           this.onTickCallbacks.forEach((cb) => cb(current));
         });
       }
@@ -64,9 +64,9 @@ export class PlayerObserver {
       this.checkTrackUpdate();
       const video = document.querySelector('video');
       if (video && !video.paused) {
-        this.onTickCallbacks.forEach((cb) => cb(Math.floor(video.currentTime)));
+        this.onTickCallbacks.forEach((cb) => cb(video.currentTime));
       }
-    }, 1000);
+    }, 250);
   }
 
   private extractTrackInfo(): TrackInfo | null {
