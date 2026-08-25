@@ -245,7 +245,7 @@ pub fn run() {
             });
 
             // Build main window with embedded initialization script
-            let _main_win = WebviewWindowBuilder::new(
+            let mut main_builder = WebviewWindowBuilder::new(
                 app,
                 "main",
                 WebviewUrl::External("https://music.youtube.com".parse().expect("valid youtube music url")),
@@ -254,8 +254,13 @@ pub fn run() {
             .inner_size(1280.0, 820.0)
             .min_inner_size(480.0, 360.0)
             .resizable(true)
-            .initialization_script(include_str!("../inject/preload.js"))
-            .build()?;
+            .initialization_script(include_str!("../inject/preload.js"));
+
+            if let Some(icon) = app.default_window_icon() {
+                main_builder = main_builder.icon(icon.clone())?;
+            }
+
+            let _main_win = main_builder.build()?;
 
             Ok(())
         })
