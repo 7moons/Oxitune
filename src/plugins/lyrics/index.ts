@@ -27,12 +27,12 @@ export const LyricsPlugin: YTMDPlugin = {
     const style = document.createElement('style');
     style.id = 'ytmd-native-lyrics-styles';
     style.textContent = `
-      /* Force enable TEKST / LYRICS tab header (2nd tab) */
-      #tabsContent > .tab-header:nth-of-type(2)[disabled],
-      #tabsContent > .tab-header:nth-of-type(2)[aria-disabled="true"],
-      tp-yt-paper-tab:nth-of-type(2)[disabled],
-      tp-yt-paper-tab:nth-of-type(2)[aria-disabled="true"],
-      ytmusic-tab-header-renderer:nth-of-type(2)[disabled] {
+      /* Scoped to tabs unlockLyricsTabHeader() has explicitly matched by
+         label — NOT blind tab position (nth-of-type), since a layout where
+         "Tekst"/"Lyrics" isn't the 2nd tab would otherwise force
+         pointer-events:auto on some unrelated tab. */
+      .ytmd-lyrics-tab-unlocked[disabled],
+      .ytmd-lyrics-tab-unlocked[aria-disabled="true"] {
         pointer-events: auto !important;
         cursor: pointer !important;
         opacity: 1 !important;
@@ -111,8 +111,29 @@ export const LyricsPlugin: YTMDPlugin = {
     const pollInterval = window.setInterval(checkTab, 600);
     checkTab();
 
+    // YouTube Music's own tab-switch machinery can throw when its backend
+    // request for the newly-selected tab's content fails (seen both as a
+    // null-endpoint dereference and as a MutationObserver/Polymer render
+    // race) — sometimes caused by YouTube's own API returning errors for
+    // reasons unrelated to us. We can't prevent that from inside YT's own
+    // code, but we don't have to wait up to 600ms to recover from it either:
+    // re-run the mount/unlock immediately so the panel self-heals within the
+    // same tick instead of sitting blank until the next poll.
+    const onWindowError = (e: ErrorEvent) => {
+      const msg = e.message || '';
+      const looksLikeYtTabCrash =
+        msg.includes('toCommand') ||
+        msg.includes('no longer a child of this node') ||
+        (typeof e.error?.stack === 'string' && e.error.stack.includes('onCurrentTabIndexChanged'));
+      if (looksLikeYtTabCrash) {
+        checkTab();
+      }
+    };
+    window.addEventListener('error', onWindowError);
+
     (this as any)._cleanup = () => {
       clearInterval(pollInterval);
+      window.removeEventListener('error', onWindowError);
       style.remove();
       const wrappers = document.querySelectorAll('#ytmd-native-lyrics-wrapper');
       wrappers.forEach((w) => w.remove());
@@ -197,7 +218,14 @@ export const LyricsPlugin: YTMDPlugin = {
         if (lyricsTab && isElementVisible(lyricsTab)) {
           const activeEl = lineEls[activeIdx];
           if (activeEl) {
-            activeEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            // 'nearest' (not 'center'): scrollIntoView walks up to the
+            // nearest scrollable ancestor, which — since our wrapper has no
+            // bounded height of its own — is the whole right-side panel.
+            // 'center' would re-center on every line change, dragging the
+            // Następny/Tekst/Komentarze/Podobne tab strip out of view;
+            // 'nearest' only nudges the scroll when the line isn't already
+            // visible.
+            activeEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
           }
         }
       }
@@ -221,10 +249,9 @@ function unlockLyricsTabHeader(): void {
   const tabs = document.querySelectorAll<HTMLElement>(
     '#tabsContent > .tab-header, ytmusic-player-page tp-yt-paper-tab, ytmusic-tab-header-renderer'
   );
-  tabs.forEach((tab, idx) => {
+  tabs.forEach((tab) => {
     const text = tab.textContent?.toLowerCase() || '';
     if (
-      idx === 1 ||
       text.includes('tekst') ||
       text.includes('lyrics') ||
       text.includes('paroles') ||
@@ -234,6 +261,7 @@ function unlockLyricsTabHeader(): void {
       tab.removeAttribute('disabled');
       tab.removeAttribute('aria-disabled');
       tab.classList.remove('disabled');
+      tab.classList.add('ytmd-lyrics-tab-unlocked');
       tab.style.pointerEvents = 'auto';
       tab.style.cursor = 'pointer';
     }
@@ -244,7 +272,14 @@ function ensureLyricsMounted(ctx: PluginContext): void {
   const tabRenderer = document.querySelector<HTMLElement>(
     '#tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"], ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"]'
   );
-  if (!tabRenderer) return;
+  if (!tabRenderer) {
+    // Not on the lyrics tab right now. If our wrapper is still attached from
+    // before the user switched away, remove it — otherwise it stays a child
+    // of whatever container YouTube Music reuses for the newly-active tab
+    // (Następny/Komentarze/Podobne), bleeding lyrics text onto them.
+    document.querySelectorAll('#ytmd-native-lyrics-wrapper').forEach((w) => w.remove());
+    return;
+  }
 
   // Hide default description or unavailable messages inside this tab renderer
   const defaultDesc = tabRenderer.querySelector('ytmusic-description-shelf-renderer, ytmusic-message-renderer');

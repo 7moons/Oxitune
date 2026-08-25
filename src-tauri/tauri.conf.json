@@ -68,10 +68,6 @@
     ],
     "security": {
       "csp": null
-    },
-    "trayIcon": {
-      "iconPath": "icons/icon.png",
-      "tooltip": "YouTube Music Desktop"
     }
   },
   "bundle": {

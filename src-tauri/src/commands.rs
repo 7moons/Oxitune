@@ -115,12 +115,54 @@ fn clean_track_name(title: &str) -> String {
     }
 }
 
+/// Lyric timing only makes sense for the specific recording it was
+/// transcribed from — a radio edit, an extended mix, and a live version of
+/// "the same" title+artist can each have completely different section
+/// lengths. This is LRCLIB's own tolerance for treating a duration as a
+/// match.
+const DURATION_TOLERANCE_SECS: f64 = 3.0;
+
+/// Picks the best candidate from a LRCLIB search response: closest duration
+/// match to the actual video first (required whenever we know the video's
+/// duration, so we never hand back lyrics timed for a different recording —
+/// the "starts fine, drifts out of sync as it plays" bug), then prefers a
+/// candidate with synced (time-tagged) lyrics over plain text.
+fn pick_best_match(items: &[serde_json::Value], target_duration: Option<f64>) -> Option<serde_json::Value> {
+    let within_tolerance = |item: &&serde_json::Value| -> bool {
+        let Some(target) = target_duration else {
+            return true;
+        };
+        match item.get("duration").and_then(|d| d.as_f64()) {
+            Some(d) => (d - target).abs() <= DURATION_TOLERANCE_SECS,
+            None => false,
+        }
+    };
+
+    let candidates: Vec<&serde_json::Value> = items.iter().filter(within_tolerance).collect();
+    if candidates.is_empty() {
+        return None;
+    }
+
+    let has_synced = |it: &&serde_json::Value| {
+        it.get("syncedLyrics")
+            .and_then(|s| s.as_str())
+            .map(|s| !s.is_empty())
+            .unwrap_or(false)
+    };
+
+    candidates
+        .iter()
+        .find(|it| has_synced(it))
+        .or_else(|| candidates.first())
+        .map(|it| (*it).clone())
+}
+
 #[tauri::command]
 pub async fn fetch_lyrics(
     artist: String,
     title: String,
     album_name: Option<String>,
-    _duration: Option<f64>,
+    duration: Option<f64>,
 ) -> Result<serde_json::Value, String> {
     let client = reqwest::Client::builder()
         .user_agent("YTMD-Desktop/1.0 (https://github.com/dachluczaj/ytmd)")
@@ -130,7 +172,11 @@ pub async fn fetch_lyrics(
     let clean_title = clean_track_name(&title);
     let clean_artist = artist.trim();
 
-    // 1. Try exact get without rigid duration filter
+    // 1. Try the exact-match endpoint, including duration — LRCLIB uses it
+    // server-side to disambiguate when multiple entries share the same
+    // artist/track/album. `_duration` was previously ignored entirely,
+    // which meant this endpoint (and every fallback below) could just as
+    // easily hand back a different recording's timing data.
     let mut get_url = format!(
         "https://lrclib.net/api/get?artist_name={}&track_name={}",
         urlencoding::encode(clean_artist),
@@ -140,6 +186,9 @@ pub async fn fetch_lyrics(
         if !album.is_empty() {
             get_url.push_str(&format!("&album_name={}", urlencoding::encode(album)));
         }
+    }
+    if let Some(d) = duration {
+        get_url.push_str(&format!("&duration={}", d.round() as i64));
     }
 
     if let Ok(res) = client.get(&get_url).send().await {
@@ -152,6 +201,11 @@ pub async fn fetch_lyrics(
         }
     }
 
+    // The /api/search endpoints don't accept a duration filter server-side —
+    // they return every title+artist match regardless of recording length —
+    // so every fallback below scores candidates by duration itself via
+    // pick_best_match() rather than trusting whichever result came first.
+
     // 2. Try structured search API
     let search_url = format!(
         "https://lrclib.net/api/search?track_name={}&artist_name={}",
@@ -162,12 +216,8 @@ pub async fn fetch_lyrics(
         if search_res.status().is_success() {
             if let Ok(items) = search_res.json::<serde_json::Value>().await {
                 if let Some(arr) = items.as_array() {
-                    // Prefer item with synced lyrics first
-                    if let Some(synced) = arr.iter().find(|it| it.get("syncedLyrics").and_then(|s| s.as_str()).map(|s| !s.is_empty()).unwrap_or(false)) {
-                        return Ok(synced.clone());
-                    }
-                    if let Some(first) = arr.first() {
-                        return Ok(first.clone());
+                    if let Some(best) = pick_best_match(arr, duration) {
+                        return Ok(best);
                     }
                 }
             }
@@ -184,11 +234,8 @@ pub async fn fetch_lyrics(
         if broad_res.status().is_success() {
             if let Ok(items) = broad_res.json::<serde_json::Value>().await {
                 if let Some(arr) = items.as_array() {
-                    if let Some(synced) = arr.iter().find(|it| it.get("syncedLyrics").and_then(|s| s.as_str()).map(|s| !s.is_empty()).unwrap_or(false)) {
-                        return Ok(synced.clone());
-                    }
-                    if let Some(first) = arr.first() {
-                        return Ok(first.clone());
+                    if let Some(best) = pick_best_match(arr, duration) {
+                        return Ok(best);
                     }
                 }
             }
@@ -204,11 +251,8 @@ pub async fn fetch_lyrics(
         if raw_res.status().is_success() {
             if let Ok(items) = raw_res.json::<serde_json::Value>().await {
                 if let Some(arr) = items.as_array() {
-                    if let Some(synced) = arr.iter().find(|it| it.get("syncedLyrics").and_then(|s| s.as_str()).map(|s| !s.is_empty()).unwrap_or(false)) {
-                        return Ok(synced.clone());
-                    }
-                    if let Some(first) = arr.first() {
-                        return Ok(first.clone());
+                    if let Some(best) = pick_best_match(arr, duration) {
+                        return Ok(best);
                     }
                 }
             }

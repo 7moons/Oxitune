@@ -8,6 +8,11 @@ use tokio::sync::mpsc;
 
 const DISCORD_CLIENT_ID: &str = "1343516590254948402"; // YouTube Music Desktop client ID
 
+#[cfg(unix)]
+type DiscordStream = tokio::net::UnixStream;
+#[cfg(windows)]
+type DiscordStream = tokio::net::windows::named_pipe::NamedPipeClient;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrackPayload {
     pub title: String,
@@ -39,7 +44,7 @@ impl DiscordRpcHandle {
         let running_clone = running.clone();
 
         tauri::async_runtime::spawn(async move {
-            let mut stream: Option<tokio::net::UnixStream> = None;
+            let mut stream: Option<DiscordStream> = None;
 
             while running_clone.load(Ordering::Relaxed) {
                 if let Some(cmd) = rx.recv().await {
@@ -81,26 +86,47 @@ impl DiscordRpcHandle {
     }
 }
 
-async fn connect_discord() -> Option<tokio::net::UnixStream> {
-    #[cfg(unix)]
-    {
-        let runtime_dir = std::env::var("XDG_RUNTIME_DIR")
-            .unwrap_or_else(|_| format!("/run/user/{}", libc_getuid()));
+#[cfg(unix)]
+async fn connect_discord() -> Option<DiscordStream> {
+    let runtime_dir = std::env::var("XDG_RUNTIME_DIR")
+        .unwrap_or_else(|_| format!("/run/user/{}", libc_getuid()));
 
-        for i in 0..10 {
-            let path = format!("{}/discord-ipc-{}", runtime_dir, i);
-            if let Ok(mut stream) = tokio::net::UnixStream::connect(&path).await {
-                // Handshake with client ID
-                let handshake = json!({
-                    "v": 1,
-                    "client_id": DISCORD_CLIENT_ID
-                });
-                if send_frame(&mut stream, 0, &handshake.to_string()).await.is_ok() {
-                    let mut buf = vec![0u8; 1024];
-                    if let Ok(n) = stream.read(&mut buf).await {
-                        if n > 0 {
-                            return Some(stream);
-                        }
+    for i in 0..10 {
+        let path = format!("{}/discord-ipc-{}", runtime_dir, i);
+        if let Ok(mut stream) = DiscordStream::connect(&path).await {
+            let handshake = json!({
+                "v": 1,
+                "client_id": DISCORD_CLIENT_ID
+            });
+            if send_frame(&mut stream, 0, &handshake.to_string()).await.is_ok() {
+                let mut buf = vec![0u8; 1024];
+                if let Ok(n) = stream.read(&mut buf).await {
+                    if n > 0 {
+                        return Some(stream);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+#[cfg(windows)]
+async fn connect_discord() -> Option<DiscordStream> {
+    use tokio::net::windows::named_pipe::ClientOptions;
+
+    for i in 0..10 {
+        let path = format!(r"\\.\pipe\discord-ipc-{}", i);
+        if let Ok(mut stream) = ClientOptions::new().open(&path) {
+            let handshake = json!({
+                "v": 1,
+                "client_id": DISCORD_CLIENT_ID
+            });
+            if send_frame(&mut stream, 0, &handshake.to_string()).await.is_ok() {
+                let mut buf = vec![0u8; 1024];
+                if let Ok(n) = stream.read(&mut buf).await {
+                    if n > 0 {
+                        return Some(stream);
                     }
                 }
             }
@@ -114,7 +140,7 @@ fn libc_getuid() -> u32 {
     1000 // Fallback UID
 }
 
-async fn send_frame(stream: &mut tokio::net::UnixStream, opcode: u32, payload: &str) -> std::io::Result<()> {
+async fn send_frame(stream: &mut DiscordStream, opcode: u32, payload: &str) -> std::io::Result<()> {
     let payload_bytes = payload.as_bytes();
     let length = payload_bytes.len() as u32;
 
@@ -129,7 +155,7 @@ async fn send_frame(stream: &mut tokio::net::UnixStream, opcode: u32, payload: &
 }
 
 async fn send_activity(
-    stream: &mut tokio::net::UnixStream,
+    stream: &mut DiscordStream,
     track: Option<&TrackPayload>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let nonce = uuid_nonce();

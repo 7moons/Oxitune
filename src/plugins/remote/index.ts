@@ -20,112 +20,121 @@ export const RemotePlugin: YTMDPlugin = {
   }
 };
 
+/**
+ * The modal is a full-viewport position:fixed overlay at max z-index, which is
+ * exactly the shape of element most prone to Chromium/WebView2 compositor bugs
+ * around backdrop-filter — a stuck layer can silently eat clicks across the
+ * whole app while the window itself stays perfectly responsive (draggable,
+ * resizable). To make that class of bug impossible rather than just unlikely,
+ * this never toggles display on a cached element: it removes the overlay from
+ * the DOM entirely on close and rebuilds it fresh on open, and skips
+ * backdrop-filter altogether (a plain translucent background reads fine here).
+ */
 export async function showQrModal(ctx: PluginContext) {
-  let modal = document.getElementById('ytmd-remote-modal');
-  if (!modal) {
-    modal = createEl('div', {
-      id: 'ytmd-remote-modal',
-      style: `
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100vw;
-        height: 100vh;
-        background: rgba(0,0,0,0.8);
-        z-index: 2147483647;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        backdrop-filter: blur(12px);
-      `
-    });
+  document.getElementById('ytmd-remote-modal')?.remove();
 
-    const card = createEl('div', {
-      style: `
-        background: #18181b;
-        border: 1px solid #27272a;
-        border-radius: 14px;
-        padding: 24px;
-        max-width: 360px;
-        width: 90%;
-        text-align: center;
-        color: #fafafa;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        box-shadow: 0 24px 48px rgba(0,0,0,0.85);
-      `
-    });
+  const modal = createEl('div', {
+    id: 'ytmd-remote-modal',
+    style: `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(0,0,0,0.85);
+      z-index: 2147483647;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    `
+  });
 
-    const title = createEl('h3', {
-      text: 'Mobile Web Remote',
-      style: 'margin: 0 0 6px 0; font-size: 18px; font-weight: 700;'
-    });
+  const closeModal = () => {
+    document.removeEventListener('keydown', onKeydown);
+    modal.remove();
+  };
 
-    const desc = createEl('p', {
-      text: 'Scan with your phone camera on the same Wi-Fi network:',
-      style: 'font-size: 13px; color: #a1a1aa; margin: 0 0 16px 0;'
-    });
+  const onKeydown = (e: KeyboardEvent) => {
+    if (e.key === 'Escape') closeModal();
+  };
+  document.addEventListener('keydown', onKeydown);
 
-    const qrContainer = createEl('div', {
-      id: 'ytmd-qr-container',
-      style: `
-        background: #ffffff;
-        padding: 14px;
-        border-radius: 10px;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        margin-bottom: 14px;
-        min-width: 180px;
-        min-height: 180px;
-      `
-    });
+  const card = createEl('div', {
+    style: `
+      background: #18181b;
+      border: 1px solid #27272a;
+      border-radius: 14px;
+      padding: 24px;
+      max-width: 360px;
+      width: 90%;
+      text-align: center;
+      color: #fafafa;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      box-shadow: 0 24px 48px rgba(0,0,0,0.85);
+    `
+  });
 
-    const loadingText = createEl('span', {
-      text: 'Generating QR code...',
-      style: 'color: #52525b; font-size: 12px; font-weight: 500;'
-    });
-    qrContainer.appendChild(loadingText);
+  const title = createEl('h3', {
+    text: 'Mobile Web Remote',
+    style: 'margin: 0 0 6px 0; font-size: 18px; font-weight: 700;'
+  });
 
-    const urlContainer = createEl('div', {
-      id: 'ytmd-remote-url',
-      style: 'font-family: monospace; font-size: 13px; color: #38bdf8; margin-bottom: 20px; word-break: break-all; font-weight: 600;'
-    });
+  const desc = createEl('p', {
+    text: 'Scan with your phone camera on the same Wi-Fi network:',
+    style: 'font-size: 13px; color: #a1a1aa; margin: 0 0 16px 0;'
+  });
 
-    const closeBtn = createEl('button', {
-      id: 'ytmd-remote-close-btn',
-      text: 'Close',
-      style: 'background: #27272a; color: #fff; border: 1px solid #3f3f46; border-radius: 8px; padding: 8px 24px; font-weight: 600; cursor: pointer; font-size: 13px;'
-    });
+  const qrContainer = createEl('div', {
+    id: 'ytmd-qr-container',
+    style: `
+      background: #ffffff;
+      padding: 14px;
+      border-radius: 10px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 14px;
+      min-width: 180px;
+      min-height: 180px;
+    `
+  });
 
-    const modalEl = modal;
-    closeBtn.addEventListener('click', () => {
-      modalEl.style.display = 'none';
-    });
+  const loadingText = createEl('span', {
+    text: 'Generating QR code...',
+    style: 'color: #52525b; font-size: 12px; font-weight: 500;'
+  });
+  qrContainer.appendChild(loadingText);
 
-    modal.addEventListener('click', (e) => {
-      if (e.target === modalEl) {
-        modalEl.style.display = 'none';
-      }
-    });
+  const urlContainer = createEl('div', {
+    id: 'ytmd-remote-url',
+    style: 'font-family: monospace; font-size: 13px; color: #38bdf8; margin-bottom: 20px; word-break: break-all; font-weight: 600;'
+  });
 
-    card.appendChild(title);
-    card.appendChild(desc);
-    card.appendChild(qrContainer);
-    card.appendChild(urlContainer);
-    card.appendChild(closeBtn);
+  const closeBtn = createEl('button', {
+    id: 'ytmd-remote-close-btn',
+    text: 'Close',
+    style: 'background: #27272a; color: #fff; border: 1px solid #3f3f46; border-radius: 8px; padding: 8px 24px; font-weight: 600; cursor: pointer; font-size: 13px;'
+  });
+  closeBtn.addEventListener('click', closeModal);
 
-    modal.appendChild(card);
-    document.body.appendChild(modal);
-  }
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) closeModal();
+  });
 
-  modal.style.display = 'flex';
+  card.appendChild(title);
+  card.appendChild(desc);
+  card.appendChild(qrContainer);
+  card.appendChild(urlContainer);
+  card.appendChild(closeBtn);
+  modal.appendChild(card);
+  document.body.appendChild(modal);
 
   try {
     const info = (await ctx.invoke('get_remote_info')) as RemoteInfo | null;
-    const qrContainer = document.getElementById('ytmd-qr-container');
-    const urlContainer = document.getElementById('ytmd-remote-url');
+    // The modal may have been closed while this was in flight — don't resurrect it.
+    if (!modal.isConnected) return;
 
-    if (info && info.qr_svg && qrContainer) {
+    if (info && info.qr_svg) {
       const img = createEl('img');
       img.src = `data:image/svg+xml;utf8,${encodeURIComponent(info.qr_svg)}`;
       img.width = 180;
@@ -133,13 +142,13 @@ export async function showQrModal(ctx: PluginContext) {
       img.style.display = 'block';
       img.alt = 'Mobile Remote QR Code';
       qrContainer.replaceChildren(img);
-    } else if (qrContainer) {
+    } else {
       qrContainer.replaceChildren(
         createEl('span', { text: 'Remote server starting...', style: 'color: #71717a; font-size: 12px;' })
       );
     }
 
-    if (info && info.url && urlContainer) {
+    if (info && info.url) {
       urlContainer.textContent = info.url;
     }
   } catch (e) {

@@ -1,7 +1,7 @@
 import { PlayerObserver } from './observer';
 import { PlayerBridge } from './bridge';
 import { PluginRegistry } from '../plugins/registry';
-import { AdblockPlugin } from '../plugins/adblock';
+import { AdblockPlugin, setupNetworkHooks } from '../plugins/adblock';
 import { SponsorblockPlugin } from '../plugins/sponsorblock';
 import { LyricsPlugin } from '../plugins/lyrics';
 import { VolumePlugin } from '../plugins/volume';
@@ -500,9 +500,22 @@ async function initYTMD() {
   console.log('[YTMD] Integration successfully activated.');
 }
 
-// Start as soon as possible
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => initYTMD());
-} else {
-  initYTMD();
+// Tauri's initialization_script runs in every frame of the webview, including
+// third-party iframes YouTube Music itself loads (ad creatives served from
+// tpc.googlesyndication.com and similar). Bootstrapping the full plugin stack
+// there wastes resources, spams "event.listen not allowed" errors (those
+// origins aren't in our Tauri capability allowlist — by design, since they're
+// untrusted), and runs a duplicate copy of every setInterval polling loop
+// (adblock, lyrics, downloader, burger menu, DSP...) per ad iframe. Only the
+// top-level music.youtube.com frame should ever run this.
+const isTopLevelYTMFrame =
+  window.self === window.top && /(^|\.)music\.youtube\.com$/.test(location.hostname);
+
+if (isTopLevelYTMFrame) {
+  setupNetworkHooks();
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => initYTMD());
+  } else {
+    initYTMD();
+  }
 }

@@ -2,7 +2,7 @@ use parking_lot::Mutex;
 use souvlaki::{MediaControlEvent, MediaControls, MediaMetadata, MediaPlayback, PlatformConfig};
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, WebviewWindow};
 
 use crate::discord_rpc::TrackPayload;
 
@@ -11,8 +11,14 @@ pub struct MprisManager {
 }
 
 impl MprisManager {
-    pub fn new(app_handle: AppHandle) -> Self {
-        let hwnd = None; // For Windows/macOS hwnd/window pointer if needed
+    pub fn new(app_handle: AppHandle, main_window: &WebviewWindow) -> Self {
+        #[cfg(target_os = "windows")]
+        let hwnd = main_window.hwnd().ok().map(|h| h.0);
+        #[cfg(not(target_os = "windows"))]
+        let hwnd = {
+            let _ = main_window;
+            None
+        };
 
         let config = PlatformConfig {
             dbus_name: "ytmd",

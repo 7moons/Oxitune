@@ -4,6 +4,20 @@ export interface ThemePreset {
   css: string;
 }
 
+interface ThemeColors {
+  id: string;
+  name: string;
+  /** Root page background (browse/search/library pages, main canvas). */
+  background: string;
+  /** Raised surfaces: nav bar, player bar, sidebar, menus, dialogs, chips, solid buttons. */
+  surface: string;
+  /** Hairline borders between surfaces. */
+  border: string;
+  /** Links, focus rings, slider fill, "call to action" buttons. */
+  accent: string;
+  accentHover: string;
+}
+
 const COMMON_PROTECT_ARTWORK = `
   /* Protect album artwork, thumbnails and player cover images from background overrides */
   yt-img-shadow,
@@ -29,183 +43,141 @@ const COMMON_PROTECT_ARTWORK = `
   }
 `;
 
-export const THEME_PRESETS: Record<string, ThemePreset> = {
-  default: {
-    id: 'default',
-    name: 'Modern Dark',
-    css: `
-      /* Clean Dark Minimal */
-      ytmusic-nav-bar { background: rgba(18, 18, 21, 0.94) !important; border-bottom: 1px solid #27272a !important; }
-      ytmusic-player-bar { background: rgba(18, 18, 21, 0.96) !important; border-top: 1px solid #27272a !important; }
-      ${COMMON_PROTECT_ARTWORK}
-    `
-  },
-  oled: {
-    id: 'oled',
-    name: 'Pure OLED Black',
-    css: `
-      html, body, ytmusic-app, ytmusic-app-layout, #browse-page, ytmusic-browse-response, ytmusic-search-page, ytmusic-tab-renderer {
-        background-color: #000000 !important;
+/**
+ * YouTube Music themes almost its entire UI — nav bar, cards, chips, menus,
+ * dialogs, buttons, links — off a shared set of CSS custom properties
+ * (`--ytmusic-*` / `--yt-sys-color-baseline--*`). Earlier versions of these
+ * presets only overrode background-color on a handful of top-level tag
+ * selectors (nav bar, player bar, sidebar), which left every menu, dialog,
+ * chip and accent-colored control in YouTube's native colors — the "some
+ * elements stay their original color, looks disjointed" bug. Overriding the
+ * custom properties instead reskins those components too, since they read
+ * from the same variables everywhere (including inside shadow DOM, which
+ * custom properties cross but plain selectors from an injected stylesheet
+ * often can't reach).
+ */
+function buildThemeCss(c: ThemeColors): string {
+  return `
+      html {
+        --ytmusic-background: ${c.background} !important;
+        --yt-sys-color-baseline--base-background: ${c.background} !important;
+
+        --ytmusic-brand-background-solid: ${c.surface} !important;
+        --yt-sys-color-baseline--raised-background: ${c.surface} !important;
+        --yt-sys-color-baseline--menu-background: ${c.surface} !important;
+        --paper-menu-background-color: ${c.surface} !important;
+        --paper-dialog-background-color: ${c.surface} !important;
+        --yt-live-chat-dialog-background-color: ${c.surface} !important;
+        --ytmusic-badge-chip-background: ${c.surface} !important;
+        --ytmusic-explore-chip-background: ${c.surface} !important;
+
+        --ytmusic-call-to-action: ${c.accent} !important;
+        --yt-sys-color-baseline--call-to-action: ${c.accent} !important;
+        --yt-sys-color-baseline--call-to-action-inverse: ${c.accent} !important;
+        --yt-sys-color-baseline--overlay-call-to-action: ${c.accent} !important;
+        --yt-sys-color-baseline--call-to-action-hover: ${c.accentHover} !important;
+        --yt-sys-color-baseline--overlay-call-to-action-hover: ${c.accentHover} !important;
+        --paper-input-container-focus-color: ${c.accent} !important;
+      }
+
+      /* Only the true root canvas is forced opaque here. ytmusic-app-layout,
+         #browse-page and ytmusic-browse-response are transparent by default
+         in YouTube Music's own CSS (they already show html/body through), and
+         forcing them opaque here would fight the ambient lighting plugin's
+         own transparency rule for those same selectors and block the glow. */
+      html, body {
+        background-color: ${c.background} !important;
       }
       ytmusic-nav-bar, ytmusic-player-bar, ytmusic-player-page {
-        background: #000000 !important;
-        border-color: #1a1a1a !important;
+        background: ${c.surface} !important;
+        border-color: ${c.border} !important;
       }
       ytmusic-guide-renderer {
-        background-color: #000000 !important;
-        border-right: 1px solid #141414 !important;
+        background-color: ${c.background} !important;
+        border-right: 1px solid ${c.border} !important;
+      }
+      tp-yt-paper-slider #primaryProgress.tp-yt-paper-slider {
+        background-color: ${c.accent} !important;
       }
       ${COMMON_PROTECT_ARTWORK}
-    `
+    `;
+}
+
+const THEME_COLORS: ThemeColors[] = [
+  {
+    id: 'default',
+    name: 'Modern Dark',
+    background: '#0f0f0f',
+    surface: '#121215',
+    border: '#27272a',
+    accent: '#3ea6ff',
+    accentHover: '#65b8ff'
   },
-  nord: {
+  {
+    id: 'oled',
+    name: 'Pure OLED Black',
+    background: '#000000',
+    surface: '#0a0a0a',
+    border: '#1a1a1a',
+    accent: '#3ea6ff',
+    accentHover: '#65b8ff'
+  },
+  {
     id: 'nord',
     name: 'Nord Arctic',
-    css: `
-      html, body, ytmusic-app, ytmusic-app-layout, #browse-page, ytmusic-browse-response, ytmusic-search-page, ytmusic-tab-renderer {
-        background-color: #2e3440 !important;
-      }
-      ytmusic-nav-bar {
-        background: #3b4252 !important;
-        border-bottom: 1px solid #434c5e !important;
-      }
-      ytmusic-player-bar {
-        background: #3b4252 !important;
-        border-top: 1px solid #434c5e !important;
-      }
-      ytmusic-guide-renderer {
-        background-color: #2e3440 !important;
-        border-right: 1px solid #3b4252 !important;
-      }
-      tp-yt-paper-slider #primaryProgress.tp-yt-paper-slider {
-        background-color: #88c0d0 !important;
-      }
-      ${COMMON_PROTECT_ARTWORK}
-    `
+    background: '#2e3440',
+    surface: '#3b4252',
+    border: '#434c5e',
+    accent: '#88c0d0',
+    accentHover: '#a3d0dd'
   },
-  catppuccin: {
+  {
     id: 'catppuccin',
     name: 'Catppuccin Mocha',
-    css: `
-      html, body, ytmusic-app, ytmusic-app-layout, #browse-page, ytmusic-browse-response, ytmusic-search-page, ytmusic-tab-renderer {
-        background-color: #1e1e2e !important;
-      }
-      ytmusic-nav-bar {
-        background: #181825 !important;
-        border-bottom: 1px solid #313244 !important;
-      }
-      ytmusic-player-bar {
-        background: #181825 !important;
-        border-top: 1px solid #313244 !important;
-      }
-      ytmusic-guide-renderer {
-        background-color: #1e1e2e !important;
-        border-right: 1px solid #313244 !important;
-      }
-      tp-yt-paper-slider #primaryProgress.tp-yt-paper-slider {
-        background-color: #cba6f7 !important;
-      }
-      ${COMMON_PROTECT_ARTWORK}
-    `
+    background: '#1e1e2e',
+    surface: '#181825',
+    border: '#313244',
+    accent: '#cba6f7',
+    accentHover: '#dbc2fa'
   },
-  gruvbox: {
+  {
     id: 'gruvbox',
     name: 'Gruvbox Dark',
-    css: `
-      html, body, ytmusic-app, ytmusic-app-layout, #browse-page, ytmusic-browse-response, ytmusic-search-page, ytmusic-tab-renderer {
-        background-color: #282828 !important;
-      }
-      ytmusic-nav-bar {
-        background: #1d2021 !important;
-        border-bottom: 1px solid #3c3836 !important;
-      }
-      ytmusic-player-bar {
-        background: #1d2021 !important;
-        border-top: 1px solid #3c3836 !important;
-      }
-      ytmusic-guide-renderer {
-        background-color: #282828 !important;
-        border-right: 1px solid #3c3836 !important;
-      }
-      tp-yt-paper-slider #primaryProgress.tp-yt-paper-slider {
-        background-color: #fe8019 !important;
-      }
-      ${COMMON_PROTECT_ARTWORK}
-    `
+    background: '#282828',
+    surface: '#1d2021',
+    border: '#3c3836',
+    accent: '#fe8019',
+    accentHover: '#fe9a4d'
   },
-  tokyo_night: {
+  {
     id: 'tokyo_night',
     name: 'Tokyo Night',
-    css: `
-      html, body, ytmusic-app, ytmusic-app-layout, #browse-page, ytmusic-browse-response, ytmusic-search-page, ytmusic-tab-renderer {
-        background-color: #1a1b26 !important;
-      }
-      ytmusic-nav-bar {
-        background: #16161e !important;
-        border-bottom: 1px solid #292e42 !important;
-      }
-      ytmusic-player-bar {
-        background: #16161e !important;
-        border-top: 1px solid #292e42 !important;
-      }
-      ytmusic-guide-renderer {
-        background-color: #1a1b26 !important;
-        border-right: 1px solid #292e42 !important;
-      }
-      tp-yt-paper-slider #primaryProgress.tp-yt-paper-slider {
-        background-color: #7aa2f7 !important;
-      }
-      ${COMMON_PROTECT_ARTWORK}
-    `
+    background: '#1a1b26',
+    surface: '#16161e',
+    border: '#292e42',
+    accent: '#7aa2f7',
+    accentHover: '#9ab8f9'
   },
-  dracula: {
+  {
     id: 'dracula',
     name: 'Dracula',
-    css: `
-      html, body, ytmusic-app, ytmusic-app-layout, #browse-page, ytmusic-browse-response, ytmusic-search-page, ytmusic-tab-renderer {
-        background-color: #282a36 !important;
-      }
-      ytmusic-nav-bar {
-        background: #21222c !important;
-        border-bottom: 1px solid #44475a !important;
-      }
-      ytmusic-player-bar {
-        background: #21222c !important;
-        border-top: 1px solid #44475a !important;
-      }
-      ytmusic-guide-renderer {
-        background-color: #282a36 !important;
-        border-right: 1px solid #44475a !important;
-      }
-      tp-yt-paper-slider #primaryProgress.tp-yt-paper-slider {
-        background-color: #bd93f9 !important;
-      }
-      ${COMMON_PROTECT_ARTWORK}
-    `
+    background: '#282a36',
+    surface: '#21222c',
+    border: '#44475a',
+    accent: '#bd93f9',
+    accentHover: '#cfb0fb'
   },
-  rose_pine: {
+  {
     id: 'rose_pine',
     name: 'Rosé Pine',
-    css: `
-      html, body, ytmusic-app, ytmusic-app-layout, #browse-page, ytmusic-browse-response, ytmusic-search-page, ytmusic-tab-renderer {
-        background-color: #191724 !important;
-      }
-      ytmusic-nav-bar {
-        background: #1f1d2e !important;
-        border-bottom: 1px solid #26233a !important;
-      }
-      ytmusic-player-bar {
-        background: #1f1d2e !important;
-        border-top: 1px solid #26233a !important;
-      }
-      ytmusic-guide-renderer {
-        background-color: #191724 !important;
-        border-right: 1px solid #26233a !important;
-      }
-      tp-yt-paper-slider #primaryProgress.tp-yt-paper-slider {
-        background-color: #eb6f92 !important;
-      }
-      ${COMMON_PROTECT_ARTWORK}
-    `
+    background: '#191724',
+    surface: '#1f1d2e',
+    border: '#26233a',
+    accent: '#eb6f92',
+    accentHover: '#f08daa'
   }
-};
+];
+
+export const THEME_PRESETS: Record<string, ThemePreset> = Object.fromEntries(
+  THEME_COLORS.map((c) => [c.id, { id: c.id, name: c.name, css: buildThemeCss(c) }])
+);

@@ -23,16 +23,37 @@ export function createSvg(
   return svg;
 }
 
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const SVG_CHILD_TAGS = 'circle|path|rect|line|polyline|polygon|g|ellipse';
+
+/**
+ * Builds an SVG element from a trusted, hardcoded markup string using only
+ * createElementNS/setAttribute (never DOMParser). YouTube Music's Trusted Types
+ * policy blocks DOMParser.parseFromString() outright ("This document requires
+ * 'TrustedHTML' assignment"), which silently swallowed every icon here before.
+ */
 export function createSvgIcon(svgString: string): SVGElement {
-  try {
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(svgString, 'image/svg+xml');
-    const svg = doc.querySelector('svg');
-    if (svg) {
-      return document.importNode(svg, true) as SVGElement;
+  const svg = document.createElementNS(SVG_NS, 'svg');
+
+  const setAttrsFrom = (el: Element, attrString: string) => {
+    for (const match of attrString.matchAll(/([\w:-]+)="([^"]*)"/g)) {
+      el.setAttribute(match[1], match[2]);
     }
-  } catch {}
-  return document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  };
+
+  const svgTagMatch = svgString.match(/^<svg([^>]*)>/);
+  if (svgTagMatch) {
+    setAttrsFrom(svg, svgTagMatch[1]);
+  }
+
+  const childRe = new RegExp(`<(${SVG_CHILD_TAGS})([^>]*)\\/?>`, 'g');
+  for (const match of svgString.matchAll(childRe)) {
+    const el = document.createElementNS(SVG_NS, match[1]);
+    setAttrsFrom(el, match[2]);
+    svg.appendChild(el);
+  }
+
+  return svg;
 }
 
 export function createEl<K extends keyof HTMLElementTagNameMap>(
