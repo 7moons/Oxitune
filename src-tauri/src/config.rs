@@ -25,6 +25,10 @@ pub struct AppConfig {
     pub equalizer_gains: Vec<f64>,
     pub preamp_gain: f64,
     pub loudness_normalization: bool,
+    pub crossfade_seconds: f64,
+    pub skip_silence_enabled: bool,
+    pub playback_speed: f64,
+    pub preserve_pitch: bool,
     pub lastfm_enabled: bool,
     pub lastfm_api_key: String,
     pub lastfm_secret: String,
@@ -54,6 +58,10 @@ impl Default for AppConfig {
             equalizer_gains: vec![0.0; 10], // 10 bands default at 0dB
             preamp_gain: 0.0,
             loudness_normalization: false,
+            crossfade_seconds: 0.0, // Disabled by default
+            skip_silence_enabled: false,
+            playback_speed: 1.0,
+            preserve_pitch: true,
             lastfm_enabled: false,
             lastfm_api_key: "".to_string(),
             lastfm_secret: "".to_string(),
@@ -110,6 +118,10 @@ mod tests {
         assert!(config.equalizer_enabled);
         assert_eq!(config.equalizer_gains.len(), 10);
         assert_eq!(config.equalizer_preset, "flat");
+        assert_eq!(config.crossfade_seconds, 0.0);
+        assert_eq!(config.skip_silence_enabled, false);
+        assert_eq!(config.playback_speed, 1.0);
+        assert_eq!(config.preserve_pitch, true);
         assert_eq!(config.wheel_volume_step, 0.05);
         assert_eq!(config.quality, "high");
     }
@@ -119,6 +131,10 @@ mod tests {
         let mut config = AppConfig::default();
         config.equalizer_gains = vec![3.0, 2.5, 1.0, 0.0, -1.0, -2.0, 0.0, 1.5, 3.0, 4.0];
         config.preamp_gain = 1.5;
+        config.crossfade_seconds = 5.0;
+        config.skip_silence_enabled = true;
+        config.playback_speed = 1.25;
+        config.preserve_pitch = false;
         let serialized = serde_json::to_string(&config).expect("Serialization failed");
         let deserialized: AppConfig = serde_json::from_str(&serialized).expect("Deserialization failed");
         assert_eq!(deserialized.theme, "default-dark");
@@ -126,5 +142,9 @@ mod tests {
         assert_eq!(deserialized.equalizer_gains.len(), 10);
         assert_eq!(deserialized.equalizer_gains[0], 3.0);
         assert_eq!(deserialized.preamp_gain, 1.5);
+        assert_eq!(deserialized.crossfade_seconds, 5.0);
+        assert_eq!(deserialized.skip_silence_enabled, true);
+        assert_eq!(deserialized.playback_speed, 1.25);
+        assert_eq!(deserialized.preserve_pitch, false);
     }
 }

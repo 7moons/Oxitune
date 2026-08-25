@@ -55,6 +55,31 @@
           </div>
         </div>
 
+        <!-- Crossfade -->
+        <div class="setting-card">
+          <div class="setting-info" style="flex: 1;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+              <span class="setting-label">Track Crossfade</span>
+              <span id="crossfade_val" class="preamp-val" style="width: auto;">Disabled</span>
+            </div>
+            <input type="range" id="crossfade_seconds" min="0" max="12" step="0.5" value="0" class="preamp-slider" style="width: 100%;" />
+            <span class="setting-desc" style="margin-top: 4px;">Smoothly mixes the end of a track into the beginning of the next (0 to 12s)</span>
+          </div>
+        </div>
+
+        <!-- Skip Silence -->
+        <div class="setting-card">
+          <div class="setting-info">
+            <span class="setting-label">Skip Silence</span>
+            <span class="setting-desc">Automatically cut dead silence at the start and end of tracks (&lt; -50 dB)</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="skip_silence_enabled" />
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <!-- Loudness Normalization -->
         <div class="setting-card">
           <div class="setting-info">
             <span class="setting-label">Loudness Normalization (Auto-Gain)</span>
@@ -64,6 +89,30 @@
             <input type="checkbox" id="loudness_normalization" />
             <span class="slider"></span>
           </label>
+        </div>
+
+        <!-- Playback Speed & Pitch -->
+        <div class="setting-card" style="flex-direction: column; align-items: stretch; gap: 10px;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div>
+              <span class="setting-label">Playback Speed & Pitch</span>
+              <div class="setting-desc">Adjust tempo with pitch lock or Nightcore mode</div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <label style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); cursor: pointer;">
+                <input type="checkbox" id="preserve_pitch" checked />
+                <span>Preserve Pitch</span>
+              </label>
+              <span id="speed_val" class="preamp-val" style="width: 48px;">1.00x</span>
+            </div>
+          </div>
+          <input type="range" id="playback_speed" min="0.5" max="2.0" step="0.05" value="1.0" class="preamp-slider" style="width: 100%;" />
+          <div style="display: flex; gap: 6px;">
+            <button class="btn-secondary speed-preset-btn" data-speed="0.8" style="padding: 3px 8px; font-size: 11px;">0.8x</button>
+            <button class="btn-secondary speed-preset-btn" data-speed="1.0" style="padding: 3px 8px; font-size: 11px;">1.0x</button>
+            <button class="btn-secondary speed-preset-btn" data-speed="1.25" style="padding: 3px 8px; font-size: 11px;">1.25x</button>
+            <button class="btn-secondary speed-preset-btn" data-speed="1.5" style="padding: 3px 8px; font-size: 11px;">1.5x</button>
+          </div>
         </div>
 
         <!-- Integrations -->

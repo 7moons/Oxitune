@@ -7,6 +7,7 @@ export class AudioEngine {
   private compressorNode: DynamicsCompressorNode | null = null;
   private filters: BiquadFilterNode[] = [];
   private preampNode: GainNode | null = null;
+  private fadeNode: GainNode | null = null;
   private analyserNode: AnalyserNode | null = null;
   private isInitialized = false;
   private isNormalizing = false;
@@ -67,9 +68,13 @@ export class AudioEngine {
       this.preampNode = this.audioCtx.createGain();
       this.preampNode.gain.setValueAtTime(1.0, this.audioCtx.currentTime);
 
-      // 5. Analyser for real-time visualizer
+      // 5. Crossfade / Fade gain node
+      this.fadeNode = this.audioCtx.createGain();
+      this.fadeNode.gain.setValueAtTime(1.0, this.audioCtx.currentTime);
+
+      // 6. Analyser for real-time visualizer & silence detection
       this.analyserNode = this.audioCtx.createAnalyser();
-      this.analyserNode.fftSize = 128;
+      this.analyserNode.fftSize = 256;
       this.analyserNode.smoothingTimeConstant = 0.8;
 
       // Connect graph
@@ -89,7 +94,7 @@ export class AudioEngine {
   }
 
   public rebuildGraph(): void {
-    if (!this.audioCtx || !this.sourceNode || !this.preampNode || !this.analyserNode || !this.compressorNode) {
+    if (!this.audioCtx || !this.sourceNode || !this.preampNode || !this.fadeNode || !this.analyserNode || !this.compressorNode) {
       return;
     }
 
@@ -98,6 +103,7 @@ export class AudioEngine {
       this.compressorNode.disconnect();
       this.filters.forEach((f) => f.disconnect());
       this.preampNode.disconnect();
+      this.fadeNode.disconnect();
       this.analyserNode.disconnect();
 
       let lastNode: AudioNode = this.sourceNode;
@@ -117,6 +123,10 @@ export class AudioEngine {
       // Route through Preamp Gain
       lastNode.connect(this.preampNode);
       lastNode = this.preampNode;
+
+      // Route through Crossfade / Fade node
+      lastNode.connect(this.fadeNode);
+      lastNode = this.fadeNode;
 
       // Route through Analyser
       lastNode.connect(this.analyserNode);
@@ -171,8 +181,49 @@ export class AudioEngine {
     return preset.gains;
   }
 
-  public getAnalyserNode(): AnalyserNode | null {
-    return this.analyserNode;
+  // Crossfade API
+  public fadeIn(durationSecs: number): void {
+    if (!this.fadeNode || !this.audioCtx || durationSecs <= 0) {
+      if (this.fadeNode && this.audioCtx) {
+        this.fadeNode.gain.setValueAtTime(1.0, this.audioCtx.currentTime);
+      }
+      return;
+    }
+    const now = this.audioCtx.currentTime;
+    this.fadeNode.gain.cancelScheduledValues(now);
+    this.fadeNode.gain.setValueAtTime(0.001, now);
+    this.fadeNode.gain.linearRampToValueAtTime(1.0, now + durationSecs);
+  }
+
+  public fadeOut(durationSecs: number): void {
+    if (!this.fadeNode || !this.audioCtx || durationSecs <= 0) return;
+    const now = this.audioCtx.currentTime;
+    this.fadeNode.gain.cancelScheduledValues(now);
+    this.fadeNode.gain.setValueAtTime(this.fadeNode.gain.value, now);
+    this.fadeNode.gain.linearRampToValueAtTime(0.001, now + durationSecs);
+  }
+
+  public resetFade(): void {
+    if (this.fadeNode && this.audioCtx) {
+      const now = this.audioCtx.currentTime;
+      this.fadeNode.gain.cancelScheduledValues(now);
+      this.fadeNode.gain.setValueAtTime(1.0, now);
+    }
+  }
+
+  // Silence Detection (RMS audio power in dB)
+  public getAudioPowerDb(): number {
+    if (!this.analyserNode) return -100;
+    const buffer = new Float32Array(this.analyserNode.fftSize);
+    this.analyserNode.getFloatTimeDomainData(buffer);
+
+    let sum = 0;
+    for (let i = 0; i < buffer.length; i++) {
+      sum += buffer[i] * buffer[i];
+    }
+    const rms = Math.sqrt(sum / buffer.length);
+    if (rms <= 0.00001) return -100;
+    return 20 * Math.log10(rms);
   }
 
   public getFrequencyData(): Uint8Array | null {
@@ -182,9 +233,11 @@ export class AudioEngine {
     return data;
   }
 
+  // Speed & Pitch
   public setPlaybackRate(rate: number): void {
+    const clamped = Math.max(0.5, Math.min(2.0, rate));
     if (this.hookedVideo) {
-      this.hookedVideo.playbackRate = Math.max(0.25, Math.min(4.0, rate));
+      this.hookedVideo.playbackRate = clamped;
     }
   }
 

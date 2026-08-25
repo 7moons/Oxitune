@@ -22,6 +22,10 @@ interface AppConfig {
   equalizer_gains: number[];
   preamp_gain: number;
   loudness_normalization: boolean;
+  crossfade_seconds: number;
+  skip_silence_enabled: boolean;
+  playback_speed: number;
+  preserve_pitch: boolean;
   lastfm_enabled: boolean;
   lastfm_api_key: string;
   lastfm_secret: string;
@@ -40,6 +44,11 @@ function formatFreq(freq: number): string {
 function formatDb(db: number): string {
   const sign = db > 0 ? '+' : '';
   return `${sign}${db.toFixed(1)}`;
+}
+
+function formatCrossfade(secs: number): string {
+  if (secs <= 0) return 'Disabled';
+  return `${secs.toFixed(1)}s`;
 }
 
 function renderEqSliders() {
@@ -74,13 +83,11 @@ function renderEqSliders() {
       currentGains[idx] = val;
       valBadge.textContent = formatDb(val);
 
-      // Set preset dropdown to custom
       const presetSelect = document.getElementById('eq_preset') as HTMLSelectElement;
       if (presetSelect && presetSelect.value !== 'custom') {
         presetSelect.value = 'custom';
       }
 
-      // Emit live event to webview
       emitLiveEvent('set-eq-band', { bandIndex: idx, gain: val });
     });
 
@@ -113,7 +120,7 @@ async function emitLiveEvent(event: string, payload: unknown) {
     try {
       await tauri.event.emit(event, payload);
     } catch {
-      // Event emission across webviews
+      // Cross-webview event
     }
   }
 }
@@ -124,7 +131,7 @@ async function loadSettings() {
       const config = (await window.__TAURI__.core.invoke('get_config')) as AppConfig;
       currentConfig = config;
 
-      // Populate UI values
+      // Populate basic UI values
       setCheckbox('discord_rpc_enabled', config.discord_rpc_enabled);
       setCheckbox('mpris_enabled', config.mpris_enabled);
       setCheckbox('notifications_enabled', config.notifications_enabled);
@@ -133,6 +140,8 @@ async function loadSettings() {
       setCheckbox('sponsorblock_enabled', config.sponsorblock_enabled);
       setCheckbox('lyrics_enabled', config.lyrics_enabled);
       setCheckbox('loudness_normalization', config.loudness_normalization);
+      setCheckbox('skip_silence_enabled', config.skip_silence_enabled);
+      setCheckbox('preserve_pitch', config.preserve_pitch !== false);
 
       const themeSelect = document.getElementById('theme') as HTMLSelectElement;
       if (themeSelect) themeSelect.value = config.theme || 'default-dark';
@@ -145,6 +154,26 @@ async function loadSettings() {
       }
       if (preampVal) {
         preampVal.textContent = `${formatDb(config.preamp_gain || 0)} dB`;
+      }
+
+      // Crossfade slider
+      const crossfadeSlider = document.getElementById('crossfade_seconds') as HTMLInputElement;
+      const crossfadeVal = document.getElementById('crossfade_val');
+      if (crossfadeSlider) {
+        crossfadeSlider.value = String(config.crossfade_seconds || 0);
+      }
+      if (crossfadeVal) {
+        crossfadeVal.textContent = formatCrossfade(config.crossfade_seconds || 0);
+      }
+
+      // Playback speed slider
+      const speedSlider = document.getElementById('playback_speed') as HTMLInputElement;
+      const speedVal = document.getElementById('speed_val');
+      if (speedSlider) {
+        speedSlider.value = String(config.playback_speed || 1.0);
+      }
+      if (speedVal) {
+        speedVal.textContent = `${(config.playback_speed || 1.0).toFixed(2)}x`;
       }
 
       // Equalizer preset & gains
@@ -185,6 +214,8 @@ async function saveSettings() {
   currentConfig.sponsorblock_enabled = getCheckbox('sponsorblock_enabled');
   currentConfig.lyrics_enabled = getCheckbox('lyrics_enabled');
   currentConfig.loudness_normalization = getCheckbox('loudness_normalization');
+  currentConfig.skip_silence_enabled = getCheckbox('skip_silence_enabled');
+  currentConfig.preserve_pitch = getCheckbox('preserve_pitch');
 
   const themeSelect = document.getElementById('theme') as HTMLSelectElement;
   if (themeSelect) currentConfig.theme = themeSelect.value;
@@ -194,6 +225,12 @@ async function saveSettings() {
 
   const preampSlider = document.getElementById('preamp_gain') as HTMLInputElement;
   if (preampSlider) currentConfig.preamp_gain = parseFloat(preampSlider.value);
+
+  const crossfadeSlider = document.getElementById('crossfade_seconds') as HTMLInputElement;
+  if (crossfadeSlider) currentConfig.crossfade_seconds = parseFloat(crossfadeSlider.value);
+
+  const speedSlider = document.getElementById('playback_speed') as HTMLInputElement;
+  if (speedSlider) currentConfig.playback_speed = parseFloat(speedSlider.value);
 
   currentConfig.equalizer_gains = [...currentGains];
 
@@ -228,11 +265,14 @@ document.addEventListener('DOMContentLoaded', () => {
       if (presetId !== 'custom' && EQ_PRESETS[presetId]) {
         const preset = EQ_PRESETS[presetId];
         updateSlidersFromGains(preset.gains);
+        emitLiveEvent('set-eq-all', { gains: preset.gains, preset: presetId });
+
         if (preset.preamp !== undefined) {
           const preampSlider = document.getElementById('preamp_gain') as HTMLInputElement;
           const preampVal = document.getElementById('preamp_val');
           if (preampSlider) preampSlider.value = String(preset.preamp);
           if (preampVal) preampVal.textContent = `${formatDb(preset.preamp)} dB`;
+          emitLiveEvent('set-preamp', preset.preamp);
         }
       }
     });
@@ -245,6 +285,63 @@ document.addEventListener('DOMContentLoaded', () => {
     preampSlider.addEventListener('input', () => {
       const val = parseFloat(preampSlider.value);
       preampVal.textContent = `${formatDb(val)} dB`;
+      emitLiveEvent('set-preamp', val);
+    });
+  }
+
+  // Crossfade slider listener
+  const crossfadeSlider = document.getElementById('crossfade_seconds') as HTMLInputElement;
+  const crossfadeVal = document.getElementById('crossfade_val');
+  if (crossfadeSlider && crossfadeVal) {
+    crossfadeSlider.addEventListener('input', () => {
+      const val = parseFloat(crossfadeSlider.value);
+      crossfadeVal.textContent = formatCrossfade(val);
+      emitLiveEvent('set-crossfade-seconds', val);
+    });
+  }
+
+  // Playback speed slider listener
+  const speedSlider = document.getElementById('playback_speed') as HTMLInputElement;
+  const speedVal = document.getElementById('speed_val');
+  if (speedSlider && speedVal) {
+    speedSlider.addEventListener('input', () => {
+      const val = parseFloat(speedSlider.value);
+      speedVal.textContent = `${val.toFixed(2)}x`;
+      emitLiveEvent('set-playback-rate', val);
+    });
+  }
+
+  // Speed preset buttons
+  document.querySelectorAll<HTMLButtonElement>('.speed-preset-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const speed = parseFloat(btn.dataset.speed || '1.0');
+      if (speedSlider) speedSlider.value = String(speed);
+      if (speedVal) speedVal.textContent = `${speed.toFixed(2)}x`;
+      emitLiveEvent('set-playback-rate', speed);
+    });
+  });
+
+  // Preserve pitch toggle listener
+  const pitchCheck = document.getElementById('preserve_pitch') as HTMLInputElement;
+  if (pitchCheck) {
+    pitchCheck.addEventListener('change', () => {
+      emitLiveEvent('set-preserves-pitch', pitchCheck.checked);
+    });
+  }
+
+  // Loudness Normalization switch listener
+  const normCheck = document.getElementById('loudness_normalization') as HTMLInputElement;
+  if (normCheck) {
+    normCheck.addEventListener('change', () => {
+      emitLiveEvent('set-loudness-normalization', normCheck.checked);
+    });
+  }
+
+  // Skip silence switch listener
+  const silenceCheck = document.getElementById('skip_silence_enabled') as HTMLInputElement;
+  if (silenceCheck) {
+    silenceCheck.addEventListener('change', () => {
+      emitLiveEvent('set-skip-silence', silenceCheck.checked);
     });
   }
 
@@ -254,9 +351,11 @@ document.addEventListener('DOMContentLoaded', () => {
     resetBtn.addEventListener('click', () => {
       if (presetSelect) presetSelect.value = 'flat';
       updateSlidersFromGains(EQ_PRESETS.flat.gains);
+      emitLiveEvent('set-eq-all', { gains: EQ_PRESETS.flat.gains, preset: 'flat' });
       if (preampSlider && preampVal) {
         preampSlider.value = '0';
         preampVal.textContent = '0.0 dB';
+        emitLiveEvent('set-preamp', 0);
       }
     });
   }
