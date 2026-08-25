@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>YTMD Preferences</title>
+    <link rel="stylesheet" href="./src/ui/styles.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="brand">
+        <span>Preferences</span>
+      </div>
+      <button id="save-btn" class="btn-primary">Save Changes</button>
+    </header>
+    <main class="container">
+      <div class="settings-grid">
+        <!-- Integrations -->
+        <div class="section-title">System & Integrations</div>
+        
+        <div class="setting-card">
+          <div class="setting-info">
+            <span class="setting-label">Discord Rich Presence</span>
+            <span class="setting-desc">Display active song title, artist, duration and play status in Discord</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="discord_rpc_enabled" />
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="setting-card">
+          <div class="setting-info">
+            <span class="setting-label">MPRIS / Media Controls (Linux/D-Bus)</span>
+            <span class="setting-desc">Enable native OS media keys, notifications, lock screen and sound widget integration</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="mpris_enabled" />
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="setting-card">
+          <div class="setting-info">
+            <span class="setting-label">Track Notifications</span>
+            <span class="setting-desc">Show native desktop notification when song changes</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="notifications_enabled" />
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="setting-card">
+          <div class="setting-info">
+            <span class="setting-label">Close to Tray</span>
+            <span class="setting-desc">Keep YouTube Music playing in the system tray when closing the window</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="close_to_tray" />
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <!-- Plugins & Enhancements -->
+        <div class="section-title">Audio & Plugins</div>
+
+        <div class="setting-card">
+          <div class="setting-info">
+            <span class="setting-label">AdBlock & Anti-Nag</span>
+            <span class="setting-desc">Skip video ads automatically and dismiss premium promotion popups</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="adblock_enabled" />
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="setting-card">
+          <div class="setting-info">
+            <span class="setting-label">SponsorBlock for Music</span>
+            <span class="setting-desc">Skip non-music music video intros, outros, and sponsor segments</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="sponsorblock_enabled" />
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="setting-card">
+          <div class="setting-info">
+            <span class="setting-label">Synchronized Lyrics (LRCLIB)</span>
+            <span class="setting-desc">Real-time scrolling synchronized lyrics with seek-on-click</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="lyrics_enabled" />
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <!-- Appearance -->
+        <div class="section-title">Appearance</div>
+
+        <div class="setting-card">
+          <div class="setting-info">
+            <span class="setting-label">Theme Mode</span>
+            <span class="setting-desc">Select visual styling mode</span>
+          </div>
+          <select id="theme" style="background: var(--bg-subtle); color: var(--text-primary); border: 1px solid var(--border); padding: 6px 12px; border-radius: 6px;">
+            <option value="default-dark">Modern Dark</option>
+            <option value="oled">Pure OLED Black</option>
+          </select>
+        </div>
+      </div>
+    </main>
+    <script type="module" src="./src/ui/settings.ts"></script>
+  </body>
+</html>
