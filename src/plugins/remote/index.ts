@@ -82,7 +82,7 @@ export async function showQrModal(ctx: PluginContext) {
         svg.style.display = 'block';
       }
     } else if (qrContainer) {
-      qrContainer.innerHTML = '<span style="color: #71717a; font-size: 12px;">Remote server starting...</span>';
+      setSafeHTML(qrContainer, '<span style="color: #71717a; font-size: 12px;">Remote server starting...</span>');
     }
 
     if (info && info.url && urlContainer) {

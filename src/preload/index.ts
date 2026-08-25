@@ -253,21 +253,22 @@ function injectBurgerMenu(config: Record<string, unknown>) {
     if (popover) {
       const rect = burgerBtn.getBoundingClientRect();
       popover.style.top = `${rect.bottom + 8}px`;
-      popover.style.left = `${Math.max(12, rect.left)}px`;
+      popover.style.right = `${Math.max(16, window.innerWidth - rect.right)}px`;
+      popover.style.left = 'auto';
       popover.style.display = popover.style.display === 'flex' ? 'none' : 'flex';
     }
   });
 
-  if (leftContent) {
-    leftContent.appendChild(burgerBtn);
-  } else if (rightContent) {
+  if (rightContent) {
     rightContent.prepend(burgerBtn);
+  } else if (leftContent) {
+    leftContent.appendChild(burgerBtn);
   } else if (navBar) {
     navBar.prepend(burgerBtn);
   } else {
     burgerBtn.style.position = 'fixed';
-    burgerBtn.style.top = '10px';
-    burgerBtn.style.left = '16px';
+    burgerBtn.style.top = '12px';
+    burgerBtn.style.right = '16px';
     fallbackContainer.appendChild(burgerBtn);
   }
 }
