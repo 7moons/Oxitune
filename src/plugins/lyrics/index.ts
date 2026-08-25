@@ -105,16 +105,132 @@ export const LyricsPlugin: YTMDPlugin = {
     `;
     document.head.appendChild(style);
 
-    // Unblock tab buttons and re-mount on user click
-    document.addEventListener('click', (e) => {
-      const target = (e.target as HTMLElement | null)?.closest('tp-yt-paper-tab, ytmusic-tab-header-renderer');
-      if (target) {
-        setTimeout(() => {
-          enableLyricsTabButton();
-          ensureLyricsMounted(ctx);
-        }, 100);
-      }
-    });
+    // Controlled Tab Switching to correctly switch tabs even when YouTube disabled them
+    document.addEventListener(
+      'click',
+      (e) => {
+        const tabBtn = (e.target as HTMLElement | null)?.closest(
+          'tp-yt-paper-tab, ytmusic-tab-header-renderer'
+        ) as HTMLElement | null;
+        if (!tabBtn) return;
+        const text = tabBtn.textContent?.toLowerCase() || '';
+
+        if (
+          text.includes('tekst') ||
+          text.includes('lyrics') ||
+          text.includes('paroles') ||
+          text.includes('letras')
+        ) {
+          // Switch to Lyrics Tab
+          const paperTabs = document.querySelector(
+            'ytmusic-player-page tp-yt-paper-tabs, ytmusic-tab-header-shelf-renderer tp-yt-paper-tabs'
+          ) as any;
+          if (paperTabs) {
+            paperTabs.selected = 1;
+          }
+          const allTabs = document.querySelectorAll(
+            'ytmusic-player-page tp-yt-paper-tab, ytmusic-tab-header-shelf-renderer tp-yt-paper-tab'
+          );
+          allTabs.forEach((t, i) => {
+            if (i === 1 || t === tabBtn) {
+              t.classList.add('iron-selected');
+              t.setAttribute('aria-selected', 'true');
+            } else {
+              t.classList.remove('iron-selected');
+              t.setAttribute('aria-selected', 'false');
+            }
+          });
+
+          const tabRenderers = document.querySelectorAll<HTMLElement>('ytmusic-player-page ytmusic-tab-renderer');
+          tabRenderers.forEach((tr, i) => {
+            const isLyrics =
+              tr.getAttribute('page-type') === 'MUSIC_PAGE_TYPE_TRACK_LYRICS' ||
+              (i === 1 && tr.getAttribute('page-type') !== 'MUSIC_PAGE_TYPE_TRACK_UP_NEXT');
+            if (isLyrics) {
+              tr.removeAttribute('hidden');
+              tr.style.display = 'block';
+            } else {
+              tr.setAttribute('hidden', '');
+              tr.style.display = 'none';
+            }
+          });
+
+          setTimeout(() => {
+            ensureLyricsMounted(ctx);
+          }, 50);
+        } else if (
+          text.includes('następn') ||
+          text.includes('up next') ||
+          text.includes('kolejk') ||
+          text.includes('queue')
+        ) {
+          // Switch to Up Next Tab
+          const paperTabs = document.querySelector(
+            'ytmusic-player-page tp-yt-paper-tabs, ytmusic-tab-header-shelf-renderer tp-yt-paper-tabs'
+          ) as any;
+          if (paperTabs) {
+            paperTabs.selected = 0;
+          }
+          const allTabs = document.querySelectorAll(
+            'ytmusic-player-page tp-yt-paper-tab, ytmusic-tab-header-shelf-renderer tp-yt-paper-tab'
+          );
+          allTabs.forEach((t, i) => {
+            if (i === 0 || t === tabBtn) {
+              t.classList.add('iron-selected');
+              t.setAttribute('aria-selected', 'true');
+            } else {
+              t.classList.remove('iron-selected');
+              t.setAttribute('aria-selected', 'false');
+            }
+          });
+
+          const tabRenderers = document.querySelectorAll<HTMLElement>('ytmusic-player-page ytmusic-tab-renderer');
+          tabRenderers.forEach((tr, i) => {
+            const isUpNext = tr.getAttribute('page-type') === 'MUSIC_PAGE_TYPE_TRACK_UP_NEXT' || i === 0;
+            if (isUpNext) {
+              tr.removeAttribute('hidden');
+              tr.style.display = 'block';
+            } else {
+              tr.setAttribute('hidden', '');
+              tr.style.display = 'none';
+            }
+          });
+        } else if (text.includes('podobn') || text.includes('related')) {
+          // Switch to Related Tab
+          const paperTabs = document.querySelector(
+            'ytmusic-player-page tp-yt-paper-tabs, ytmusic-tab-header-shelf-renderer tp-yt-paper-tabs'
+          ) as any;
+          if (paperTabs) {
+            paperTabs.selected = 2;
+          }
+          const allTabs = document.querySelectorAll(
+            'ytmusic-player-page tp-yt-paper-tab, ytmusic-tab-header-shelf-renderer tp-yt-paper-tab'
+          );
+          allTabs.forEach((t, i) => {
+            if (i === 2 || t === tabBtn) {
+              t.classList.add('iron-selected');
+              t.setAttribute('aria-selected', 'true');
+            } else {
+              t.classList.remove('iron-selected');
+              t.setAttribute('aria-selected', 'false');
+            }
+          });
+
+          const tabRenderers = document.querySelectorAll<HTMLElement>('ytmusic-player-page ytmusic-tab-renderer');
+          tabRenderers.forEach((tr, i) => {
+            const isRelated = tr.getAttribute('page-type') === 'MUSIC_PAGE_TYPE_TRACK_RELATED' || i === 2;
+            if (isRelated) {
+              tr.removeAttribute('hidden');
+              tr.style.display = 'block';
+            } else {
+              tr.setAttribute('hidden', '');
+              tr.style.display = 'none';
+            }
+          });
+        }
+      },
+      true
+    );
 
     const checkTabButtons = () => {
       enableLyricsTabButton();
@@ -257,15 +373,18 @@ function enableLyricsTabButton(): void {
 function findNativeLyricsTabElement(): HTMLElement | null {
   // 1. Primary: Explicit page-type attribute on lyrics tab renderer
   const tabByType = document.querySelector<HTMLElement>(
-    'ytmusic-player-page ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"], ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"]'
+    'ytmusic-player-page ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"]'
   );
   if (tabByType) return tabByType;
 
-  // 2. Secondary: Description shelf
-  const shelf = document.querySelector<HTMLElement>(
-    'ytmusic-player-page ytmusic-description-shelf-renderer, ytmusic-description-shelf-renderer'
-  );
-  if (shelf) return shelf;
+  // 2. Secondary: Tab renderer at index 1 (never index 0 which is Up Next)
+  const allTabs = Array.from(document.querySelectorAll<HTMLElement>('ytmusic-player-page ytmusic-tab-renderer'));
+  if (allTabs.length >= 2) {
+    const tab1 = allTabs[1];
+    if (tab1.getAttribute('page-type') !== 'MUSIC_PAGE_TYPE_TRACK_UP_NEXT') {
+      return tab1;
+    }
+  }
 
   return null;
 }
@@ -278,17 +397,25 @@ function findNativeLyricsTab(): HTMLElement | null {
 }
 
 function ensureLyricsMounted(ctx: PluginContext): void {
+  // Strict cleanup: Remove any wrapper that is in Up Next or first tab
+  const rogueWrappers = document.querySelectorAll(
+    'ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_UP_NEXT"] #ytmd-native-lyrics-wrapper, ytmusic-player-page ytmusic-tab-renderer:first-child #ytmd-native-lyrics-wrapper'
+  );
+  rogueWrappers.forEach((w) => w.remove());
+
   const targetContainer = findNativeLyricsTab();
   if (!targetContainer) return;
 
-  // Do not mount if targetContainer is inside up-next or comments
-  const parentPageType = targetContainer.closest('ytmusic-tab-renderer')?.getAttribute('page-type');
-  if (
-    parentPageType === 'MUSIC_PAGE_TYPE_TRACK_UP_NEXT' ||
-    parentPageType === 'MUSIC_PAGE_TYPE_TRACK_RELATED' ||
-    parentPageType === 'MUSIC_PAGE_TYPE_TRACK_COMMENTS'
-  ) {
-    return;
+  // SAFETY CHECK: Ensure targetContainer is NOT in Up Next tab or first child
+  const parentTab = targetContainer.closest('ytmusic-tab-renderer');
+  if (parentTab) {
+    if (parentTab.getAttribute('page-type') === 'MUSIC_PAGE_TYPE_TRACK_UP_NEXT') {
+      return;
+    }
+    const allTabs = Array.from(document.querySelectorAll('ytmusic-player-page ytmusic-tab-renderer'));
+    if (allTabs.indexOf(parentTab) === 0) {
+      return;
+    }
   }
 
   // Hide YouTube Music's default "unavailable" message element
