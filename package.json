@@ -4,8 +4,9 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
+    "dev": "bun run build:preload && vite",
+    "build:preload": "bun build src/preload/index.ts --outfile src-tauri/inject/preload.js --target browser --minify",
+    "build": "tsc && vite build && bun run build:preload",
     "preview": "vite preview",
     "tauri": "tauri",
     "test": "bun test",

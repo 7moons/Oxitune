@@ -75,9 +75,16 @@ pub fn run() {
                 remote_server::start_remote_server(handle.clone(), remote_port);
             }
 
-            // Inject preload script into the main window when initialized
+            // Inject preload script into the main window when initialized and on navigation
             if let Some(main_win) = handle.get_webview_window("main") {
-                let _ = main_win.eval(include_str!("../inject/init.js"));
+                let main_win_clone = main_win.clone();
+                let _ = main_win.eval(include_str!("../inject/preload.js"));
+                main_win.on_page_load(move |_url, payload| {
+                    if payload.event() == tauri::webview::PageLoadEvent::Finished {
+                        log::info!("[YTMD] Page loaded, injecting preload bundle...");
+                        let _ = main_win_clone.eval(include_str!("../inject/preload.js"));
+                    }
+                });
             }
 
             Ok(())

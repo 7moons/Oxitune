@@ -8,28 +8,29 @@ export const ThemeEnginePlugin: YTMDPlugin = {
   defaultEnabled: true,
 
   onInit(ctx: PluginContext) {
-    let themeStyle = document.getElementById('ytmd-active-theme');
-    if (!themeStyle) {
-      themeStyle = document.createElement('style');
-      themeStyle.id = 'ytmd-active-theme';
-      document.head.appendChild(themeStyle);
-    }
+    const ensureHead = () => document.head || document.documentElement;
 
-    let customStyle = document.getElementById('ytmd-custom-css');
-    if (!customStyle) {
-      customStyle = document.createElement('style');
-      customStyle.id = 'ytmd-custom-css';
-      document.head.appendChild(customStyle);
-    }
+    const getOrCreateStyle = (id: string) => {
+      let el = document.getElementById(id) as HTMLStyleElement;
+      if (!el) {
+        el = document.createElement('style');
+        el.id = id;
+        const target = ensureHead();
+        if (target) target.appendChild(el);
+      }
+      return el;
+    };
 
     const applyTheme = (themeId: string) => {
       const preset = THEME_PRESETS[themeId] || THEME_PRESETS.default;
+      const themeStyle = getOrCreateStyle('ytmd-active-theme');
       if (themeStyle) {
         themeStyle.textContent = preset.css;
       }
     };
 
     const applyCustomCss = (cssText: string) => {
+      const customStyle = getOrCreateStyle('ytmd-custom-css');
       if (customStyle) {
         customStyle.textContent = cssText;
       }
