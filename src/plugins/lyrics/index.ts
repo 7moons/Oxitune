@@ -23,10 +23,31 @@ export const LyricsPlugin: YTMDPlugin = {
     cachedLyricsData = null;
     currentSongKey = '';
 
-    // Inject CSS for Native Lyrics Tab enhancement
+    // Inject CSS for Native Lyrics Tab and Tab Button Force Enable
     const style = document.createElement('style');
     style.id = 'ytmd-native-lyrics-styles';
     style.textContent = `
+      /* Force enable TEKST / LYRICS tab button so it is always clickable and bright */
+      tp-yt-paper-tab[disabled],
+      tp-yt-paper-tab[aria-disabled="true"],
+      ytmusic-tab-header-renderer[disabled],
+      ytmusic-tab-header-renderer[aria-disabled="true"],
+      .tab-header[disabled] {
+        pointer-events: auto !important;
+        cursor: pointer !important;
+        opacity: 1 !important;
+        display: inline-flex !important;
+        color: #d4d4d8 !important;
+      }
+      tp-yt-paper-tab[disabled]:hover,
+      ytmusic-tab-header-renderer[disabled]:hover {
+        color: #ffffff !important;
+      }
+      tp-yt-paper-tab.iron-selected {
+        color: #ffffff !important;
+        font-weight: 700 !important;
+      }
+
       #ytmd-native-lyrics-wrapper {
         display: flex;
         flex-direction: column;
@@ -86,18 +107,82 @@ export const LyricsPlugin: YTMDPlugin = {
     `;
     document.head.appendChild(style);
 
-    // Watch for tab clicks to immediately mount lyrics
-    document.addEventListener('click', (e) => {
-      const target = e.target as HTMLElement | null;
-      if (target?.closest('tp-yt-paper-tab, ytmusic-tab-header-renderer, .tab-header, ytmusic-player-page')) {
-        setTimeout(() => ensureLyricsMounted(ctx), 100);
-      }
-    });
+    // Force enable tab button and handle custom tab switching
+    document.addEventListener(
+      'click',
+      (e) => {
+        const target = (e.target as HTMLElement | null)?.closest(
+          'tp-yt-paper-tab, ytmusic-tab-header-renderer, .tab-header'
+        ) as HTMLElement | null;
 
-    // Periodic check to ensure wrapper remains mounted when navigating
-    const pollInterval = window.setInterval(() => {
+        if (target) {
+          const text = target.textContent?.toLowerCase() || '';
+          if (
+            text.includes('tekst') ||
+            text.includes('lyrics') ||
+            text.includes('paroles') ||
+            text.includes('letras')
+          ) {
+            const allTabs = document.querySelectorAll(
+              'ytmusic-player-page tp-yt-paper-tab, ytmusic-tab-header-shelf-renderer tp-yt-paper-tab, tp-yt-paper-tabs tp-yt-paper-tab'
+            );
+            allTabs.forEach((t) => t.classList.remove('iron-selected'));
+            target.classList.add('iron-selected');
+
+            const tabRenderers = document.querySelectorAll<HTMLElement>(
+              'ytmusic-player-page ytmusic-tab-renderer, #tab-renderer'
+            );
+            tabRenderers.forEach((tr, idx) => {
+              if (idx === 1 || tr.getAttribute('page-type') === 'MUSIC_PAGE_TYPE_TRACK_LYRICS') {
+                tr.removeAttribute('hidden');
+                tr.style.display = 'block';
+              } else {
+                tr.style.display = 'none';
+              }
+            });
+            setTimeout(() => ensureLyricsMounted(ctx), 50);
+          } else if (
+            text.includes('następny') ||
+            text.includes('up next') ||
+            text.includes('kolejka') ||
+            text.includes('queue')
+          ) {
+            const tabRenderers = document.querySelectorAll<HTMLElement>(
+              'ytmusic-player-page ytmusic-tab-renderer, #tab-renderer'
+            );
+            tabRenderers.forEach((tr, idx) => {
+              if (idx === 0) {
+                tr.removeAttribute('hidden');
+                tr.style.display = 'block';
+              } else {
+                tr.style.display = 'none';
+              }
+            });
+          } else if (text.includes('podobne') || text.includes('related') || text.includes('komentarze') || text.includes('comments')) {
+            const tabRenderers = document.querySelectorAll<HTMLElement>(
+              'ytmusic-player-page ytmusic-tab-renderer, #tab-renderer'
+            );
+            tabRenderers.forEach((tr, idx) => {
+              if (idx >= 2) {
+                tr.removeAttribute('hidden');
+                tr.style.display = 'block';
+              } else {
+                tr.style.display = 'none';
+              }
+            });
+          }
+        }
+      },
+      true
+    );
+
+    const checkTabButtons = () => {
+      enableLyricsTabButton();
       ensureLyricsMounted(ctx);
-    }, 1000);
+    };
+
+    const pollInterval = window.setInterval(checkTabButtons, 800);
+    checkTabButtons();
 
     (this as any)._cleanup = () => {
       clearInterval(pollInterval);
@@ -117,6 +202,8 @@ export const LyricsPlugin: YTMDPlugin = {
     pluginLines = [];
     currentActiveIdx = -1;
     cachedLyricsData = null;
+
+    enableLyricsTabButton();
 
     const wrapper = document.getElementById('ytmd-native-lyrics-wrapper');
     if (wrapper) {
@@ -140,6 +227,7 @@ export const LyricsPlugin: YTMDPlugin = {
         pluginLines = parsed;
       }
 
+      enableLyricsTabButton();
       ensureLyricsMounted(ctx);
       renderCurrentLyrics(ctx);
     } catch {
@@ -186,6 +274,29 @@ export const LyricsPlugin: YTMDPlugin = {
     }
   }
 };
+
+function enableLyricsTabButton(): void {
+  const tabs = document.querySelectorAll<HTMLElement>(
+    'ytmusic-player-page tp-yt-paper-tab, ytmusic-tab-header-renderer, .tab-header, tp-yt-paper-tab'
+  );
+  tabs.forEach((tab) => {
+    const text = tab.textContent?.toLowerCase() || '';
+    if (
+      text.includes('tekst') ||
+      text.includes('lyrics') ||
+      text.includes('paroles') ||
+      text.includes('letras')
+    ) {
+      tab.removeAttribute('disabled');
+      tab.setAttribute('aria-disabled', 'false');
+      tab.classList.remove('disabled');
+      tab.style.pointerEvents = 'auto';
+      tab.style.cursor = 'pointer';
+      tab.style.opacity = '1';
+      tab.style.color = '#d4d4d8';
+    }
+  });
+}
 
 function ensureLyricsMounted(ctx: PluginContext): void {
   const tab = findNativeLyricsTab();
