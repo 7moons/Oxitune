@@ -72,6 +72,13 @@ export class PlayerObserver {
   private extractTrackInfo(): TrackInfo | null {
     const video = document.querySelector('video');
     
+    // Ignore ads completely
+    const isAd = Boolean(
+      document.querySelector('.ad-showing, .ad-interrupting, .ytp-ad-player-overlay, .ytp-ad-text') ||
+      video?.closest('.ad-showing')
+    );
+    if (isAd) return null;
+
     // Priority 1: MediaSession metadata
     const msMeta = navigator.mediaSession?.metadata;
     let title = msMeta?.title || '';

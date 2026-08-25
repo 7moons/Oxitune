@@ -64,7 +64,7 @@ impl Default for AppConfig {
             close_to_tray: true,
             discord_rpc_enabled: true,
             mpris_enabled: true,
-            notifications_enabled: true,
+            notifications_enabled: false,
             adblock_enabled: true,
             sponsorblock_enabled: true,
             lyrics_enabled: true,

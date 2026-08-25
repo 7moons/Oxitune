@@ -11,17 +11,22 @@ export const AdblockPlugin: YTMDPlugin = {
 
     const blockAds = () => {
       const video = ctx.getVideoElement();
-      const adShowing = document.querySelector('.ad-showing, .ad-interrupting');
+      const adShowing = document.querySelector('.ad-showing, .ad-interrupting, .ytp-ad-player-overlay');
       
       // 1. Skip video ad instantly
       if (adShowing && video) {
         video.muted = true;
-        video.currentTime = video.duration || 99999;
+        video.playbackRate = 16.0;
+        if (video.duration && isFinite(video.duration)) {
+          video.currentTime = video.duration;
+        } else {
+          video.currentTime = 99999;
+        }
       }
 
       // 2. Click skip buttons
       const skipButtons = document.querySelectorAll<HTMLElement>(
-        '.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button, button.ytp-ad-skip-button'
+        '.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button, button.ytp-ad-skip-button, .ytp-ad-skip-button-container button'
       );
       skipButtons.forEach((btn) => btn.click());
 
@@ -45,13 +50,14 @@ export const AdblockPlugin: YTMDPlugin = {
       .ytmusic-popup-container:has(ytmusic-upsell-dialog-renderer),
       ytmusic-guide-entry-renderer:has(path[d*="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17.93c-3.95-.49-7-3.85-7-7.93"]),
       #premium-badge,
-      .companion-ad-container {
+      .companion-ad-container,
+      .ytp-ad-overlay-container {
         display: none !important;
       }
     `;
     document.head.appendChild(style);
 
-    adCheckInterval = window.setInterval(blockAds, 500);
+    adCheckInterval = window.setInterval(blockAds, 100);
 
     (this as any)._cleanup = () => {
       if (adCheckInterval) clearInterval(adCheckInterval);
