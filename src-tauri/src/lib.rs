@@ -17,7 +17,7 @@ use parking_lot::Mutex;
 use power_manager::PowerManager;
 use std::sync::Arc;
 use sync_room::SyncRoomManager;
-use tauri::{Manager, WindowEvent};
+use tauri::{Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 
 pub struct AppState {
     pub config_manager: ConfigManager,
@@ -75,17 +75,18 @@ pub fn run() {
                 remote_server::start_remote_server(handle.clone(), remote_port);
             }
 
-            // Inject preload script into the main window when initialized and on navigation
-            if let Some(main_win) = handle.get_webview_window("main") {
-                let main_win_clone = main_win.clone();
-                let _ = main_win.eval(include_str!("../inject/preload.js"));
-                main_win.on_page_load(move |_url, payload| {
-                    if payload.event() == tauri::webview::PageLoadEvent::Finished {
-                        log::info!("[YTMD] Page loaded, injecting preload bundle...");
-                        let _ = main_win_clone.eval(include_str!("../inject/preload.js"));
-                    }
-                });
-            }
+            // Build main window with embedded initialization script
+            let _main_win = WebviewWindowBuilder::new(
+                app,
+                "main",
+                WebviewUrl::External("https://music.youtube.com".parse().expect("valid youtube music url")),
+            )
+            .title("YouTube Music")
+            .inner_size(1280.0, 820.0)
+            .min_inner_size(480.0, 360.0)
+            .resizable(true)
+            .initialization_script(include_str!("../inject/preload.js"))
+            .build()?;
 
             Ok(())
         })
