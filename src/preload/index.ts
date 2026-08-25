@@ -33,8 +33,9 @@ const invokeBackend = async (cmd: string, args: Record<string, unknown> = {}): P
     if (tauri?.core && typeof tauri.core.invoke === 'function') {
       return await tauri.core.invoke(cmd, args);
     }
-  } catch {
-    // Silent in browser mode
+    console.warn(`[YTMD IPC] Bridge not ready for command: ${cmd}`);
+  } catch (err) {
+    console.error(`[YTMD IPC] Execution of '${cmd}' failed:`, err);
   }
   return null;
 };

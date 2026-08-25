@@ -25,8 +25,8 @@ pub fn generate_qr_svg(url: &str) -> String {
     if let Ok(code) = QrCode::new(url.as_bytes()) {
         code.render::<svg::Color>()
             .min_dimensions(200, 200)
-            .dark_color(svg::Color("#ffffff"))
-            .light_color(svg::Color("#18181b"))
+            .dark_color(svg::Color("#000000"))
+            .light_color(svg::Color("#ffffff"))
             .build()
     } else {
         "<svg></svg>".to_string()
