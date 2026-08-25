@@ -11,7 +11,6 @@ export const VisualizerPlugin: YTMDPlugin = {
     style.id = 'ytmd-theme-styles';
 
     const customCss = (ctx.config.custom_css as string) || '';
-    const theme = (ctx.config.theme as string) || 'default-dark';
 
     let baseThemeCss = `
       /* Clean subtle scrollbars */
@@ -42,19 +41,24 @@ export const VisualizerPlugin: YTMDPlugin = {
         backdrop-filter: blur(16px);
         border-top: 1px solid #222226;
       }
-    `;
 
-    if (theme === 'oled') {
-      baseThemeCss += `
-        body, #content, ytmusic-app-layout, #background.ytmusic-item-section-renderer {
-          background-color: #000000 !important;
-        }
-        ytmusic-nav-bar, ytmusic-player-bar {
-          background: #000000 !important;
-          border-color: #1a1a1a !important;
-        }
-      `;
-    }
+      /* Ensure artwork and thumbnails are always visible and transparent */
+      yt-img-shadow,
+      yt-img-shadow #content,
+      yt-img-shadow img,
+      ytmusic-player-page #song-image,
+      ytmusic-player-page #song-image #image,
+      ytmusic-player-page #song-image #content,
+      ytmusic-thumbnail-renderer,
+      ytmusic-thumbnail-renderer #content,
+      ytmusic-thumbnail-renderer img,
+      #thumbnail,
+      #thumbnail img,
+      #song-image,
+      #song-image img {
+        background-color: transparent !important;
+      }
+    `;
 
     style.textContent = `${baseThemeCss}\n${customCss}`;
     document.head.appendChild(style);
