@@ -25,7 +25,7 @@ pub struct AppState {
     pub discord_rpc: Mutex<Option<DiscordRpcHandle>>,
     pub mpris: Mutex<Option<MprisManager>>,
     pub current_track: Mutex<Option<TrackPayload>>,
-    pub sync_room: SyncRoomManager,
+    pub sync_room: Arc<SyncRoomManager>,
     pub power_manager: PowerManager,
     pub remote_token: String,
 }
@@ -110,7 +110,7 @@ pub fn run() {
         discord_rpc: Mutex::new(discord_rpc),
         mpris: Mutex::new(None),
         current_track: Mutex::new(None),
-        sync_room: SyncRoomManager::new(),
+        sync_room: Arc::new(SyncRoomManager::new()),
         power_manager: PowerManager::new(),
         remote_token: remote_token.clone(),
     });

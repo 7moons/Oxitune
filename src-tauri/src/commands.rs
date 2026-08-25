@@ -306,26 +306,24 @@ pub fn toggle_sync_window(app_handle: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn create_sync_room(
+pub async fn create_sync_room(
     app_handle: AppHandle,
     state: State<'_, Arc<AppState>>,
     nickname: String,
-) -> crate::sync_room::RoomState {
-    let room = state.sync_room.create_room(nickname);
-    let _ = app_handle.emit("sync-room-updated", &room);
-    room
+) -> Result<crate::sync_room::RoomState, String> {
+    let sink: Arc<dyn crate::sync_room::SyncEventSink> = Arc::new(app_handle);
+    crate::sync_room::create_room(&state.sync_room, sink, nickname).await
 }
 
 #[tauri::command]
-pub fn join_sync_room(
+pub async fn join_sync_room(
     app_handle: AppHandle,
     state: State<'_, Arc<AppState>>,
     room_code: String,
     nickname: String,
-) -> crate::sync_room::RoomState {
-    let room = state.sync_room.join_room(room_code, nickname);
-    let _ = app_handle.emit("sync-room-updated", &room);
-    room
+) -> Result<crate::sync_room::RoomState, String> {
+    let sink: Arc<dyn crate::sync_room::SyncEventSink> = Arc::new(app_handle);
+    crate::sync_room::join_room(&state.sync_room, sink, room_code, nickname).await
 }
 
 #[tauri::command]
@@ -333,7 +331,7 @@ pub fn leave_sync_room(
     app_handle: AppHandle,
     state: State<'_, Arc<AppState>>,
 ) -> Result<(), String> {
-    state.sync_room.leave_room();
+    crate::sync_room::leave_room(&state.sync_room);
     let _ = app_handle.emit("sync-room-left", ());
     Ok(())
 }
@@ -347,12 +345,10 @@ pub fn get_sync_room_state(
 
 #[tauri::command]
 pub fn broadcast_sync_state(
-    app_handle: AppHandle,
     state: State<'_, Arc<AppState>>,
     playback: crate::sync_room::SyncPlaybackState,
 ) -> Result<(), String> {
-    state.sync_room.update_playback_state(playback.clone());
-    let _ = app_handle.emit("sync-playback-remote", &playback);
+    crate::sync_room::broadcast_playback(&state.sync_room, playback);
     Ok(())
 }
 
