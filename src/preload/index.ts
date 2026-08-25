@@ -165,6 +165,45 @@ async function initYTMD() {
     });
   }
 
+  // Keyboard shortcut: Ctrl+, or F2 opens settings
+  window.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey && e.key === ',') || e.key === 'F2') {
+      e.preventDefault();
+      invokeBackend('toggle_settings_window');
+    }
+  });
+
+  // Inject Settings and Mini Player buttons into YouTube Music UI
+  const injectNavbarControls = () => {
+    if (document.getElementById('ytmd-nav-controls')) return;
+
+    const rightContent = document.querySelector('ytmusic-nav-bar .right-content, ytmusic-nav-bar #right-content');
+    if (rightContent) {
+      const btnWrapper = document.createElement('div');
+      btnWrapper.id = 'ytmd-nav-controls';
+      btnWrapper.style.cssText = 'display:flex;align-items:center;gap:8px;margin-right:12px;';
+
+      const miniBtn = document.createElement('button');
+      miniBtn.textContent = 'Mini Player';
+      miniBtn.title = 'Toggle Mini Player Window';
+      miniBtn.style.cssText = 'background:#18181b;color:#e4e4e7;border:1px solid #27272a;padding:5px 10px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;';
+      miniBtn.addEventListener('click', () => invokeBackend('toggle_mini_player'));
+
+      const settingsBtn = document.createElement('button');
+      settingsBtn.textContent = '⚙ Settings';
+      settingsBtn.title = 'Open YTMD Preferences (Ctrl+,)';
+      settingsBtn.style.cssText = 'background:#18181b;color:#e4e4e7;border:1px solid #27272a;padding:5px 10px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;';
+      settingsBtn.addEventListener('click', () => invokeBackend('toggle_settings_window'));
+
+      btnWrapper.appendChild(miniBtn);
+      btnWrapper.appendChild(settingsBtn);
+      rightContent.insertBefore(btnWrapper, rightContent.firstChild);
+    }
+  };
+
+  setInterval(injectNavbarControls, 1000);
+  injectNavbarControls();
+
   console.log('[YTMD] Integration successfully activated.');
 }
 
