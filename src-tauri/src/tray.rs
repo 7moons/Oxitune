@@ -30,9 +30,15 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         ],
     )?;
 
-    let tray_builder = TrayIconBuilder::with_id("main-tray")
+    let mut tray_builder = TrayIconBuilder::with_id("main-tray")
         .menu(&menu)
-        .show_menu_on_left_click(false)
+        .show_menu_on_left_click(false);
+
+    if let Some(icon) = app.default_window_icon() {
+        tray_builder = tray_builder.icon(icon.clone());
+    }
+
+    let tray_builder = tray_builder
         .on_menu_event(move |app_handle, event| match event.id.as_ref() {
             "play_pause" => {
                 let _ = app_handle.emit("tray-command", "play-pause");
