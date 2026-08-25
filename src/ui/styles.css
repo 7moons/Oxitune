@@ -472,6 +472,119 @@ button.btn-secondary:active {
   transform: scale(0.98);
 }
 
+button.btn-primary:disabled,
+button.btn-secondary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none !important;
+}
+
+button.btn-primary:disabled:hover {
+  background: var(--accent);
+}
+
+button.btn-secondary:disabled:hover {
+  background: var(--bg-subtle);
+  border-color: var(--border);
+}
+
+/* Spinner — used inline in buttons (mid-request) and standalone (loading
+   states like the local-library scan). White variant is the default since
+   it's almost always sitting on the accent-red primary button; the
+   `.spinner-accent` variant is for use on neutral/dark backgrounds. */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spinner {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #ffffff;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+.spinner-accent {
+  border-color: var(--border);
+  border-top-color: var(--accent);
+}
+
+/* Inline error banner — surfaces a backend error message in the UI itself
+   instead of leaving it in the devtools console, which nobody but us ever
+   opens. */
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.form-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  background: rgba(220, 38, 38, 0.1);
+  border: 1px solid rgba(220, 38, 38, 0.3);
+  color: #f87171;
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.45;
+  animation: fade-in-up 0.15s ease;
+}
+
+.form-error svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: #f87171;
+}
+
+/* Toast notifications — for windows (like Settings) whose layout has no
+   natural inline slot for a `.form-error` banner next to the action that
+   failed. Fixed to the corner, stacks, self-dismisses. */
+.toast-container {
+  position: fixed;
+  top: 52px;
+  right: 16px;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+  max-width: 320px;
+}
+
+.toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  background: var(--bg-surface);
+  border: 1px solid rgba(220, 38, 38, 0.35);
+  color: var(--text-primary);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 12px;
+  line-height: 1.45;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  animation: fade-in-up 0.18s ease;
+}
+
+.toast svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: #f87171;
+}
+
 /* Toggle Switch */
 .switch {
   position: relative;

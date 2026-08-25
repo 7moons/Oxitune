@@ -41,7 +41,10 @@
     </div>
 
     <div class="tracks-table-container">
-      <div id="loading-state" class="empty-state" style="display: none;">Scanning music files...</div>
+      <div id="loading-state" class="empty-state" style="display: none;">
+        <span class="spinner spinner-accent" style="width: 20px; height: 20px; border-width: 2.5px;"></span>
+        <span>Scanning music files…</span>
+      </div>
       <table class="tracks-table" id="tracks-table" style="display: none;">
         <thead>
           <tr>
@@ -56,8 +59,8 @@
         <tbody id="tracks-body"></tbody>
       </table>
       <div id="empty-state" class="empty-state">
-        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/><line x1="12" y1="2" x2="12" y2="5"/></svg>
-        <span>No local music files found.</span>
+        <svg id="empty-state-icon" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/><line x1="12" y1="2" x2="12" y2="5"/></svg>
+        <span id="empty-state-text">No local music files found.</span>
         <button id="scan-now-btn" class="btn-primary" style="font-size: 12px; padding: 6px 14px;">Scan Music Directory</button>
       </div>
     </div>

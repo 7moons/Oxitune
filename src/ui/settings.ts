@@ -45,6 +45,34 @@ interface AppConfig {
 let currentConfig: AppConfig | null = null;
 let currentGains: number[] = new Array(10).fill(0);
 
+const ERROR_ICON_SVG =
+  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
+
+/** Surfaces a backend failure as a self-dismissing toast in the corner —
+ * settings' header has no room for an inline banner next to Save, unlike
+ * Listen Together's room panels. */
+function showToast(message: string) {
+  const container = document.getElementById('toast-container');
+  if (!container) return;
+  const toast = document.createElement('div');
+  toast.className = 'toast';
+  toast.innerHTML = `${ERROR_ICON_SVG}<span>${escapeHtml(message)}</span>`;
+  container.appendChild(toast);
+  setTimeout(() => toast.remove(), 6000);
+}
+
+function escapeHtml(str: string): string {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+function errorMessage(e: unknown): string {
+  if (typeof e === 'string') return e;
+  if (e instanceof Error) return e.message;
+  return 'Something went wrong. Check the app logs for details.';
+}
+
 function formatFreq(freq: number): string {
   if (freq >= 1000) {
     return `${freq / 1000}k`;
@@ -267,6 +295,7 @@ async function loadSettings() {
       renderEqSliders();
     } catch (e) {
       console.error('[YTMD] Failed to load settings:', e);
+      showToast(`Couldn't load your settings: ${errorMessage(e)}`);
     }
   } else {
     renderEqSliders();
@@ -337,18 +366,28 @@ async function saveSettings() {
 
   currentConfig.equalizer_gains = [...currentGains];
 
+  const saveBtn = document.getElementById('save-btn') as HTMLButtonElement | null;
+  const savingHtml = '<span class="spinner"></span><span>Saving…</span>';
+  const idleText = 'Save Changes';
+  if (saveBtn) {
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = savingHtml;
+  }
+
   try {
     await window.__TAURI__.core.invoke('save_config', { config: currentConfig });
-    const saveBtn = document.getElementById('save-btn');
     if (saveBtn) {
-      const oldText = saveBtn.textContent;
       saveBtn.textContent = 'Saved!';
       setTimeout(() => {
-        saveBtn.textContent = oldText;
+        saveBtn.textContent = idleText;
       }, 1500);
     }
   } catch (e) {
     console.error('[YTMD] Failed to save settings:', e);
+    showToast(`Couldn't save your settings: ${errorMessage(e)}`);
+    if (saveBtn) saveBtn.textContent = idleText;
+  } finally {
+    if (saveBtn) saveBtn.disabled = false;
   }
 }
 

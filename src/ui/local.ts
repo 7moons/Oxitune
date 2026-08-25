@@ -50,6 +50,28 @@ function updateTrackCountBadge(count: number, total: number) {
   }
 }
 
+/** Swaps the empty-state message/icon between "haven't scanned yet" (or
+ * "no matches") and "the scan itself failed" — these look identical
+ * otherwise, which reads as the app silently doing nothing on a real error
+ * (e.g. a missing/unreadable music directory). */
+function setEmptyStateError(message: string | null) {
+  const text = document.getElementById('empty-state-text');
+  const icon = document.getElementById('empty-state-icon');
+  if (!text || !icon) return;
+
+  if (message) {
+    text.textContent = message;
+    icon.innerHTML =
+      '<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>';
+    icon.setAttribute('stroke', '#f87171');
+  } else {
+    text.textContent = 'No local music files found.';
+    icon.innerHTML =
+      '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/><line x1="12" y1="2" x2="12" y2="5"/>';
+    icon.setAttribute('stroke', 'var(--text-muted)');
+  }
+}
+
 function renderTable(tracks: LocalTrack[]) {
   currentFilteredTracks = tracks;
   const tbody = document.getElementById('tracks-body');
@@ -151,12 +173,19 @@ function playPrevTrack() {
   playTrackByIndex(prevIdx);
 }
 
+let scanInFlight = false;
+
 async function loadTracks() {
+  if (scanInFlight) return;
+  scanInFlight = true;
+
   const loadingState = document.getElementById('loading-state');
   const table = document.getElementById('tracks-table');
   const emptyState = document.getElementById('empty-state');
   const rescanIcon = document.getElementById('rescan-icon');
+  const rescanBtn = document.getElementById('rescan-btn') as HTMLButtonElement | null;
 
+  if (rescanBtn) rescanBtn.disabled = true;
   if (rescanIcon) rescanIcon.style.animation = 'spin 0.8s linear infinite';
   if (loadingState) loadingState.style.display = 'flex';
   if (table) table.style.display = 'none';
@@ -166,14 +195,20 @@ async function loadTracks() {
     if (window.__TAURI__?.core) {
       const tracks = (await window.__TAURI__.core.invoke('scan_local_music')) as LocalTrack[];
       allTracks = tracks || [];
+      setEmptyStateError(null);
       renderTable(allTracks);
     } else {
       renderTable([]);
     }
   } catch (e) {
     console.error('[YTMD Local] Failed to scan directory:', e);
+    allTracks = [];
+    const reason = typeof e === 'string' ? e : e instanceof Error ? e.message : 'Unknown error.';
+    setEmptyStateError(`Couldn't scan your music folder: ${reason}`);
     renderTable([]);
   } finally {
+    scanInFlight = false;
+    if (rescanBtn) rescanBtn.disabled = false;
     if (rescanIcon) rescanIcon.style.animation = 'none';
   }
 }

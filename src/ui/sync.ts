@@ -74,6 +74,65 @@ function escapeHtml(str: string): string {
   return div.innerHTML;
 }
 
+const ERROR_ICON_SVG =
+  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
+
+/**
+ * Toggles a button between its normal label and a spinner + status text,
+ * and disables/re-enables every input in `siblingsToLock` alongside it —
+ * so a pending create/join request can't be double-submitted and the form
+ * fields don't silently change under a request that's already in flight.
+ */
+function setButtonLoading(
+  button: HTMLButtonElement | null,
+  labelEl: HTMLElement | null,
+  loading: boolean,
+  loadingText: string,
+  originalText: string,
+  siblingsToLock: (HTMLElement | null)[]
+) {
+  if (!button || !labelEl) return;
+  button.disabled = loading;
+  siblingsToLock.forEach((el) => {
+    if (el) (el as HTMLInputElement).disabled = loading;
+  });
+  labelEl.innerHTML = loading
+    ? `<span class="spinner"></span><span>${escapeHtml(loadingText)}</span>`
+    : escapeHtml(originalText);
+}
+
+function showFormError(bannerId: string, message: string) {
+  const banner = document.getElementById(bannerId);
+  if (!banner) return;
+  banner.innerHTML = `${ERROR_ICON_SVG}<span>${escapeHtml(message)}</span>`;
+  banner.style.display = 'flex';
+}
+
+function hideFormError(bannerId: string) {
+  const banner = document.getElementById(bannerId);
+  if (banner) banner.style.display = 'none';
+}
+
+function setStatusHint(hintId: string, text: string) {
+  const hint = document.getElementById(hintId);
+  if (!hint) return;
+  if (text) {
+    hint.textContent = text;
+    hint.style.display = 'inline';
+  } else {
+    hint.style.display = 'none';
+  }
+}
+
+/** Human-readable message for whatever `invoke()` rejects with — Tauri
+ * commands that return `Result<T, String>` reject with that string
+ * directly, but fall back gracefully if something else shows up. */
+function errorMessage(e: unknown): string {
+  if (typeof e === 'string') return e;
+  if (e instanceof Error) return e.message;
+  return 'Something went wrong. Check the app logs for details.';
+}
+
 async function loadRoomState() {
   if (window.__TAURI__?.core) {
     try {
@@ -101,6 +160,7 @@ document.addEventListener('DOMContentLoaded', () => {
       tabGuest.classList.remove('active');
       panelHost.style.display = 'flex';
       panelGuest.style.display = 'none';
+      hideFormError('guest-error');
     });
 
     tabGuest.addEventListener('click', () => {
@@ -108,22 +168,35 @@ document.addEventListener('DOMContentLoaded', () => {
       tabHost.classList.remove('active');
       panelGuest.style.display = 'flex';
       panelHost.style.display = 'none';
+      hideFormError('host-error');
     });
   }
 
   // Create Room
-  const createBtn = document.getElementById('create-room-btn');
+  const createBtn = document.getElementById('create-room-btn') as HTMLButtonElement | null;
+  const createBtnLabel = document.getElementById('create-room-btn-label');
   const hostNickInput = document.getElementById('host-nickname') as HTMLInputElement;
+  let createInFlight = false;
+
   const handleCreateRoom = async () => {
+    if (createInFlight) return;
     const nick = hostNickInput?.value.trim() || 'Host';
-    if (window.__TAURI__?.core) {
-      try {
-        const room = (await window.__TAURI__.core.invoke('create_sync_room', { nickname: nick })) as RoomState;
-        activeRoom = room;
-        renderRoomView(room);
-      } catch (e) {
-        console.error('[YTMD Sync] Failed to create room:', e);
-      }
+    if (!window.__TAURI__?.core) return;
+
+    createInFlight = true;
+    hideFormError('host-error');
+    setButtonLoading(createBtn, createBtnLabel, true, 'Creating room…', 'Create Listening Room', [hostNickInput]);
+
+    try {
+      const room = (await window.__TAURI__.core.invoke('create_sync_room', { nickname: nick })) as RoomState;
+      activeRoom = room;
+      renderRoomView(room);
+    } catch (e) {
+      console.error('[YTMD Sync] Failed to create room:', e);
+      showFormError('host-error', errorMessage(e));
+    } finally {
+      createInFlight = false;
+      setButtonLoading(createBtn, createBtnLabel, false, '', 'Create Listening Room', [hostNickInput]);
     }
   };
 
@@ -135,26 +208,54 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Join Room
-  const joinBtn = document.getElementById('join-room-btn');
+  const joinBtn = document.getElementById('join-room-btn') as HTMLButtonElement | null;
+  const joinBtnLabel = document.getElementById('join-room-btn-label');
   const joinCodeInput = document.getElementById('join-code') as HTMLInputElement;
   const guestNickInput = document.getElementById('guest-nickname') as HTMLInputElement;
+  let joinInFlight = false;
+
+  // The Rust side tries the LAN beacon first (~4s) before falling back to
+  // the internet (DHT) path, which can take up to ~20s more — see
+  // p2p_sync.rs. There's no intermediate progress event from the backend,
+  // so this is a client-side timer estimating when that fallback most
+  // likely kicked in, purely so a 15s wait doesn't look like the app hung.
+  const LAN_TIMEOUT_ESTIMATE_MS = 4500;
+  let joinPhaseTimer: ReturnType<typeof setTimeout> | null = null;
 
   const handleJoinRoom = async () => {
+    if (joinInFlight) return;
     const code = joinCodeInput?.value.trim().toUpperCase();
     const nick = guestNickInput?.value.trim() || 'Friend';
-    if (!code) return;
 
-    if (window.__TAURI__?.core) {
-      try {
-        const room = (await window.__TAURI__.core.invoke('join_sync_room', {
-          roomCode: code,
-          nickname: nick
-        })) as RoomState;
-        activeRoom = room;
-        renderRoomView(room);
-      } catch (e) {
-        console.error('[YTMD Sync] Failed to join room:', e);
-      }
+    hideFormError('guest-error');
+    if (!code) {
+      showFormError('guest-error', 'Enter a room code first.');
+      return;
+    }
+    if (!window.__TAURI__?.core) return;
+
+    joinInFlight = true;
+    setButtonLoading(joinBtn, joinBtnLabel, true, 'Searching…', 'Join Listening Room', [joinCodeInput, guestNickInput]);
+    setStatusHint('guest-status-hint', 'Looking for the room on your network…');
+    joinPhaseTimer = setTimeout(() => {
+      setStatusHint('guest-status-hint', "Not found nearby — trying the internet, this can take up to 20s…");
+    }, LAN_TIMEOUT_ESTIMATE_MS);
+
+    try {
+      const room = (await window.__TAURI__.core.invoke('join_sync_room', {
+        roomCode: code,
+        nickname: nick
+      })) as RoomState;
+      activeRoom = room;
+      renderRoomView(room);
+    } catch (e) {
+      console.error('[YTMD Sync] Failed to join room:', e);
+      showFormError('guest-error', errorMessage(e));
+    } finally {
+      joinInFlight = false;
+      if (joinPhaseTimer) clearTimeout(joinPhaseTimer);
+      setStatusHint('guest-status-hint', '');
+      setButtonLoading(joinBtn, joinBtnLabel, false, '', 'Join Listening Room', [joinCodeInput, guestNickInput]);
     }
   };
 
