@@ -186,48 +186,47 @@ async function initYTMD() {
     }
   });
 
-  // Inject sleek Burger Menu in top navigation
+  // Inject sleek Fixed Floating Burger Menu
   const injectBurgerMenu = () => {
     if (document.getElementById('ytmd-burger-btn')) return;
-
-    const navBar = document.querySelector('ytmusic-nav-bar');
-    const rightContent = document.querySelector('ytmusic-nav-bar .right-content, ytmusic-nav-bar #right-content');
-    if (!navBar || !rightContent) return;
+    if (!document.body) return;
 
     // Burger Button
     const burgerBtn = document.createElement('button');
     burgerBtn.id = 'ytmd-burger-btn';
-    burgerBtn.title = 'YTMD Menu';
+    burgerBtn.title = 'YTMD Menu (Ctrl+,)';
     burgerBtn.innerHTML = `
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
         <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>
       </svg>
-      <span style="font-size: 13px; font-weight: 700; letter-spacing: -0.2px;">YTMD</span>
+      <span style="font-size: 12px; font-weight: 700; letter-spacing: -0.2px;">YTMD</span>
     `;
     burgerBtn.style.cssText = `
+      position: fixed !important;
+      top: 10px !important;
+      right: 76px !important;
       display: inline-flex !important;
       align-items: center !important;
       gap: 6px !important;
       background: #18181b !important;
       color: #fafafa !important;
-      border: 1px solid #27272a !important;
+      border: 1px solid #3f3f46 !important;
       padding: 6px 12px !important;
       border-radius: 8px !important;
       cursor: pointer !important;
-      font-family: inherit !important;
-      margin-right: 12px !important;
-      flex-shrink: 0 !important;
-      z-index: 1000 !important;
-      transition: background 0.15s ease, border-color 0.15s ease;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+      z-index: 9999999 !important;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5) !important;
+      transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease !important;
     `;
 
     burgerBtn.addEventListener('mouseenter', () => {
       burgerBtn.style.background = '#27272a';
-      burgerBtn.style.borderColor = '#3f3f46';
+      burgerBtn.style.borderColor = '#52525b';
     });
     burgerBtn.addEventListener('mouseleave', () => {
       burgerBtn.style.background = '#18181b';
-      burgerBtn.style.borderColor = '#27272a';
+      burgerBtn.style.borderColor = '#3f3f46';
     });
 
     // Dropdown Popover Menu
@@ -236,40 +235,40 @@ async function initYTMD() {
       popover = document.createElement('div');
       popover.id = 'ytmd-burger-popover';
       popover.style.cssText = `
-        position: fixed;
-        top: 60px;
-        right: 16px;
-        width: 280px;
-        background: #121215;
-        border: 1px solid #27272a;
-        border-radius: 12px;
-        box-shadow: 0 16px 36px rgba(0,0,0,0.7);
-        z-index: 999999;
+        position: fixed !important;
+        top: 52px !important;
+        right: 76px !important;
+        width: 290px !important;
+        background: #121215 !important;
+        border: 1px solid #27272a !important;
+        border-radius: 12px !important;
+        box-shadow: 0 20px 48px rgba(0,0,0,0.85) !important;
+        z-index: 99999999 !important;
         display: none;
         flex-direction: column;
-        padding: 8px;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-        color: #fafafa;
-        backdrop-filter: blur(12px);
+        padding: 8px !important;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+        color: #fafafa !important;
+        backdrop-filter: blur(16px) !important;
       `;
 
       const createMenuItem = (icon: string, label: string, shortcut: string, onClick: () => void) => {
         const item = document.createElement('button');
         item.style.cssText = `
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          width: 100%;
-          background: transparent;
-          border: none;
-          color: #e4e4e7;
-          padding: 9px 12px;
-          border-radius: 6px;
-          cursor: pointer;
-          font-size: 13px;
-          font-family: inherit;
-          text-align: left;
-          transition: background 0.12s ease, color 0.12s ease;
+          display: flex !important;
+          align-items: center !important;
+          justify-content: space-between !important;
+          width: 100% !important;
+          background: transparent !important;
+          border: none !important;
+          color: #e4e4e7 !important;
+          padding: 10px 12px !important;
+          border-radius: 6px !important;
+          cursor: pointer !important;
+          font-size: 13px !important;
+          font-family: inherit !important;
+          text-align: left !important;
+          transition: background 0.12s ease, color 0.12s ease !important;
         `;
         item.innerHTML = `
           <span style="display:flex; align-items:center; gap:10px;">
@@ -295,7 +294,7 @@ async function initYTMD() {
 
       const divider = () => {
         const div = document.createElement('div');
-        div.style.cssText = 'height: 1px; background: #27272a; margin: 6px 4px;';
+        div.style.cssText = 'height: 1px !important; background: #27272a !important; margin: 6px 4px !important;';
         return div;
       };
 
@@ -325,7 +324,7 @@ async function initYTMD() {
 
       popover.appendChild(createMenuItem('⬇', 'Download Current Track', '', async () => {
         if (!currentActiveTrack || !currentActiveTrack.videoId) {
-          alert('Please start playing a track to download.');
+          alert('Please play a track first to download.');
           return;
         }
         try {
@@ -365,13 +364,13 @@ async function initYTMD() {
       }
     });
 
-    rightContent.insertBefore(burgerBtn, rightContent.firstChild);
+    document.body.appendChild(burgerBtn);
   };
 
-  setInterval(injectBurgerMenu, 1000);
+  setInterval(injectBurgerMenu, 500);
   injectBurgerMenu();
 
-  console.log('[YTMD] Integration activated with Burger Menu.');
+  console.log('[YTMD] Integration activated with floating Burger Menu.');
 }
 
 // Start as soon as DOM is ready
