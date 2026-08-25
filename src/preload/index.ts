@@ -16,27 +16,24 @@ import { LocalFilesPlugin } from '../plugins/local-files';
 import { SyncRoomPlugin } from '../plugins/sync-room';
 import { PowerPlugin } from '../plugins/power';
 import { RemotePlugin } from '../plugins/remote';
-import { PluginContext } from '../plugins/types';
-
-declare global {
-  interface Window {
-    __TAURI__?: {
-      core: {
-        invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
-      };
-      event: {
-        listen: <T>(event: string, handler: (event: { payload: T }) => void) => Promise<() => void>;
-      };
-    };
-  }
-}
+import { PluginContext, TrackInfo } from '../plugins/types';
 
 async function initYTMD() {
   console.log('[YTMD] Initializing YouTube Music Desktop integration bridge...');
 
-  const invokeBackend = async (cmd: string, args?: Record<string, unknown>): Promise<unknown> => {
-    if (window.__TAURI__?.core) {
-      return window.__TAURI__.core.invoke(cmd, args);
+  const invokeBackend = async (cmd: string, args: Record<string, unknown> = {}): Promise<unknown> => {
+    try {
+      const internals = (window as any).__TAURI_INTERNALS__;
+      if (internals && typeof internals.invoke === 'function') {
+        return await internals.invoke(cmd, args);
+      }
+      const tauri = (window as any).__TAURI__;
+      if (tauri?.core && typeof tauri.core.invoke === 'function') {
+        return await tauri.core.invoke(cmd, args);
+      }
+      console.warn(`[YTMD] Tauri IPC bridge not ready for '${cmd}'`);
+    } catch (err) {
+      console.error(`[YTMD] Failed to invoke '${cmd}':`, err);
     }
     return null;
   };
@@ -82,6 +79,8 @@ async function initYTMD() {
 
   await registry.initAll();
 
+  let currentActiveTrack: TrackInfo | null = null;
+
   // Initialize Player Observer
   const observer = new PlayerObserver();
 
@@ -110,6 +109,7 @@ async function initYTMD() {
     registry.handlePlaybackChange(isPlaying);
     const track = observer.getCurrentTrack();
     if (track) {
+      track.isPlaying = isPlaying;
       try {
         await invokeBackend('update_track_info', {
           track: {
@@ -124,24 +124,24 @@ async function initYTMD() {
           }
         });
       } catch (e) {
-        console.error('[YTMD] Failed to sync playback state:', e);
+        console.error('[YTMD] Failed to sync playback status:', e);
       }
     }
   });
 
-  observer.onTick((currentTime) => {
-    registry.handleTick(currentTime);
+  observer.onTick((positionSecs) => {
+    registry.handleTick(positionSecs);
   });
 
-  function handlePlayerCommand(cmd: string) {
-    switch (cmd) {
+  function handlePlayerCommand(command: string) {
+    switch (command) {
       case 'play':
         PlayerBridge.play();
         break;
       case 'pause':
         PlayerBridge.pause();
         break;
-      case 'play-pause':
+      case 'play_pause':
         PlayerBridge.playPause();
         break;
       case 'next':
@@ -163,26 +163,20 @@ async function initYTMD() {
   }
 
   // Listen to Tauri IPC events
-  if (window.__TAURI__?.event) {
-    const { listen } = window.__TAURI__.event;
+  const listenEvent = (eventName: string, handler: (payload: any) => void) => {
+    const tauri = (window as any).__TAURI__;
+    if (tauri?.event?.listen) {
+      tauri.event.listen(eventName, (e: any) => handler(e.payload));
+    }
+  };
 
-    listen<string>('player-command', (e) => handlePlayerCommand(e.payload));
-    listen<string>('tray-command', (e) => handlePlayerCommand(e.payload));
-    listen<string>('mpris-command', (e) => handlePlayerCommand(e.payload));
-    listen<string>('global-shortcut-event', (e) => handlePlayerCommand(e.payload));
-
-    listen<number>('player-seek', (e) => {
-      PlayerBridge.seekTo(e.payload);
-    });
-
-    listen<number>('mpris-command-seek', (e) => {
-      PlayerBridge.seekTo(e.payload);
-    });
-
-    listen<number>('player-volume', (e) => {
-      PlayerBridge.setVolume(e.payload);
-    });
-  }
+  listenEvent('player-command', (payload) => handlePlayerCommand(payload));
+  listenEvent('tray-command', (payload) => handlePlayerCommand(payload));
+  listenEvent('mpris-command', (payload) => handlePlayerCommand(payload));
+  listenEvent('global-shortcut-event', (payload) => handlePlayerCommand(payload));
+  listenEvent('player-seek', (payload) => PlayerBridge.seekTo(payload));
+  listenEvent('mpris-command-seek', (payload) => PlayerBridge.seekTo(payload));
+  listenEvent('player-volume', (payload) => PlayerBridge.setVolume(payload));
 
   // Keyboard shortcut: Ctrl+, or F2 opens settings
   window.addEventListener('keydown', (e) => {
@@ -192,65 +186,148 @@ async function initYTMD() {
     }
   });
 
-  // Inject unified toolbar into YouTube Music UI
-  const createNavButton = (label: string, title: string, onClick: () => void) => {
-    const btn = document.createElement('button');
-    btn.className = 'ytmd-navbar-action-btn';
-    btn.textContent = label;
-    btn.title = title;
-    btn.style.cssText = `
-      background: #18181b;
-      color: #e4e4e7;
-      border: 1px solid #27272a;
-      padding: 5px 10px;
-      border-radius: 6px;
-      font-size: 12px;
-      font-weight: 600;
-      cursor: pointer;
-      font-family: inherit;
-      white-space: nowrap;
+  // Inject sleek Burger Menu in top navigation
+  const injectBurgerMenu = () => {
+    if (document.getElementById('ytmd-burger-btn')) return;
+
+    const navBar = document.querySelector('ytmusic-nav-bar');
+    const rightContent = document.querySelector('ytmusic-nav-bar .right-content, ytmusic-nav-bar #right-content');
+    if (!navBar || !rightContent) return;
+
+    // Burger Button
+    const burgerBtn = document.createElement('button');
+    burgerBtn.id = 'ytmd-burger-btn';
+    burgerBtn.title = 'YTMD Menu';
+    burgerBtn.innerHTML = `
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>
+      </svg>
+      <span style="font-size: 13px; font-weight: 700; letter-spacing: -0.2px;">YTMD</span>
+    `;
+    burgerBtn.style.cssText = `
+      display: inline-flex !important;
+      align-items: center !important;
+      gap: 6px !important;
+      background: #18181b !important;
+      color: #fafafa !important;
+      border: 1px solid #27272a !important;
+      padding: 6px 12px !important;
+      border-radius: 8px !important;
+      cursor: pointer !important;
+      font-family: inherit !important;
+      margin-right: 12px !important;
+      flex-shrink: 0 !important;
+      z-index: 1000 !important;
       transition: background 0.15s ease, border-color 0.15s ease;
     `;
-    btn.addEventListener('mouseenter', () => {
-      btn.style.background = '#27272a';
-      btn.style.borderColor = '#3f3f46';
-      btn.style.color = '#ffffff';
+
+    burgerBtn.addEventListener('mouseenter', () => {
+      burgerBtn.style.background = '#27272a';
+      burgerBtn.style.borderColor = '#3f3f46';
     });
-    btn.addEventListener('mouseleave', () => {
-      btn.style.background = '#18181b';
-      btn.style.borderColor = '#27272a';
-      btn.style.color = '#e4e4e7';
+    burgerBtn.addEventListener('mouseleave', () => {
+      burgerBtn.style.background = '#18181b';
+      burgerBtn.style.borderColor = '#27272a';
     });
-    btn.addEventListener('click', onClick);
-    return btn;
-  };
 
-  let currentActiveTrack: any = null;
+    // Dropdown Popover Menu
+    let popover = document.getElementById('ytmd-burger-popover');
+    if (!popover) {
+      popover = document.createElement('div');
+      popover.id = 'ytmd-burger-popover';
+      popover.style.cssText = `
+        position: fixed;
+        top: 60px;
+        right: 16px;
+        width: 280px;
+        background: #121215;
+        border: 1px solid #27272a;
+        border-radius: 12px;
+        box-shadow: 0 16px 36px rgba(0,0,0,0.7);
+        z-index: 999999;
+        display: none;
+        flex-direction: column;
+        padding: 8px;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        color: #fafafa;
+        backdrop-filter: blur(12px);
+      `;
 
-  const injectNavbarControls = () => {
-    if (document.getElementById('ytmd-nav-controls')) return;
+      const createMenuItem = (icon: string, label: string, shortcut: string, onClick: () => void) => {
+        const item = document.createElement('button');
+        item.style.cssText = `
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          width: 100%;
+          background: transparent;
+          border: none;
+          color: #e4e4e7;
+          padding: 9px 12px;
+          border-radius: 6px;
+          cursor: pointer;
+          font-size: 13px;
+          font-family: inherit;
+          text-align: left;
+          transition: background 0.12s ease, color 0.12s ease;
+        `;
+        item.innerHTML = `
+          <span style="display:flex; align-items:center; gap:10px;">
+            <span style="font-size: 15px;">${icon}</span>
+            <span style="font-weight: 500;">${label}</span>
+          </span>
+          <span style="font-size: 11px; color: #71717a; font-family: monospace;">${shortcut}</span>
+        `;
+        item.addEventListener('mouseenter', () => {
+          item.style.background = '#27272a';
+          item.style.color = '#ffffff';
+        });
+        item.addEventListener('mouseleave', () => {
+          item.style.background = 'transparent';
+          item.style.color = '#e4e4e7';
+        });
+        item.addEventListener('click', () => {
+          if (popover) popover.style.display = 'none';
+          onClick();
+        });
+        return item;
+      };
 
-    const rightContent = document.querySelector('ytmusic-nav-bar .right-content, ytmusic-nav-bar #right-content, ytmusic-nav-bar');
-    if (rightContent) {
-      const btnWrapper = document.createElement('div');
-      btnWrapper.id = 'ytmd-nav-controls';
-      btnWrapper.style.cssText = 'display:flex !important;align-items:center !important;gap:6px !important;margin:0 10px !important;flex-shrink:0 !important;z-index:9999 !important;';
+      const divider = () => {
+        const div = document.createElement('div');
+        div.style.cssText = 'height: 1px; background: #27272a; margin: 6px 4px;';
+        return div;
+      };
 
-      const localBtn = createNavButton('🎵 Local', 'Open Local Music Library', () => {
+      popover.appendChild(createMenuItem('⚙', 'Preferences & DSP EQ', 'Ctrl+,', () => {
+        invokeBackend('toggle_settings_window');
+      }));
+
+      popover.appendChild(createMenuItem('🎵', 'Local Music Library', '', () => {
         invokeBackend('toggle_local_library_window');
-      });
+      }));
 
-      const syncBtn = createNavButton('👥 Sync', 'Listen Together (P2P Room Sync)', () => {
+      popover.appendChild(createMenuItem('👥', 'Listen Together (Sync)', '', () => {
         invokeBackend('toggle_sync_window');
-      });
+      }));
 
-      const downloadBtn = createNavButton('⬇ Download', 'Download Current Track (MP3/FLAC)', async () => {
+      popover.appendChild(createMenuItem('📱', 'Mobile Web Remote', '', () => {
+        const remoteBtn = document.getElementById('ytmd-remote-nav-btn');
+        if (remoteBtn) remoteBtn.click();
+        else invokeBackend('toggle_settings_window');
+      }));
+
+      popover.appendChild(createMenuItem('🗖', 'Mini Player', '', () => {
+        invokeBackend('toggle_mini_player');
+      }));
+
+      popover.appendChild(divider());
+
+      popover.appendChild(createMenuItem('⬇', 'Download Current Track', '', async () => {
         if (!currentActiveTrack || !currentActiveTrack.videoId) {
-          downloadBtn.textContent = 'Play a track first';
-          setTimeout(() => { downloadBtn.textContent = '⬇ Download'; }, 2000);
+          alert('Please start playing a track to download.');
           return;
         }
-        downloadBtn.textContent = '⏳ Downloading...';
         try {
           await invokeBackend('download_track', {
             request: {
@@ -263,46 +340,38 @@ async function initYTMD() {
               embed_lyrics: config.embed_lyrics !== false
             }
           });
-          downloadBtn.textContent = '✓ Saved!';
-          setTimeout(() => { downloadBtn.textContent = '⬇ Download'; }, 2500);
-        } catch {
-          downloadBtn.textContent = '✕ Error';
-          setTimeout(() => { downloadBtn.textContent = '⬇ Download'; }, 2500);
+          alert(`Download started for: ${currentActiveTrack.title}`);
+        } catch (e) {
+          console.error('[YTMD Download Error]:', e);
+        }
+      }));
+
+      document.body.appendChild(popover);
+
+      // Close on outside click
+      document.addEventListener('click', (e) => {
+        if (popover && popover.style.display === 'flex') {
+          if (!popover.contains(e.target as Node) && !burgerBtn.contains(e.target as Node)) {
+            popover.style.display = 'none';
+          }
         }
       });
-
-      const remoteBtn = createNavButton('📱 Remote', 'Mobile Web Remote (QR Code)', () => {
-        const modal = document.getElementById('ytmd-remote-nav-btn');
-        if (modal) {
-          modal.click();
-        } else {
-          invokeBackend('toggle_settings_window');
-        }
-      });
-
-      const miniBtn = createNavButton('🗖 Mini', 'Toggle Mini Player Window', () => {
-        invokeBackend('toggle_mini_player');
-      });
-
-      const settingsBtn = createNavButton('⚙ Settings', 'Open YTMD Preferences (Ctrl+,)', () => {
-        invokeBackend('toggle_settings_window');
-      });
-
-      btnWrapper.appendChild(localBtn);
-      btnWrapper.appendChild(syncBtn);
-      btnWrapper.appendChild(downloadBtn);
-      btnWrapper.appendChild(remoteBtn);
-      btnWrapper.appendChild(miniBtn);
-      btnWrapper.appendChild(settingsBtn);
-
-      rightContent.insertBefore(btnWrapper, rightContent.firstChild);
     }
+
+    burgerBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (popover) {
+        popover.style.display = popover.style.display === 'flex' ? 'none' : 'flex';
+      }
+    });
+
+    rightContent.insertBefore(burgerBtn, rightContent.firstChild);
   };
 
-  setInterval(injectNavbarControls, 1000);
-  injectNavbarControls();
+  setInterval(injectBurgerMenu, 1000);
+  injectBurgerMenu();
 
-  console.log('[YTMD] Integration successfully activated.');
+  console.log('[YTMD] Integration activated with Burger Menu.');
 }
 
 // Start as soon as DOM is ready
