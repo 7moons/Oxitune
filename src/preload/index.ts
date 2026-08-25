@@ -24,19 +24,36 @@ let currentActiveTrack: TrackInfo | null = null;
 let currentPluginContext: PluginContext | null = null;
 
 const invokeBackend = async (cmd: string, args: Record<string, unknown> = {}): Promise<unknown> => {
-  try {
-    const internals = (window as any).__TAURI_INTERNALS__;
-    if (internals && typeof internals.invoke === 'function') {
-      return await internals.invoke(cmd, args);
+  const pluginCmd = cmd.startsWith('plugin:') ? cmd : `plugin:ytmd|${cmd}`;
+  const internals = (window as any).__TAURI_INTERNALS__;
+  if (internals && typeof internals.invoke === 'function') {
+    try {
+      return await internals.invoke(pluginCmd, args);
+    } catch (err1) {
+      try {
+        return await internals.invoke(cmd, args);
+      } catch (err2) {
+        console.error(`[YTMD IPC] Execution of '${cmd}' failed:`, err1);
+      }
     }
-    const tauri = (window as any).__TAURI__;
-    if (tauri?.core && typeof tauri.core.invoke === 'function') {
-      return await tauri.core.invoke(cmd, args);
-    }
-    console.warn(`[YTMD IPC] Bridge not ready for command: ${cmd}`);
-  } catch (err) {
-    console.error(`[YTMD IPC] Execution of '${cmd}' failed:`, err);
+    return null;
   }
+
+  const tauri = (window as any).__TAURI__;
+  if (tauri?.core && typeof tauri.core.invoke === 'function') {
+    try {
+      return await tauri.core.invoke(pluginCmd, args);
+    } catch {
+      try {
+        return await tauri.core.invoke(cmd, args);
+      } catch (err) {
+        console.error(`[YTMD IPC] Execution of '${cmd}' failed:`, err);
+      }
+    }
+    return null;
+  }
+
+  console.warn(`[YTMD IPC] Bridge not ready for command: ${cmd}`);
   return null;
 };
 

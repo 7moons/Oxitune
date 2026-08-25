@@ -28,6 +28,37 @@ pub struct AppState {
     pub power_manager: PowerManager,
 }
 
+fn ytmd_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
+    tauri::plugin::Builder::new("ytmd")
+        .invoke_handler(tauri::generate_handler![
+            commands::get_config,
+            commands::save_config,
+            commands::update_track_info,
+            commands::toggle_mini_player,
+            commands::toggle_settings_window,
+            commands::toggle_local_library_window,
+            commands::toggle_sync_window,
+            commands::send_player_command,
+            commands::send_seek_command,
+            commands::send_volume_command,
+            commands::fetch_lyrics,
+            commands::notify_track_change,
+            commands::download_track,
+            commands::scan_local_music,
+            commands::create_sync_room,
+            commands::join_sync_room,
+            commands::leave_sync_room,
+            commands::get_sync_room_state,
+            commands::broadcast_sync_state,
+            commands::get_remote_info,
+            commands::set_inhibit_sleep,
+            commands::minimize_window,
+            commands::toggle_maximize_window,
+            commands::close_window,
+        ])
+        .build()
+}
+
 pub fn run() {
     let config_manager = ConfigManager::new();
     let initial_config = config_manager.load();
@@ -56,6 +87,7 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::new().build())
+        .plugin(ytmd_plugin())
         .manage(app_state)
         .setup(move |app| {
             let handle = app.handle().clone();
