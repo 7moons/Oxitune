@@ -35,11 +35,16 @@ pub async fn execute_download(
         fs::create_dir_all(&output_dir).map_err(|e| e.to_string())?;
     }
 
-    let format_ext = request.format.unwrap_or_else(|| "mp3".to_string());
+    let format_ext = sanitize_format(request.format.as_deref());
     let clean_title = sanitize_filename(&request.title);
     let clean_artist = sanitize_filename(&request.artist);
     let filename = format!("{} - {}.{}", clean_artist, clean_title, format_ext);
     let output_file_path = output_dir.join(&filename);
+
+    // Defense in depth: the sanitized filename must never escape output_dir.
+    if output_file_path.parent() != Some(output_dir.as_path()) {
+        return Err("Invalid output path".to_string());
+    }
     let output_str = output_file_path.to_string_lossy().to_string();
 
     let yt_url = format!("https://music.youtube.com/watch?v={}", request.video_id);
@@ -175,6 +180,20 @@ fn sanitize_filename(name: &str) -> String {
         .collect()
 }
 
+const ALLOWED_AUDIO_FORMATS: &[&str] = &["mp3", "flac", "opus", "m4a", "wav", "aac", "ogg"];
+
+/// Only ever returns one of ALLOWED_AUDIO_FORMATS. Untrusted input (the `format`
+/// field of a DownloadRequest) must never reach a filesystem path or a yt-dlp
+/// argument unvalidated — a value like "../../../../.config/autostart/x" would
+/// otherwise escape output_dir (see execute_download's confinement check, which
+/// this whitelist exists to make redundant-by-construction).
+fn sanitize_format(requested: Option<&str>) -> String {
+    match requested {
+        Some(f) if ALLOWED_AUDIO_FORMATS.contains(&f) => f.to_string(),
+        _ => "mp3".to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -184,5 +203,59 @@ mod tests {
         assert_eq!(sanitize_filename("Queen: Bohemian / Rhapsody?"), "Queen_ Bohemian _ Rhapsody_");
         assert_eq!(sanitize_filename("AC/DC"), "AC_DC");
         assert_eq!(sanitize_filename("Standard Title"), "Standard Title");
+    }
+
+    #[test]
+    fn test_sanitize_format_allows_known_formats() {
+        for f in ALLOWED_AUDIO_FORMATS {
+            assert_eq!(sanitize_format(Some(f)), *f);
+        }
+    }
+
+    #[test]
+    fn test_sanitize_format_rejects_path_traversal() {
+        assert_eq!(sanitize_format(Some("../../../../.config/autostart/evil")), "mp3");
+        assert_eq!(sanitize_format(Some("/etc/passwd")), "mp3");
+        assert_eq!(sanitize_format(Some("mp3\0.desktop")), "mp3");
+        assert_eq!(sanitize_format(None), "mp3");
+        assert_eq!(sanitize_format(Some("")), "mp3");
+        assert_eq!(sanitize_format(Some("EXE")), "mp3");
+    }
+
+    #[tokio::test]
+    async fn test_execute_download_rejects_path_traversal_via_format() {
+        use tempfile::tempdir;
+        let dir = tempdir().expect("tempdir");
+        let output_dir = dir.path().to_path_buf();
+
+        // This request would previously escape output_dir via the unsanitized
+        // `format` field, e.g. writing to output_dir/../../evil. It must now
+        // be coerced to a safe, confined path instead of erroring in a way
+        // that leaks a write outside output_dir.
+        let request = DownloadRequest {
+            video_id: "dQw4w9WgXcQ".to_string(),
+            title: "Title".to_string(),
+            artist: "Artist".to_string(),
+            album: None,
+            cover_url: None,
+            format: Some("../../../../../../tmp/evil".to_string()),
+            embed_lyrics: Some(false),
+        };
+
+        // execute_download requires a Tauri AppHandle to emit progress events,
+        // which isn't available in a unit test; instead we directly verify
+        // the two functions it composes: format sanitization and the
+        // confinement invariant they must satisfy together.
+        let format_ext = sanitize_format(request.format.as_deref());
+        assert_eq!(format_ext, "mp3");
+
+        let filename = format!(
+            "{} - {}.{}",
+            sanitize_filename(&request.artist),
+            sanitize_filename(&request.title),
+            format_ext
+        );
+        let output_file_path = output_dir.join(&filename);
+        assert_eq!(output_file_path.parent(), Some(output_dir.as_path()));
     }
 }

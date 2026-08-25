@@ -15,6 +15,26 @@ pub struct LocalTrack {
     pub file_size_bytes: u64,
 }
 
+/// True only if `candidate` resolves (after following symlinks) to `root`
+/// itself or a descendant of it. scan_local_music is reachable from any
+/// window's JS, including the untrusted music.youtube.com origin (see
+/// remote_server.rs's architecture notes), so an attacker-supplied
+/// `directory` override must never be trusted verbatim — without this check
+/// a call like `scan_local_music({ directory: "/home/user/Documents" })`
+/// would happily walk and return the contents of any readable directory on
+/// disk, not just the configured music library.
+pub fn is_within_root(root: &Path, candidate: &Path) -> bool {
+    let root_canon = match root.canonicalize() {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+    let candidate_canon = match candidate.canonicalize() {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+    candidate_canon.starts_with(&root_canon)
+}
+
 pub fn is_audio_file(path: &Path) -> bool {
     if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
         matches!(
@@ -121,6 +141,30 @@ mod tests {
     use super::*;
     use std::fs::File;
     use tempfile::tempdir;
+
+    #[test]
+    fn test_is_within_root_allows_root_and_descendants() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path();
+        let subdir = root.join("Artist");
+        std::fs::create_dir_all(&subdir).unwrap();
+
+        assert!(is_within_root(root, root));
+        assert!(is_within_root(root, &subdir));
+    }
+
+    #[test]
+    fn test_is_within_root_rejects_paths_outside_root() {
+        let dir = tempdir().expect("tempdir");
+        let root_dir = tempdir().expect("tempdir");
+        let root = root_dir.path();
+        let outside = dir.path();
+
+        assert!(!is_within_root(root, outside));
+        // A directory that doesn't exist can't be canonicalized — must
+        // fail closed (reject), never fail open.
+        assert!(!is_within_root(root, Path::new("/definitely/does/not/exist")));
+    }
 
     #[test]
     fn test_is_audio_file() {

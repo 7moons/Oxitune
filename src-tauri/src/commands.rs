@@ -254,9 +254,24 @@ pub fn scan_local_music(
     directory: Option<String>,
 ) -> Vec<crate::local_files::LocalTrack> {
     let config = state.config_manager.load();
-    let target_dir = directory
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::PathBuf::from(&config.local_music_dir));
+    let library_root = std::path::PathBuf::from(&config.local_music_dir);
+
+    let target_dir = match directory {
+        Some(requested) => {
+            let requested_path = std::path::PathBuf::from(&requested);
+            if crate::local_files::is_within_root(&library_root, &requested_path) {
+                requested_path
+            } else {
+                log::warn!(
+                    "[YTMD] scan_local_music rejected a directory outside the configured library root: {}",
+                    requested
+                );
+                library_root
+            }
+        }
+        None => library_root,
+    };
+
     crate::local_files::scan_directory(&target_dir)
 }
 
@@ -348,7 +363,7 @@ pub fn get_remote_info(
 ) -> crate::remote_server::RemoteInfo {
     let config = state.config_manager.load();
     let target_port = port.unwrap_or(config.remote_port);
-    crate::remote_server::get_remote_info(target_port)
+    crate::remote_server::get_remote_info(target_port, &state.remote_token)
 }
 
 #[tauri::command]

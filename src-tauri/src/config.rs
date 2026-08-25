@@ -102,6 +102,55 @@ impl Default for AppConfig {
     }
 }
 
+impl AppConfig {
+    /// Clamps every numeric/enum-ish field to its sane operating range and
+    /// falls back to defaults for blank paths. save_config is reachable from
+    /// any window's JS (including the untrusted music.youtube.com origin —
+    /// see the capabilities/architecture notes in remote_server.rs), so a
+    /// config blob arriving there must never be persisted unvalidated: e.g.
+    /// an out-of-range remote_port, a negative crossfade, or a multi-million
+    /// entry equalizer_gains vector would otherwise be written straight to
+    /// disk and reloaded on every future run.
+    pub fn sanitized(mut self) -> Self {
+        // NaN/Infinity can't be meaningfully clamped into a range (NaN
+        // compares false to everything, Infinity.clamp(lo, hi) == hi in
+        // Rust) — fall back to a sane default instead of silently letting
+        // one slip through as a boundary value.
+        fn clamp(v: f64, lo: f64, hi: f64, fallback: f64) -> f64 {
+            if !v.is_finite() {
+                return fallback;
+            }
+            v.clamp(lo, hi)
+        }
+
+        self.wheel_volume_step = clamp(self.wheel_volume_step, 0.0, 1.0, 0.05);
+        self.preamp_gain = clamp(self.preamp_gain, -24.0, 24.0, 0.0);
+        self.crossfade_seconds = clamp(self.crossfade_seconds, 0.0, 30.0, 0.0);
+        self.playback_speed = clamp(self.playback_speed, 0.25, 4.0, 1.0);
+        self.ambient_intensity = clamp(self.ambient_intensity, 0.0, 1.0, 0.6);
+
+        self.equalizer_gains.truncate(32);
+        for gain in self.equalizer_gains.iter_mut() {
+            *gain = clamp(*gain, -24.0, 24.0, 0.0);
+        }
+
+        // Never allow binding to a privileged port (<1024, requires root on
+        // most platforms and includes many well-known services).
+        if self.remote_port < 1024 {
+            self.remote_port = AppConfig::default().remote_port;
+        }
+
+        if self.download_dir.trim().is_empty() {
+            self.download_dir = AppConfig::default().download_dir;
+        }
+        if self.local_music_dir.trim().is_empty() {
+            self.local_music_dir = AppConfig::default().local_music_dir;
+        }
+
+        self
+    }
+}
+
 pub struct ConfigManager {
     config_path: PathBuf,
 }
@@ -131,7 +180,8 @@ impl ConfigManager {
     }
 
     pub fn save(&self, config: &AppConfig) -> Result<(), String> {
-        let json = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
+        let sanitized = config.clone().sanitized();
+        let json = serde_json::to_string_pretty(&sanitized).map_err(|e| e.to_string())?;
         fs::write(&self.config_path, json).map_err(|e| e.to_string())
     }
 }
@@ -139,6 +189,71 @@ impl ConfigManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_sanitized_clamps_malicious_out_of_range_values() {
+        let mut config = AppConfig::default();
+        config.wheel_volume_step = 999.0;
+        config.preamp_gain = -9999.0;
+        config.crossfade_seconds = -5.0;
+        config.playback_speed = f64::INFINITY;
+        config.ambient_intensity = f64::NAN;
+        config.remote_port = 22; // SSH — a malicious save_config trying to steer us onto a privileged port
+        config.download_dir = "".to_string();
+        config.local_music_dir = "   ".to_string();
+        config.equalizer_gains = vec![1000.0; 5000];
+
+        let clean = config.sanitized();
+
+        assert_eq!(clean.wheel_volume_step, 1.0);
+        assert_eq!(clean.preamp_gain, -24.0);
+        assert_eq!(clean.crossfade_seconds, 0.0);
+        assert_eq!(clean.playback_speed, 1.0); // non-finite input falls back to the default, not a clamp bound
+        assert_eq!(clean.ambient_intensity, 0.6); // same for NaN
+        assert_eq!(clean.remote_port, AppConfig::default().remote_port);
+        assert_eq!(clean.download_dir, AppConfig::default().download_dir);
+        assert_eq!(clean.local_music_dir, AppConfig::default().local_music_dir);
+        assert_eq!(clean.equalizer_gains.len(), 32);
+        assert!(clean.equalizer_gains.iter().all(|g| *g == 24.0));
+    }
+
+    #[test]
+    fn test_sanitized_preserves_valid_values() {
+        let mut config = AppConfig::default();
+        config.wheel_volume_step = 0.1;
+        config.preamp_gain = 3.5;
+        config.crossfade_seconds = 5.0;
+        config.playback_speed = 1.25;
+        config.ambient_intensity = 0.6;
+        config.remote_port = 9863;
+        config.equalizer_gains = vec![1.0, -2.0, 3.0];
+
+        let clean = config.sanitized();
+
+        assert_eq!(clean.wheel_volume_step, 0.1);
+        assert_eq!(clean.preamp_gain, 3.5);
+        assert_eq!(clean.crossfade_seconds, 5.0);
+        assert_eq!(clean.playback_speed, 1.25);
+        assert_eq!(clean.ambient_intensity, 0.6);
+        assert_eq!(clean.remote_port, 9863);
+        assert_eq!(clean.equalizer_gains, vec![1.0, -2.0, 3.0]);
+    }
+
+    #[test]
+    fn test_config_manager_save_persists_sanitized_config() {
+        use tempfile::tempdir;
+        let dir = tempdir().expect("tempdir");
+        let manager = ConfigManager {
+            config_path: dir.path().join("config.json"),
+        };
+
+        let mut config = AppConfig::default();
+        config.remote_port = 1; // would otherwise let an attacker steer us onto a privileged port
+
+        manager.save(&config).expect("save should succeed");
+        let loaded = manager.load();
+        assert_eq!(loaded.remote_port, AppConfig::default().remote_port);
+    }
 
     #[test]
     fn test_default_config_values() {

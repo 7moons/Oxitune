@@ -27,6 +27,7 @@ pub struct AppState {
     pub current_track: Mutex<Option<TrackPayload>>,
     pub sync_room: SyncRoomManager,
     pub power_manager: PowerManager,
+    pub remote_token: String,
 }
 
 #[derive(Deserialize)]
@@ -102,6 +103,8 @@ pub fn run() {
         None
     };
 
+    let remote_token = remote_server::generate_token();
+
     let app_state = Arc::new(AppState {
         config_manager,
         discord_rpc: Mutex::new(discord_rpc),
@@ -109,6 +112,7 @@ pub fn run() {
         current_track: Mutex::new(None),
         sync_room: SyncRoomManager::new(),
         power_manager: PowerManager::new(),
+        remote_token: remote_token.clone(),
     });
 
     let app_state_for_setup = app_state.clone();
@@ -135,7 +139,7 @@ pub fn run() {
             let _ = shortcuts::setup_shortcuts(&handle);
 
             // Start Local Bridge & Mobile Web Remote Server
-            remote_server::start_remote_server(handle.clone(), remote_port);
+            remote_server::start_remote_server(handle.clone(), remote_port, remote_token.clone());
 
             // Native Event-based IPC Bridge (100% permitted under core:event without CORS or Mixed Content)
             let handle_for_bridge = handle.clone();
@@ -161,7 +165,7 @@ pub fn run() {
                             }
                             "get_remote_info" => {
                                 let cfg = state.config_manager.load();
-                                let info = remote_server::get_remote_info(cfg.remote_port);
+                                let info = remote_server::get_remote_info(cfg.remote_port, &state.remote_token);
                                 result = serde_json::to_value(info).unwrap_or(serde_json::Value::Null);
                             }
                             "toggle_settings_window" => {
