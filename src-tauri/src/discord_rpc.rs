@@ -38,7 +38,7 @@ impl DiscordRpcHandle {
         let running = Arc::new(AtomicBool::new(true));
         let running_clone = running.clone();
 
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             let mut stream: Option<tokio::net::UnixStream> = None;
 
             while running_clone.load(Ordering::Relaxed) {
@@ -219,3 +219,25 @@ fn uuid_nonce() -> String {
     let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
     format!("{:x}", now)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_discord_rpc_handle_initialization() {
+        let handle = DiscordRpcHandle::new();
+        handle.clear();
+        handle.update(TrackPayload {
+            title: "Starboy".to_string(),
+            artist: "The Weeknd".to_string(),
+            album: Some("Starboy".to_string()),
+            cover_url: None,
+            duration_secs: 230,
+            current_time_secs: 45,
+            is_playing: true,
+            video_id: Some("34Na4j8AVgA".to_string()),
+        });
+    }
+}
+
