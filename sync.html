@@ -103,12 +103,19 @@
   <body>
     <header class="app-header" data-tauri-drag-region>
       <div class="brand" data-tauri-drag-region>
-        <span>👥 YTMD Listen Together</span>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        <span>Listen Together</span>
       </div>
       <div class="window-controls">
-        <button id="win-min-btn" class="window-btn" title="Minimize">🗕</button>
-        <button id="win-max-btn" class="window-btn" title="Maximize">🗖</button>
-        <button id="win-close-btn" class="window-btn close" title="Close">✕</button>
+        <button id="win-min-btn" class="window-btn" title="Minimize">
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 8h8"/></svg>
+        </button>
+        <button id="win-max-btn" class="window-btn" title="Maximize">
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1.5" y="1.5" width="7" height="7" rx="1"/></svg>
+        </button>
+        <button id="win-close-btn" class="window-btn close" title="Close">
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="m1.5 1.5 7 7m0-7-7 7"/></svg>
+        </button>
       </div>
     </header>
     <div class="sync-container">

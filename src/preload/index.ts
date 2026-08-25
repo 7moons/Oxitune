@@ -133,20 +133,20 @@ function injectBurgerMenu(config: Record<string, unknown>) {
       `
     });
 
-    const createMenuItem = (icon: string, label: string, shortcut: string, onClick: () => void) => {
+    const createMenuItem = (iconSvg: string, label: string, shortcut: string, onClick: () => void) => {
       const item = createEl('button', {
         style: `
           display: flex !important;
           align-items: center !important;
           justify-content: space-between !important;
           width: 100% !important;
+          padding: 8px 10px !important;
           background: transparent !important;
           border: none !important;
-          color: #e4e4e7 !important;
-          padding: 10px 12px !important;
           border-radius: 6px !important;
-          cursor: pointer !important;
+          color: #e4e4e7 !important;
           font-size: 13px !important;
+          cursor: pointer !important;
           font-family: inherit !important;
           text-align: left !important;
           transition: background 0.12s ease, color 0.12s ease !important;
@@ -154,7 +154,10 @@ function injectBurgerMenu(config: Record<string, unknown>) {
       });
 
       const left = createEl('span', { style: 'display:flex; align-items:center; gap:10px;' });
-      const iconSpan = createEl('span', { text: icon, style: 'font-size: 15px;' });
+      const iconSpan = createEl('span', {
+        style: 'display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px; color:#a1a1aa;'
+      });
+      iconSpan.innerHTML = iconSvg;
       const labelSpan = createEl('span', { text: label, style: 'font-weight: 500;' });
       left.appendChild(iconSpan);
       left.appendChild(labelSpan);
@@ -167,10 +170,12 @@ function injectBurgerMenu(config: Record<string, unknown>) {
       item.addEventListener('mouseenter', () => {
         item.style.background = '#27272a';
         item.style.color = '#ffffff';
+        iconSpan.style.color = '#ffffff';
       });
       item.addEventListener('mouseleave', () => {
         item.style.background = 'transparent';
         item.style.color = '#e4e4e7';
+        iconSpan.style.color = '#a1a1aa';
       });
       item.addEventListener('click', () => {
         if (popover) popover.style.display = 'none';
@@ -185,52 +190,82 @@ function injectBurgerMenu(config: Record<string, unknown>) {
       });
     };
 
-    popover.appendChild(createMenuItem('⚙', 'Preferences & DSP EQ', 'Ctrl+,', () => {
-      invokeBackend('toggle_settings_window');
-    }));
-
-    popover.appendChild(createMenuItem('🎵', 'Local Music Library', '', () => {
-      invokeBackend('toggle_local_library_window');
-    }));
-
-    popover.appendChild(createMenuItem('👥', 'Listen Together (Sync)', '', () => {
-      invokeBackend('toggle_sync_window');
-    }));
-
-    popover.appendChild(createMenuItem('📱', 'Mobile Web Remote', '', () => {
-      if (currentPluginContext) {
-        showQrModal(currentPluginContext);
+    popover.appendChild(createMenuItem(
+      '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
+      'Preferences & DSP EQ',
+      'Ctrl+,',
+      () => {
+        invokeBackend('toggle_settings_window');
       }
-    }));
+    ));
 
-    popover.appendChild(createMenuItem('🗖', 'Mini Player', '', () => {
-      invokeBackend('toggle_mini_player');
-    }));
+    popover.appendChild(createMenuItem(
+      '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>',
+      'Local Music Library',
+      '',
+      () => {
+        invokeBackend('toggle_local_library_window');
+      }
+    ));
+
+    popover.appendChild(createMenuItem(
+      '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+      'Listen Together (Sync)',
+      '',
+      () => {
+        invokeBackend('toggle_sync_window');
+      }
+    ));
+
+    popover.appendChild(createMenuItem(
+      '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>',
+      'Mobile Web Remote',
+      '',
+      () => {
+        if (currentPluginContext) {
+          showQrModal(currentPluginContext);
+        }
+      }
+    ));
+
+    popover.appendChild(createMenuItem(
+      '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><rect x="12" y="9" width="8" height="6" rx="1"/></svg>',
+      'Mini Player',
+      '',
+      () => {
+        invokeBackend('toggle_mini_player');
+      }
+    ));
 
     popover.appendChild(createDivider());
 
-    popover.appendChild(createMenuItem('⬇', 'Download Current Track', '', async () => {
-      if (!currentActiveTrack || !currentActiveTrack.videoId) {
-        alert('Please play a track first to download.');
-        return;
+    popover.appendChild(createMenuItem(
+      '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
+      'Download Current Track',
+      '',
+      async () => {
+        if (!currentActiveTrack || !currentActiveTrack.videoId) {
+          alert('Please play a track first to download.');
+          return;
+        }
+        try {
+          await invokeBackend('download_track', {
+            request: {
+              video_id: currentActiveTrack.videoId,
+              title: currentActiveTrack.title,
+              artist: currentActiveTrack.artist,
+              album: currentActiveTrack.album || undefined,
+              cover_url: currentActiveTrack.coverUrl || undefined,
+              format: config.download_format || 'mp3',
+              embed_lyrics: config.embed_lyrics !== false
+            }
+          });
+          alert(`Download started for: ${currentActiveTrack.title}`);
+        } catch (e) {
+          console.error('[YTMD Download Error]:', e);
+        }
       }
-      try {
-        await invokeBackend('download_track', {
-          request: {
-            video_id: currentActiveTrack.videoId,
-            title: currentActiveTrack.title,
-            artist: currentActiveTrack.artist,
-            album: currentActiveTrack.album || undefined,
-            cover_url: currentActiveTrack.coverUrl || undefined,
-            format: config.download_format || 'mp3',
-            embed_lyrics: config.embed_lyrics !== false
-          }
-        });
-        alert(`Download started for: ${currentActiveTrack.title}`);
-      } catch (e) {
-        console.error('[YTMD Download Error]:', e);
-      }
-    }));
+    ));
 
     // Quick Theme Switcher Row
     const themeRow = createEl('div', {

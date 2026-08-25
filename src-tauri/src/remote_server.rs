@@ -366,14 +366,26 @@ fn get_mobile_html() -> &'static str {
   </div>
   <div class="controls">
     <div class="btn-row">
-      <button class="btn" onclick="sendCmd('previous')">⏮ Prev</button>
-      <button class="btn btn-primary" onclick="sendCmd('play_pause')">⏯ Play</button>
-      <button class="btn" onclick="sendCmd('next')">⏭ Next</button>
+      <button class="btn" onclick="sendCmd('previous')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg> Prev
+      </button>
+      <button class="btn btn-primary" onclick="sendCmd('play_pause')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> Play / Pause
+      </button>
+      <button class="btn" onclick="sendCmd('next')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m6 18 8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg> Next
+      </button>
     </div>
     <div class="btn-row">
-      <button class="btn" onclick="sendCmd('like')">👍 Like</button>
-      <button class="btn" onclick="sendCmd('dislike')">👎 Dislike</button>
-      <button class="btn" onclick="sendCmd('mute')">🔇 Mute</button>
+      <button class="btn" onclick="sendCmd('like')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg> Like
+      </button>
+      <button class="btn" onclick="sendCmd('dislike')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3"/></svg> Dislike
+      </button>
+      <button class="btn" onclick="sendCmd('mute')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4V5z"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg> Mute
+      </button>
     </div>
     <div class="slider-box">
       <span class="slider-label">Volume</span>
