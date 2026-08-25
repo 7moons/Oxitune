@@ -395,8 +395,13 @@ async function initYTMD() {
   // Initialize Player Observer
   const observer = new PlayerObserver();
 
+  let lastSyncedPosition = 0;
+  let lastSyncRealTime = Date.now();
+
   observer.onTrackChange(async (track) => {
     currentActiveTrack = track;
+    lastSyncedPosition = track.currentTimeSecs || 0;
+    lastSyncRealTime = Date.now();
     registry.handleTrackChange(track);
     try {
       await invokeBackend('update_track_info', {
@@ -421,6 +426,8 @@ async function initYTMD() {
     const track = observer.getCurrentTrack();
     if (track) {
       track.isPlaying = isPlaying;
+      lastSyncedPosition = track.currentTimeSecs || 0;
+      lastSyncRealTime = Date.now();
       try {
         await invokeBackend('update_track_info', {
           track: {
@@ -442,6 +449,33 @@ async function initYTMD() {
 
   observer.onTick((positionSecs) => {
     registry.handleTick(positionSecs);
+
+    const track = observer.getCurrentTrack();
+    if (!track || !track.isPlaying) return;
+
+    const now = Date.now();
+    const elapsedSecs = (now - lastSyncRealTime) / 1000;
+    const expectedPosition = lastSyncedPosition + elapsedSecs;
+    const drift = Math.abs(positionSecs - expectedPosition);
+
+    // Sync whenever a seek (>2s drift) occurs or periodically every 15s to guarantee tight Discord RPC time sync
+    if (drift > 2.0 || elapsedSecs >= 15.0) {
+      lastSyncedPosition = positionSecs;
+      lastSyncRealTime = now;
+      track.currentTimeSecs = Math.round(positionSecs);
+      invokeBackend('update_track_info', {
+        track: {
+          title: track.title,
+          artist: track.artist,
+          album: track.album || null,
+          cover_url: track.coverUrl || null,
+          duration_secs: Math.round(track.durationSecs || 0),
+          current_time_secs: Math.round(positionSecs),
+          is_playing: true,
+          video_id: track.videoId || null
+        }
+      }).catch((e) => console.error('[YTMD] Failed to sync seek/progress to backend:', e));
+    }
   });
 
   function handlePlayerCommand(command: string) {

@@ -44,60 +44,6 @@ export function sanitizePlayerResponse<T>(data: T): T {
   return data;
 }
 
-// In-engine JSON response & ytInitialPlayerResponse interceptor (uBlock Origin style)
-let interceptorsInstalled = false;
-
-function installJsonInterceptors() {
-  if (interceptorsInstalled || typeof window === 'undefined') return;
-  interceptorsInstalled = true;
-
-  try {
-    // 1. Intercept JSON.parse
-    const origParse = JSON.parse;
-    JSON.parse = function (text: string, reviver?: any) {
-      const data = origParse.call(this, text, reviver);
-      if (data && typeof data === 'object') {
-        if (data.adPlacements || data.playerAds || data.adSlots || data.playerResponse?.adPlacements) {
-          return sanitizePlayerResponse(data);
-        }
-      }
-      return data;
-    };
-
-    // 2. Intercept Response.prototype.json
-    if (typeof Response !== 'undefined' && Response.prototype.json) {
-      const origJson = Response.prototype.json;
-      Response.prototype.json = async function () {
-        const data = await origJson.call(this);
-        if (data && typeof data === 'object') {
-          if (data.adPlacements || data.playerAds || data.adSlots || data.playerResponse?.adPlacements) {
-            return sanitizePlayerResponse(data);
-          }
-        }
-        return data;
-      };
-    }
-
-    // 3. Intercept window.ytInitialPlayerResponse
-    let initialResponse = (window as any).ytInitialPlayerResponse;
-    Object.defineProperty(window, 'ytInitialPlayerResponse', {
-      get() {
-        return initialResponse;
-      },
-      set(val) {
-        initialResponse = sanitizePlayerResponse(val);
-      },
-      configurable: true,
-      enumerable: true
-    });
-    if (initialResponse) {
-      (window as any).ytInitialPlayerResponse = sanitizePlayerResponse(initialResponse);
-    }
-  } catch (e) {
-    console.warn('[YTMD Adblock] Failed to install JSON interceptors:', e);
-  }
-}
-
 export const AdblockPlugin: YTMDPlugin = {
   id: 'adblock',
   name: 'Ad Blocker & Anti-Nag',
@@ -106,7 +52,6 @@ export const AdblockPlugin: YTMDPlugin = {
 
   onInit(ctx: PluginContext) {
     if (typeof document === 'undefined') return;
-    installJsonInterceptors();
 
     let adCheckInterval: number | null = null;
     let adHandled = false;

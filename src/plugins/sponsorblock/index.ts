@@ -18,24 +18,25 @@ export const SponsorblockPlugin: YTMDPlugin = {
     (this as any)._skippedSegments = new Set<string>();
   },
 
-  async onTrackChange(track: TrackInfo) {
+  onTrackChange(track: TrackInfo) {
     if (!track.videoId || track.videoId === (this as any)._lastVideoId) return;
-    (this as any)._lastVideoId = track.videoId;
+    const currentVideoId = track.videoId;
+    (this as any)._lastVideoId = currentVideoId;
     (this as any)._segments = [];
     (this as any)._skippedSegments = new Set<string>();
 
-    try {
-      const categories = JSON.stringify(['music_offtopic', 'intro', 'outro', 'sponsor', 'selfpromo']);
-      const url = `https://sponsor.ajay.app/api/skipSegments?videoID=${track.videoId}&categories=${encodeURIComponent(categories)}`;
-      const res = await fetch(url);
-      if (res.ok) {
-        const data = (await res.json()) as Segment[];
-        (this as any)._segments = data;
-        console.log(`[YTMD SponsorBlock] Loaded ${data.length} segments for ${track.videoId}`);
-      }
-    } catch (e) {
-      // SponsorBlock segment not found or network offline
-    }
+    const categories = JSON.stringify(['music_offtopic', 'intro', 'outro', 'sponsor', 'selfpromo']);
+    const url = `https://sponsor.ajay.app/api/skipSegments?videoID=${currentVideoId}&categories=${encodeURIComponent(categories)}`;
+    
+    fetch(url, { signal: AbortSignal.timeout(3000) })
+      .then(async (res) => {
+        if (res.ok && (this as any)._lastVideoId === currentVideoId) {
+          const data = (await res.json()) as Segment[];
+          (this as any)._segments = data;
+          console.log(`[YTMD SponsorBlock] Loaded ${data.length} segments for ${currentVideoId}`);
+        }
+      })
+      .catch(() => {});
   },
 
   onTick(currentTimeSecs: number, ctx: PluginContext) {

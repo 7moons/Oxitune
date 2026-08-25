@@ -285,6 +285,7 @@ pub fn build_activity_payload(track: Option<&TrackPayload>, pid: u32, nonce: &st
             let artist = sanitize_discord_str(&format!("by {}", t.artist), "YouTube Music", 128);
 
             let mut activity = json!({
+                "type": 2,
                 "details": title,
                 "state": artist,
                 "timestamps": {
@@ -343,6 +344,7 @@ pub fn build_activity_payload(track: Option<&TrackPayload>, pid: u32, nonce: &st
             let artist = sanitize_discord_str(&format!("Paused - {}", t.artist), "Paused", 128);
 
             let mut activity = json!({
+                "type": 2,
                 "details": title,
                 "state": artist,
             });
@@ -411,15 +413,11 @@ async fn send_activity(
     send_frame(stream, 1, &payload.to_string()).await?;
 
     let mut buf = vec![0u8; 2048];
-    match tokio::time::timeout(std::time::Duration::from_millis(500), stream.read(&mut buf)).await {
-        Ok(Ok(n)) if n > 8 => {
+    if let Ok(Ok(n)) = tokio::time::timeout(std::time::Duration::from_millis(5), stream.read(&mut buf)).await {
+        if n > 8 {
             let resp = String::from_utf8_lossy(&buf[8..n]);
             log::debug!("[YTMD Discord RPC] Response: {}", resp);
         }
-        Ok(Err(e)) => {
-            return Err(Box::new(e));
-        }
-        _ => {}
     }
 
     Ok(())
@@ -541,6 +539,7 @@ mod tests {
         let payload_playing = build_activity_payload(Some(&track), 1234, "nonce-1");
         assert_eq!(payload_playing["cmd"], "SET_ACTIVITY");
         let act = &payload_playing["args"]["activity"];
+        assert_eq!(act["type"], 2);
         assert_eq!(act["details"], "Maniac");
         assert_eq!(act["state"], "by Carpenter Brut");
         assert!(act["timestamps"]["start"].as_u64().is_some());
@@ -555,6 +554,7 @@ mod tests {
         paused_track.is_playing = false;
         let payload_paused = build_activity_payload(Some(&paused_track), 1234, "nonce-2");
         let act_paused = &payload_paused["args"]["activity"];
+        assert_eq!(act_paused["type"], 2);
         assert_eq!(act_paused["details"], "Maniac");
         assert_eq!(act_paused["state"], "Paused - Carpenter Brut");
         assert!(act_paused.get("timestamps").is_none());
