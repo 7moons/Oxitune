@@ -8,6 +8,9 @@ import { VolumePlugin } from '../plugins/volume';
 import { NotificationsPlugin } from '../plugins/notifications';
 import { VisualizerPlugin } from '../plugins/visualizer';
 import { AudioDspPlugin } from '../plugins/audio-dsp';
+import { AmbientLightingPlugin } from '../plugins/ambient';
+import { ThemeEnginePlugin } from '../plugins/themes';
+import { PipPlugin } from '../plugins/pip';
 import { PluginContext } from '../plugins/types';
 
 declare global {
@@ -63,6 +66,9 @@ async function initYTMD() {
   registry.register(NotificationsPlugin);
   registry.register(VisualizerPlugin);
   registry.register(AudioDspPlugin);
+  registry.register(AmbientLightingPlugin);
+  registry.register(ThemeEnginePlugin);
+  registry.register(PipPlugin);
 
   await registry.initAll();
 

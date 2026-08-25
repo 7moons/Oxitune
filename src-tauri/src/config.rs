@@ -29,6 +29,9 @@ pub struct AppConfig {
     pub skip_silence_enabled: bool,
     pub playback_speed: f64,
     pub preserve_pitch: bool,
+    pub ambient_lighting_enabled: bool,
+    pub ambient_intensity: f64,
+    pub theme_preset: String,
     pub lastfm_enabled: bool,
     pub lastfm_api_key: String,
     pub lastfm_secret: String,
@@ -62,6 +65,9 @@ impl Default for AppConfig {
             skip_silence_enabled: false,
             playback_speed: 1.0,
             preserve_pitch: true,
+            ambient_lighting_enabled: true,
+            ambient_intensity: 0.6,
+            theme_preset: "default".to_string(),
             lastfm_enabled: false,
             lastfm_api_key: "".to_string(),
             lastfm_secret: "".to_string(),
@@ -122,6 +128,9 @@ mod tests {
         assert_eq!(config.skip_silence_enabled, false);
         assert_eq!(config.playback_speed, 1.0);
         assert_eq!(config.preserve_pitch, true);
+        assert_eq!(config.ambient_lighting_enabled, true);
+        assert_eq!(config.ambient_intensity, 0.6);
+        assert_eq!(config.theme_preset, "default");
         assert_eq!(config.wheel_volume_step, 0.05);
         assert_eq!(config.quality, "high");
     }
@@ -135,6 +144,9 @@ mod tests {
         config.skip_silence_enabled = true;
         config.playback_speed = 1.25;
         config.preserve_pitch = false;
+        config.ambient_lighting_enabled = true;
+        config.ambient_intensity = 0.8;
+        config.theme_preset = "catppuccin".to_string();
         let serialized = serde_json::to_string(&config).expect("Serialization failed");
         let deserialized: AppConfig = serde_json::from_str(&serialized).expect("Deserialization failed");
         assert_eq!(deserialized.theme, "default-dark");
@@ -146,5 +158,8 @@ mod tests {
         assert_eq!(deserialized.skip_silence_enabled, true);
         assert_eq!(deserialized.playback_speed, 1.25);
         assert_eq!(deserialized.preserve_pitch, false);
+        assert_eq!(deserialized.ambient_lighting_enabled, true);
+        assert_eq!(deserialized.ambient_intensity, 0.8);
+        assert_eq!(deserialized.theme_preset, "catppuccin");
     }
 }

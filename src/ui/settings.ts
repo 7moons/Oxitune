@@ -26,6 +26,9 @@ interface AppConfig {
   skip_silence_enabled: boolean;
   playback_speed: number;
   preserve_pitch: boolean;
+  ambient_lighting_enabled: boolean;
+  ambient_intensity: number;
+  theme_preset: string;
   lastfm_enabled: boolean;
   lastfm_api_key: string;
   lastfm_secret: string;
@@ -142,9 +145,27 @@ async function loadSettings() {
       setCheckbox('loudness_normalization', config.loudness_normalization);
       setCheckbox('skip_silence_enabled', config.skip_silence_enabled);
       setCheckbox('preserve_pitch', config.preserve_pitch !== false);
+      setCheckbox('ambient_lighting_enabled', config.ambient_lighting_enabled !== false);
 
-      const themeSelect = document.getElementById('theme') as HTMLSelectElement;
-      if (themeSelect) themeSelect.value = config.theme || 'default-dark';
+      // Ambient intensity slider
+      const intensitySlider = document.getElementById('ambient_intensity') as HTMLInputElement;
+      const intensityVal = document.getElementById('ambient_intensity_val');
+      if (intensitySlider) {
+        const intVal = config.ambient_intensity !== undefined ? config.ambient_intensity : 0.6;
+        intensitySlider.value = String(intVal);
+        if (intensityVal) intensityVal.textContent = `${Math.round(intVal * 100)}%`;
+      }
+
+      // Theme Preset & Custom CSS
+      const themePresetSelect = document.getElementById('theme_preset') as HTMLSelectElement;
+      if (themePresetSelect) {
+        themePresetSelect.value = config.theme_preset || config.theme || 'default';
+      }
+
+      const cssEditor = document.getElementById('custom_css') as HTMLTextAreaElement;
+      if (cssEditor) {
+        cssEditor.value = config.custom_css || '';
+      }
 
       // Preamp slider
       const preampSlider = document.getElementById('preamp_gain') as HTMLInputElement;
@@ -216,9 +237,16 @@ async function saveSettings() {
   currentConfig.loudness_normalization = getCheckbox('loudness_normalization');
   currentConfig.skip_silence_enabled = getCheckbox('skip_silence_enabled');
   currentConfig.preserve_pitch = getCheckbox('preserve_pitch');
+  currentConfig.ambient_lighting_enabled = getCheckbox('ambient_lighting_enabled');
 
-  const themeSelect = document.getElementById('theme') as HTMLSelectElement;
-  if (themeSelect) currentConfig.theme = themeSelect.value;
+  const intensitySlider = document.getElementById('ambient_intensity') as HTMLInputElement;
+  if (intensitySlider) currentConfig.ambient_intensity = parseFloat(intensitySlider.value);
+
+  const themePresetSelect = document.getElementById('theme_preset') as HTMLSelectElement;
+  if (themePresetSelect) currentConfig.theme_preset = themePresetSelect.value;
+
+  const cssEditor = document.getElementById('custom_css') as HTMLTextAreaElement;
+  if (cssEditor) currentConfig.custom_css = cssEditor.value;
 
   const presetSelect = document.getElementById('eq_preset') as HTMLSelectElement;
   if (presetSelect) currentConfig.equalizer_preset = presetSelect.value;
@@ -326,6 +354,40 @@ document.addEventListener('DOMContentLoaded', () => {
   if (pitchCheck) {
     pitchCheck.addEventListener('change', () => {
       emitLiveEvent('set-preserves-pitch', pitchCheck.checked);
+    });
+  }
+
+  // Ambient Lighting listeners
+  const ambientCheck = document.getElementById('ambient_lighting_enabled') as HTMLInputElement;
+  if (ambientCheck) {
+    ambientCheck.addEventListener('change', () => {
+      emitLiveEvent('set-ambient-enabled', ambientCheck.checked);
+    });
+  }
+
+  const ambientSlider = document.getElementById('ambient_intensity') as HTMLInputElement;
+  const ambientVal = document.getElementById('ambient_intensity_val');
+  if (ambientSlider && ambientVal) {
+    ambientSlider.addEventListener('input', () => {
+      const val = parseFloat(ambientSlider.value);
+      ambientVal.textContent = `${Math.round(val * 100)}%`;
+      emitLiveEvent('set-ambient-intensity', val);
+    });
+  }
+
+  // Theme Preset select listener (Live Reload)
+  const themeSelect = document.getElementById('theme_preset') as HTMLSelectElement;
+  if (themeSelect) {
+    themeSelect.addEventListener('change', () => {
+      emitLiveEvent('set-theme-preset', themeSelect.value);
+    });
+  }
+
+  // Custom CSS textarea listener (Live Reload)
+  const cssEditor = document.getElementById('custom_css') as HTMLTextAreaElement;
+  if (cssEditor) {
+    cssEditor.addEventListener('input', () => {
+      emitLiveEvent('set-custom-css', cssEditor.value);
     });
   }
 

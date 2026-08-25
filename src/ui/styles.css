@@ -235,6 +235,28 @@ body {
   white-space: nowrap;
 }
 
+/* Custom CSS Code Editor */
+.css-editor {
+  width: 100%;
+  height: 120px;
+  background: var(--bg-subtle);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.4;
+  resize: vertical;
+  outline: none;
+  tab-size: 2;
+  box-sizing: border-box;
+}
+
+.css-editor:focus {
+  border-color: var(--text-muted);
+}
+
 /* Buttons */
 button.btn-primary {
   background: var(--accent);

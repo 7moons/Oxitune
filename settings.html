@@ -115,6 +115,59 @@
           </div>
         </div>
 
+        <!-- Visuals & Ambient Lighting -->
+        <div class="section-title">Visuals & Ambient Glow</div>
+
+        <div class="setting-card">
+          <div class="setting-info">
+            <span class="setting-label">Dynamic Ambient Lighting</span>
+            <span class="setting-desc">Extracts album colors in real-time and creates a dynamic background glow</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="ambient_lighting_enabled" />
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="setting-card">
+          <div class="setting-info" style="flex: 1;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+              <span class="setting-label">Ambient Glow Intensity</span>
+              <span id="ambient_intensity_val" class="preamp-val" style="width: auto;">60%</span>
+            </div>
+            <input type="range" id="ambient_intensity" min="0.1" max="1.0" step="0.05" value="0.6" class="preamp-slider" style="width: 100%;" />
+          </div>
+        </div>
+
+        <!-- Themes & Custom CSS -->
+        <div class="section-title">Themes & Live CSS Editor</div>
+
+        <div class="setting-card">
+          <div class="setting-info">
+            <span class="setting-label">Theme Preset</span>
+            <span class="setting-desc">Select visual color theme</span>
+          </div>
+          <select id="theme_preset" class="eq-select">
+            <option value="default">Modern Dark</option>
+            <option value="oled">Pure OLED Black</option>
+            <option value="nord">Nord Arctic</option>
+            <option value="catppuccin">Catppuccin Mocha</option>
+            <option value="gruvbox">Gruvbox Dark</option>
+            <option value="tokyo_night">Tokyo Night</option>
+            <option value="dracula">Dracula</option>
+            <option value="rose_pine">Rosé Pine</option>
+          </select>
+        </div>
+
+        <!-- Custom CSS live editor -->
+        <div class="setting-card" style="flex-direction: column; align-items: stretch; gap: 8px;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span class="setting-label">Custom CSS (Live Reload)</span>
+            <span class="setting-desc" style="font-size: 11px;">Updates in real time</span>
+          </div>
+          <textarea id="custom_css" class="css-editor" placeholder="/* Enter custom CSS here (e.g. ytmusic-nav-bar { opacity: 0.9; }) */"></textarea>
+        </div>
+
         <!-- Integrations -->
         <div class="section-title">System & Integrations</div>
         
@@ -196,20 +249,6 @@
             <input type="checkbox" id="lyrics_enabled" />
             <span class="slider"></span>
           </label>
-        </div>
-
-        <!-- Appearance -->
-        <div class="section-title">Appearance</div>
-
-        <div class="setting-card">
-          <div class="setting-info">
-            <span class="setting-label">Theme Mode</span>
-            <span class="setting-desc">Select visual styling mode</span>
-          </div>
-          <select id="theme" class="eq-select">
-            <option value="default-dark">Modern Dark</option>
-            <option value="oled">Pure OLED Black</option>
-          </select>
         </div>
 
       </div>
