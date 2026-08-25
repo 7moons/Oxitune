@@ -65,6 +65,19 @@
         "alwaysOnTop": false,
         "decorations": true,
         "visible": false
+      },
+      {
+        "label": "sync",
+        "title": "YTMD Listen Together (Room Sync)",
+        "url": "sync.html",
+        "width": 640,
+        "height": 520,
+        "minWidth": 480,
+        "minHeight": 380,
+        "resizable": true,
+        "alwaysOnTop": false,
+        "decorations": true,
+        "visible": false
       }
     ],
     "security": {

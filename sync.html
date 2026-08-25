@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>YTMD Listen Together</title>
+    <link rel="stylesheet" href="./src/ui/styles.css" />
+    <style>
+      .sync-container {
+        padding: 24px 28px;
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+        min-height: 100vh;
+        box-sizing: border-box;
+      }
+      .tabs-header {
+        display: flex;
+        gap: 8px;
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 8px;
+      }
+      .tab-btn {
+        background: none;
+        border: none;
+        color: var(--text-secondary);
+        font-family: inherit;
+        font-size: 13px;
+        font-weight: 500;
+        padding: 6px 14px;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+      }
+      .tab-btn.active {
+        background: var(--bg-subtle);
+        color: var(--text-primary);
+        font-weight: 600;
+      }
+      .room-card {
+        background: var(--bg-surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+      .code-display {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        background: var(--bg-subtle);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 12px 16px;
+      }
+      .code-text {
+        font-family: var(--font-mono);
+        font-size: 20px;
+        font-weight: 700;
+        letter-spacing: 2px;
+        color: var(--accent);
+      }
+      .member-list {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .member-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 12px;
+        background: var(--bg-subtle);
+        border-radius: 6px;
+        font-size: 13px;
+      }
+      .badge-host {
+        font-size: 10px;
+        font-weight: 600;
+        background: #f59e0b;
+        color: #000;
+        padding: 2px 6px;
+        border-radius: 4px;
+        text-transform: uppercase;
+      }
+      .status-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        color: #22c55e;
+      }
+      .status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background-color: #22c55e;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="sync-container">
+      
+      <!-- Room Setup Mode -->
+      <div id="setup-view">
+        <div style="margin-bottom: 16px;">
+          <h2 style="font-size: 18px; margin: 0 0 6px 0;">Listen Together (Room Sync)</h2>
+          <span style="color: var(--text-secondary); font-size: 13px;">Synchronize your YouTube Music queue and playback with friends in real-time.</span>
+        </div>
+
+        <div class="tabs-header">
+          <button id="tab-host" class="tab-btn active">Create Room (Host)</button>
+          <button id="tab-guest" class="tab-btn">Join Room (Guest)</button>
+        </div>
+
+        <!-- Create Room Panel -->
+        <div id="panel-host" class="room-card" style="margin-top: 14px;">
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            <label style="font-size: 12px; color: var(--text-secondary);">Your Display Nickname</label>
+            <input type="text" id="host-nickname" class="search-box" style="max-width: 100%;" placeholder="e.g. Kacper" value="Host" />
+          </div>
+          <button id="create-room-btn" class="btn-primary">Create Listening Room</button>
+        </div>
+
+        <!-- Join Room Panel -->
+        <div id="panel-guest" class="room-card" style="margin-top: 14px; display: none;">
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            <label style="font-size: 12px; color: var(--text-secondary);">Room Code</label>
+            <input type="text" id="join-code" class="search-box" style="max-width: 100%; font-family: var(--font-mono); text-transform: uppercase;" placeholder="YTMD-ABC123" />
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            <label style="font-size: 12px; color: var(--text-secondary);">Your Display Nickname</label>
+            <input type="text" id="guest-nickname" class="search-box" style="max-width: 100%;" placeholder="e.g. Friend" value="Friend" />
+          </div>
+          <button id="join-room-btn" class="btn-primary">Join Listening Room</button>
+        </div>
+      </div>
+
+      <!-- Active Room Mode -->
+      <div id="active-room-view" style="display: none; flex-direction: column; gap: 16px;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <h2 style="font-size: 18px; margin: 0 0 4px 0;">Active Listening Room</h2>
+            <div class="status-pill">
+              <span class="status-dot"></span>
+              <span id="sync-status-label">Synchronized</span>
+            </div>
+          </div>
+          <button id="leave-room-btn" class="btn-secondary" style="color: #ef4444; border-color: #7f1d1d;">Leave Room</button>
+        </div>
+
+        <div class="room-card">
+          <div>
+            <span style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.5px;">Shareable Room Code</span>
+            <div class="code-display" style="margin-top: 6px;">
+              <span class="code-text" id="room-code-display">YTMD-XXXX</span>
+              <button id="copy-code-btn" class="btn-secondary" style="font-size: 11px; padding: 4px 10px;">Copy Code</button>
+            </div>
+          </div>
+
+          <div>
+            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+              <span style="font-size: 12px; font-weight: 600; color: var(--text-primary);">Connected Listeners</span>
+              <span id="member-count" style="font-size: 12px; color: var(--text-muted);">1 listener</span>
+            </div>
+            <div class="member-list" id="members-list">
+              <!-- Dynamically populated -->
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+    <script type="module" src="./src/ui/sync.ts"></script>
+  </body>
+</html>

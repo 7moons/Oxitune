@@ -5,6 +5,7 @@ pub mod downloader;
 pub mod local_files;
 pub mod mpris;
 pub mod shortcuts;
+pub mod sync_room;
 pub mod tray;
 
 use config::ConfigManager;
@@ -12,6 +13,7 @@ use discord_rpc::{DiscordRpcHandle, TrackPayload};
 use mpris::MprisManager;
 use parking_lot::Mutex;
 use std::sync::Arc;
+use sync_room::SyncRoomManager;
 use tauri::{Manager, WindowEvent};
 
 pub struct AppState {
@@ -19,6 +21,7 @@ pub struct AppState {
     pub discord_rpc: Mutex<Option<DiscordRpcHandle>>,
     pub mpris: Mutex<Option<MprisManager>>,
     pub current_track: Mutex<Option<TrackPayload>>,
+    pub sync_room: SyncRoomManager,
 }
 
 pub fn run() {
@@ -36,6 +39,7 @@ pub fn run() {
         discord_rpc: Mutex::new(discord_rpc),
         mpris: Mutex::new(None),
         current_track: Mutex::new(None),
+        sync_room: SyncRoomManager::new(),
     });
 
     let app_state_for_setup = app_state.clone();
@@ -75,7 +79,7 @@ pub fn run() {
                         api.prevent_close();
                         let _ = window.hide();
                     }
-                } else if window.label() == "miniplayer" || window.label() == "settings" || window.label() == "local" {
+                } else if window.label() == "miniplayer" || window.label() == "settings" || window.label() == "local" || window.label() == "sync" {
                     api.prevent_close();
                     let _ = window.hide();
                 }
@@ -88,6 +92,7 @@ pub fn run() {
             commands::toggle_mini_player,
             commands::toggle_settings_window,
             commands::toggle_local_library_window,
+            commands::toggle_sync_window,
             commands::send_player_command,
             commands::send_seek_command,
             commands::send_volume_command,
@@ -95,6 +100,11 @@ pub fn run() {
             commands::notify_track_change,
             commands::download_track,
             commands::scan_local_music,
+            commands::create_sync_room,
+            commands::join_sync_room,
+            commands::leave_sync_room,
+            commands::get_sync_room_state,
+            commands::broadcast_sync_state,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

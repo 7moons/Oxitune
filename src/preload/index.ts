@@ -13,6 +13,7 @@ import { ThemeEnginePlugin } from '../plugins/themes';
 import { PipPlugin } from '../plugins/pip';
 import { DownloaderPlugin } from '../plugins/downloader';
 import { LocalFilesPlugin } from '../plugins/local-files';
+import { SyncRoomPlugin } from '../plugins/sync-room';
 import { PluginContext } from '../plugins/types';
 
 declare global {
@@ -73,6 +74,7 @@ async function initYTMD() {
   registry.register(PipPlugin);
   registry.register(DownloaderPlugin);
   registry.register(LocalFilesPlugin);
+  registry.register(SyncRoomPlugin);
 
   await registry.initAll();
 

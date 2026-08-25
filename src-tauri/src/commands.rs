@@ -203,6 +203,72 @@ pub fn toggle_local_library_window(app_handle: AppHandle) -> Result<(), String> 
     Ok(())
 }
 
+#[tauri::command]
+pub fn toggle_sync_window(app_handle: AppHandle) -> Result<(), String> {
+    if let Some(sync_win) = app_handle.get_webview_window("sync") {
+        if let Ok(visible) = sync_win.is_visible() {
+            if visible {
+                let _ = sync_win.hide();
+            } else {
+                let _ = sync_win.show();
+                let _ = sync_win.set_focus();
+            }
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn create_sync_room(
+    app_handle: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    nickname: String,
+) -> crate::sync_room::RoomState {
+    let room = state.sync_room.create_room(nickname);
+    let _ = app_handle.emit("sync-room-updated", &room);
+    room
+}
+
+#[tauri::command]
+pub fn join_sync_room(
+    app_handle: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    room_code: String,
+    nickname: String,
+) -> crate::sync_room::RoomState {
+    let room = state.sync_room.join_room(room_code, nickname);
+    let _ = app_handle.emit("sync-room-updated", &room);
+    room
+}
+
+#[tauri::command]
+pub fn leave_sync_room(
+    app_handle: AppHandle,
+    state: State<'_, Arc<AppState>>,
+) -> Result<(), String> {
+    state.sync_room.leave_room();
+    let _ = app_handle.emit("sync-room-left", ());
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_sync_room_state(
+    state: State<'_, Arc<AppState>>,
+) -> Option<crate::sync_room::RoomState> {
+    state.sync_room.get_room_state()
+}
+
+#[tauri::command]
+pub fn broadcast_sync_state(
+    app_handle: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    playback: crate::sync_room::SyncPlaybackState,
+) -> Result<(), String> {
+    state.sync_room.update_playback_state(playback.clone());
+    let _ = app_handle.emit("sync-playback-remote", &playback);
+    Ok(())
+}
+
 mod urlencoding {
     pub fn encode(s: &str) -> String {
         url::form_urlencoded::byte_serialize(s.as_bytes()).collect()

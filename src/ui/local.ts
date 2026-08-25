@@ -1,3 +1,5 @@
+export {};
+
 interface LocalTrack {
   id: string;
   title: string;
@@ -10,7 +12,6 @@ interface LocalTrack {
 }
 
 let allTracks: LocalTrack[] = [];
-let currentTrack: LocalTrack | null = null;
 const audioElement = document.getElementById('local-audio-element') as HTMLAudioElement;
 
 function formatDuration(secs: number): string {
@@ -68,7 +69,6 @@ function escapeHtml(str: string): string {
 }
 
 function playTrack(track: LocalTrack) {
-  currentTrack = track;
   const titleEl = document.getElementById('playing-title');
   const artistEl = document.getElementById('playing-artist');
   const playBtn = document.getElementById('play-pause-btn');

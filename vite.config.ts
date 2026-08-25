@@ -20,6 +20,7 @@ export default defineConfig({
         miniplayer: resolve(__dirname, 'miniplayer.html'),
         settings: resolve(__dirname, 'settings.html'),
         local: resolve(__dirname, 'local.html'),
+        sync: resolve(__dirname, 'sync.html'),
         preload: resolve(__dirname, 'src/preload/index.ts')
       },
       output: {
