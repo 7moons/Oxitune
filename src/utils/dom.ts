@@ -1,6 +1,6 @@
 /**
  * Pure DOM Element Builders.
- * Uses ONLY native DOM methods (createElement, createElementNS, textContent, setAttribute, appendChild)
+ * Uses ONLY native DOM methods (createElement, createElementNS, textContent, setAttribute, appendChild, DOMParser)
  * to guarantee 100% immunity to Trusted Types CSP restrictions on YouTube Music.
  */
 
@@ -21,6 +21,18 @@ export function createSvg(
   svg.appendChild(path);
 
   return svg;
+}
+
+export function createSvgIcon(svgString: string): SVGElement {
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(svgString, 'image/svg+xml');
+    const svg = doc.querySelector('svg');
+    if (svg) {
+      return document.importNode(svg, true) as SVGElement;
+    }
+  } catch {}
+  return document.createElementNS('http://www.w3.org/2000/svg', 'svg');
 }
 
 export function createEl<K extends keyof HTMLElementTagNameMap>(

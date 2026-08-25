@@ -18,7 +18,7 @@ import { SyncRoomPlugin } from '../plugins/sync-room';
 import { PowerPlugin } from '../plugins/power';
 import { RemotePlugin, showQrModal } from '../plugins/remote';
 import { PluginContext, TrackInfo } from '../plugins/types';
-import { createEl, createSvg } from '../utils/dom';
+import { createEl, createSvg, createSvgIcon } from '../utils/dom';
 
 let currentActiveTrack: TrackInfo | null = null;
 let currentPluginContext: PluginContext | null = null;
@@ -157,7 +157,7 @@ function injectBurgerMenu(config: Record<string, unknown>) {
       const iconSpan = createEl('span', {
         style: 'display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px; color:#a1a1aa;'
       });
-      iconSpan.innerHTML = iconSvg;
+      iconSpan.appendChild(createSvgIcon(iconSvg));
       const labelSpan = createEl('span', { text: label, style: 'font-weight: 500;' });
       left.appendChild(iconSpan);
       left.appendChild(labelSpan);
