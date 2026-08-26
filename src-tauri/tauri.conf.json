@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "YouTube Music",
+  "productName": "YTMD",
   "version": "1.0.0",
   "identifier": "com.ytmd.desktop",
   "build": {
@@ -72,6 +72,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -79,5 +80,13 @@
       "icons/icon.ico",
       "icons/icon.png"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQ2NzVENDIyRkM4NkI0OEYKUldTUHRJYjhJdFIxUmh3c1Y3QkFIbEszOVErSjh5VmxDZElNNDQyd2hLbXJDTXhCakR4ZmJxZi8K",
+      "endpoints": [
+        "https://github.com/KayZedd/ytmd/releases/latest/download/latest.json"
+      ]
+    }
   }
 }

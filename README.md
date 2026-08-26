@@ -1,4 +1,4 @@
-# YouTube Music Desktop (YTMD)
+# YTMD
 
 A high-performance, lightweight, and extensible desktop client for YouTube Music built with **Tauri v2**, **Rust**, and **TypeScript**.
 
@@ -22,6 +22,7 @@ YTMD provides native operating system integration, minimal memory overhead (<100
 - **Native Notifications**: Real-time track change notifications with song title and artist.
 - **Global Shortcuts**: Control playback globally even when the window is minimized or unfocused.
 - **Power Management**: Automatic system sleep inhibition during playback and optional pause on screen lock.
+- **Auto-Updates**: Checks for new signed releases shortly after launch and lets you install them with one click from Settings > About & Updates.
 
 ### Synchronized Lyrics (LRCLIB)
 - Injected directly into YouTube Music's native Lyrics tab.
@@ -34,7 +35,7 @@ YTMD provides native operating system integration, minimal memory overhead (<100
 - Animated active equalizer indicators on currently playing local tracks.
 
 ### Listen Together (P2P Room Sync)
-- Synchronize your YouTube Music playback and queue with friends in real time.
+- Synchronize your YTMD playback and queue with friends in real time.
 - Generate shareable room codes (`YTMD-XXXX`) with automatic host discovery on local or VPN/Tailscale networks.
 
 ### Mobile Web Remote Control
@@ -168,6 +169,29 @@ bun test
 # Rust backend tests
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
+
+---
+
+## Releasing a New Version
+
+Releases are built and published by `.github/workflows/release.yml`, which also generates the signed `latest.json` manifest the in-app updater polls (`src-tauri/tauri.conf.json` -> `plugins.updater.endpoints`).
+
+1. Bump the version in **all three** places so they stay in sync: `package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`.
+2. Commit, then tag and push:
+   ```bash
+   git tag v1.0.1
+   git push origin v1.0.1
+   ```
+3. The workflow builds Linux (`.deb`/`.rpm`/`.AppImage`) and Windows (`.msi`/`.exe`) installers, signs the updater artifacts, and opens a **draft** GitHub Release with everything attached. Review it and publish it manually — the updater only sees non-draft releases.
+
+The workflow needs two repository secrets (Settings > Secrets and variables > Actions):
+
+| Secret | What it is |
+| --- | --- |
+| `TAURI_SIGNING_PRIVATE_KEY` | The updater signing private key (generate once with `bunx tauri signer generate -w /path/to/key.pem`, keep the file out of git) |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | The password you set when generating that key |
+
+The matching public key is already committed in `src-tauri/tauri.conf.json` (`plugins.updater.pubkey`) — it's what lets running copies of YTMD verify that an update actually came from you. If the private key is ever regenerated, that pubkey must be updated to match or every existing install will reject future updates.
 
 ---
 

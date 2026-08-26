@@ -70,7 +70,7 @@ function injectBurgerMenu(config: Record<string, unknown>) {
   // Burger Button
   const burgerBtn = createEl('button', {
     id: 'ytmd-burger-btn',
-    title: 'YouTube Music Desktop Menu (Ctrl+,)',
+    title: 'YTMD Menu (Ctrl+,)',
     style: `
       display: inline-flex !important;
       align-items: center !important;
@@ -341,7 +341,7 @@ function injectBurgerMenu(config: Record<string, unknown>) {
 }
 
 async function initYTMD() {
-  console.log('[YTMD] Initializing YouTube Music Desktop integration bridge...');
+  console.log('[YTMD] Initializing desktop integration bridge...');
 
   let config: Record<string, unknown> = {};
 

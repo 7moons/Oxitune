@@ -234,7 +234,7 @@
         <div class="setting-card">
           <div class="setting-info">
             <span class="setting-label">Close to Tray</span>
-            <span class="setting-desc">Keep YouTube Music playing in the system tray when closing the window</span>
+            <span class="setting-desc">Keep YTMD playing in the system tray when closing the window</span>
           </div>
           <label class="switch">
             <input type="checkbox" id="close_to_tray" />
@@ -378,6 +378,28 @@
             <input type="checkbox" id="pause_on_lock" />
             <span class="slider"></span>
           </label>
+        </div>
+
+        <!-- About & Updates -->
+        <div class="section-title">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+          <span>About & Updates</span>
+        </div>
+
+        <div class="setting-card">
+          <div class="setting-info">
+            <span class="setting-label">YTMD Version</span>
+            <span class="setting-desc" id="app-version-desc">Version —</span>
+          </div>
+          <button id="check-update-btn" class="btn-secondary">Check for Updates</button>
+        </div>
+
+        <div id="update-available-card" class="setting-card" style="display: none;">
+          <div class="setting-info">
+            <span class="setting-label" id="update-available-label">Update available</span>
+            <span class="setting-desc" id="update-available-desc"></span>
+          </div>
+          <button id="install-update-btn" class="btn-primary">Install & Restart</button>
         </div>
 
       </div>

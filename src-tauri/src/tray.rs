@@ -32,7 +32,7 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 
     let mut tray_builder = TrayIconBuilder::with_id("main-tray")
         .menu(&menu)
-        .tooltip("YouTube Music Desktop")
+        .tooltip("YTMD")
         .show_menu_on_left_click(false);
 
     if let Ok(icon) = tauri::image::Image::from_bytes(include_bytes!("../icons/icon.png")) {

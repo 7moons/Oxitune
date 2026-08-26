@@ -10,6 +10,7 @@ pub mod remote_server;
 pub mod shortcuts;
 pub mod sync_room;
 pub mod tray;
+pub mod updater;
 
 use config::ConfigManager;
 use discord_rpc::{DiscordRpcHandle, TrackPayload};
@@ -29,6 +30,30 @@ pub struct AppState {
     pub sync_room: Arc<SyncRoomManager>,
     pub power_manager: PowerManager,
     pub remote_token: String,
+}
+
+/// Installs the process-wide rustls crypto provider exactly once.
+///
+/// Pulling in `tauri-plugin-updater` (via `rustls-platform-verifier`) put both
+/// the `ring` and `aws_lc_rs` cargo features of `rustls` in play at once
+/// (Cargo unifies features across the whole dependency graph, and rumqttc's
+/// TLS stack and the updater's each want a different one) — with neither a
+/// clear majority, rustls refuses to auto-select a default provider the
+/// moment anything (room sync, p2p sync, the updater) opens a TLS
+/// connection, and panics instead. Call this before any such connection is
+/// made; `#[ctor]` below does that for `cargo test`, and `run()` does it for
+/// the real app.
+pub fn ensure_crypto_provider() {
+    static INIT: std::sync::Once = std::sync::Once::new();
+    INIT.call_once(|| {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    });
+}
+
+#[cfg(test)]
+#[ctor::ctor]
+fn install_crypto_provider_for_tests() {
+    ensure_crypto_provider();
 }
 
 #[derive(Deserialize)]
@@ -90,11 +115,16 @@ fn ytmd_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
             commands::minimize_window,
             commands::toggle_maximize_window,
             commands::close_window,
+            commands::get_app_version,
+            commands::check_for_updates,
+            commands::install_update,
         ])
         .build()
 }
 
 pub fn run() {
+    ensure_crypto_provider();
+
     // Without this, every log::info!/warn!/error! call in the app (including
     // ones diagnosing real startup failures) is silently discarded — the
     // `log` facade is a no-op until some logger implementation registers
@@ -130,6 +160,7 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::new().build())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(ytmd_plugin())
         .manage(app_state)
         .setup(move |app| {
@@ -257,7 +288,7 @@ pub fn run() {
                 "main",
                 WebviewUrl::External("https://music.youtube.com".parse().expect("valid youtube music url")),
             )
-            .title("YouTube Music")
+            .title("YTMD")
             .inner_size(1280.0, 820.0)
             // YouTube Music's own UI isn't built for anything much narrower than this: its
             // right-side flyout panels (queue, "up next") are a fixed ~400-460px wide and
@@ -278,6 +309,28 @@ pub fn run() {
             // Initialize MPRIS (needs the main window's HWND on Windows)
             let mpris_manager = MprisManager::new(handle.clone(), &main_win);
             *app_state_for_setup.mpris.lock() = Some(mpris_manager);
+
+            // Silent background update check, delayed so it never competes with
+            // startup work for network/CPU. Surfaces a system notification when a
+            // newer signed release is published; the user installs it from
+            // Settings, which also re-checks (and lets them retry) on demand.
+            let handle_for_update = handle.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+                match updater::check_for_update(&handle_for_update).await {
+                    Ok(Some(info)) => {
+                        use tauri_plugin_notification::NotificationExt;
+                        let _ = handle_for_update
+                            .notification()
+                            .builder()
+                            .title("YTMD update available")
+                            .body(format!("Version {} is ready to install from Settings.", info.version))
+                            .show();
+                    }
+                    Ok(None) => {}
+                    Err(e) => log::warn!("startup update check failed: {e}"),
+                }
+            });
 
             Ok(())
         })
@@ -321,6 +374,9 @@ pub fn run() {
             commands::minimize_window,
             commands::toggle_maximize_window,
             commands::close_window,
+            commands::get_app_version,
+            commands::check_for_updates,
+            commands::install_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

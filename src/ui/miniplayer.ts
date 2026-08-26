@@ -33,7 +33,7 @@ function updateTrackUI(track: TrackPayload) {
   const pauseIcon = document.getElementById('pause-icon');
 
   if (titleEl) titleEl.textContent = track.title || 'No Track Playing';
-  if (artistEl) artistEl.textContent = track.artist || 'YouTube Music';
+  if (artistEl) artistEl.textContent = track.artist || 'YTMD';
   if (coverEl) {
     coverEl.src = track.cover_url || FALLBACK_COVER;
     coverEl.onerror = () => {

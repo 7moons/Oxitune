@@ -317,7 +317,7 @@ pub fn build_activity_payload(track: Option<&TrackPayload>, pid: u32, nonce: &st
             };
 
             let title = sanitize_discord_str(&t.title, "Unknown Track", 128);
-            let artist = sanitize_discord_str(&format!("by {}", t.artist), "YouTube Music", 128);
+            let artist = sanitize_discord_str(&format!("by {}", t.artist), "Unknown Artist", 128);
 
             let mut activity = json!({
                 "type": 2,

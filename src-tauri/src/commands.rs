@@ -558,6 +558,21 @@ pub fn close_window(window: tauri::Window) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+pub fn get_app_version(app_handle: AppHandle) -> String {
+    app_handle.package_info().version.to_string()
+}
+
+#[tauri::command]
+pub async fn check_for_updates(app_handle: AppHandle) -> Result<Option<crate::updater::UpdateInfo>, String> {
+    crate::updater::check_for_update(&app_handle).await
+}
+
+#[tauri::command]
+pub async fn install_update(app_handle: AppHandle) -> Result<(), String> {
+    crate::updater::install_update(&app_handle).await
+}
+
 mod urlencoding {
     pub fn encode(s: &str) -> String {
         url::form_urlencoded::byte_serialize(s.as_bytes()).collect()

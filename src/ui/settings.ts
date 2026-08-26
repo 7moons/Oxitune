@@ -42,6 +42,13 @@ interface AppConfig {
   lastfm_secret: string;
 }
 
+interface UpdateInfo {
+  version: string;
+  current_version: string;
+  body: string | null;
+  date: string | null;
+}
+
 let currentConfig: AppConfig | null = null;
 let currentGains: number[] = new Array(10).fill(0);
 
@@ -391,8 +398,97 @@ async function saveSettings() {
   }
 }
 
+async function loadAppVersion() {
+  const versionDesc = document.getElementById('app-version-desc');
+  if (!versionDesc || !window.__TAURI__?.core) return;
+  try {
+    const version = (await window.__TAURI__.core.invoke('get_app_version')) as string;
+    versionDesc.textContent = `Version ${version}`;
+  } catch {
+    // Leave the placeholder text if the version can't be read.
+  }
+}
+
+function showUpdateAvailable(info: UpdateInfo) {
+  const card = document.getElementById('update-available-card');
+  const desc = document.getElementById('update-available-desc');
+  if (card) card.style.display = 'flex';
+  if (desc) {
+    desc.textContent = info.body
+      ? `Version ${info.version}: ${info.body}`
+      : `Version ${info.version} is ready to install.`;
+  }
+}
+
+async function checkForUpdates(showUpToDateToast: boolean) {
+  if (!window.__TAURI__?.core) return;
+  const btn = document.getElementById('check-update-btn') as HTMLButtonElement | null;
+  const idleText = 'Check for Updates';
+
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span><span>Checking…</span>';
+  }
+
+  try {
+    const info = (await window.__TAURI__.core.invoke('check_for_updates')) as UpdateInfo | null;
+    if (info) {
+      showUpdateAvailable(info);
+    } else if (showUpToDateToast) {
+      showToast("You're already on the latest version.");
+    }
+  } catch (e) {
+    console.error('[YTMD] Update check failed:', e);
+    if (showUpToDateToast) {
+      showToast(`Couldn't check for updates: ${errorMessage(e)}`);
+    }
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = idleText;
+    }
+  }
+}
+
+async function installUpdate() {
+  if (!window.__TAURI__?.core) return;
+  const btn = document.getElementById('install-update-btn') as HTMLButtonElement | null;
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span><span>Installing…</span>';
+  }
+
+  try {
+    // On success the app restarts itself — this promise never resolves in practice.
+    await window.__TAURI__.core.invoke('install_update');
+  } catch (e) {
+    console.error('[YTMD] Update install failed:', e);
+    showToast(`Couldn't install the update: ${errorMessage(e)}`);
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Install & Restart';
+    }
+  }
+}
+
+function initUpdateChecker() {
+  loadAppVersion();
+  checkForUpdates(false);
+
+  const checkBtn = document.getElementById('check-update-btn');
+  if (checkBtn) {
+    checkBtn.addEventListener('click', () => checkForUpdates(true));
+  }
+
+  const installBtn = document.getElementById('install-update-btn');
+  if (installBtn) {
+    installBtn.addEventListener('click', installUpdate);
+  }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   loadSettings();
+  initUpdateChecker();
 
   const saveBtn = document.getElementById('save-btn');
   if (saveBtn) {
