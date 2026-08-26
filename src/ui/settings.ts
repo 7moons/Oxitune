@@ -374,6 +374,10 @@ async function saveSettings() {
 
   try {
     await window.__TAURI__.core.invoke('save_config', { config: currentConfig });
+    // Lets the main window's plugin registry re-check toggles
+    // (adblock/sponsorblock/lyrics/notifications/remote/...) immediately
+    // instead of only picking up the change on next app restart.
+    emitLiveEvent('config-updated', currentConfig);
     if (saveBtn) {
       saveBtn.textContent = 'Saved!';
       setTimeout(() => {

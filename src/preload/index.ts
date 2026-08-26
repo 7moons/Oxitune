@@ -336,10 +336,33 @@ function injectBurgerMenu(config: Record<string, unknown>) {
   }
 }
 
+// Maps plugin id -> [AppConfig field that toggles it, default when that
+// field is missing (matches AppConfig::default() in config.rs)], for the
+// handful of plugins that don't read ctx.config themselves and rely
+// entirely on the registry's enable/disable to honor the user's Settings
+// choice. Plugin ids missing here (ambient_lighting, audio_dsp, ...)
+// self-gate off ctx.config instead, so they're left out on purpose.
+const CONFIG_TOGGLED_PLUGINS: Record<string, [field: string, defaultValue: boolean]> = {
+  adblock: ['adblock_enabled', true],
+  sponsorblock: ['sponsorblock_enabled', true],
+  lyrics: ['lyrics_enabled', true],
+  notifications: ['notifications_enabled', false],
+  web_remote: ['remote_enabled', true]
+};
+
+function configToggleMap(config: Record<string, unknown>): Record<string, boolean> {
+  const map: Record<string, boolean> = {};
+  for (const [pluginId, [field, defaultValue]] of Object.entries(CONFIG_TOGGLED_PLUGINS)) {
+    const value = config[field];
+    map[pluginId] = typeof value === 'boolean' ? value : defaultValue;
+  }
+  return map;
+}
+
 async function initYTMD() {
   console.log('[YTMD] Initializing desktop integration bridge...');
 
-  let config: Record<string, unknown> = {};
+  const config: Record<string, unknown> = {};
 
   // Inject burger menu immediately
   injectBurgerMenu(config);
@@ -351,12 +374,17 @@ async function initYTMD() {
   // ticking against a torn-down document.
   window.addEventListener('pagehide', () => clearInterval(burgerMenuPoll));
 
-  // Load config in background
-  invokeBackend('get_config').then((loaded) => {
-    if (loaded && typeof loaded === 'object') {
-      config = loaded as Record<string, unknown>;
-    }
-  });
+  // Awaited (not fire-and-forget) so `context.config` below is never handed
+  // out as an empty object — plugins that read ctx.config synchronously in
+  // onInit (audio_dsp, ambient_lighting, ...) would otherwise always see
+  // defaults, never the user's saved settings. Mutated in place with
+  // Object.assign rather than reassigned, since `context.config` and this
+  // `config` binding must stay the same object for the config-updated
+  // listener below to keep working after a Settings save.
+  const loaded = await invokeBackend('get_config');
+  if (loaded && typeof loaded === 'object') {
+    Object.assign(config, loaded as Record<string, unknown>);
+  }
 
   const context: PluginContext = {
     track: null,
@@ -389,7 +417,7 @@ async function initYTMD() {
   registry.register(RemotePlugin);
 
   try {
-    await registry.initAll();
+    await registry.initAll(configToggleMap(config));
   } catch (e) {
     console.error('[YTMD] Registry init error:', e);
   }
@@ -524,6 +552,28 @@ async function initYTMD() {
   listenEvent<number>('player-seek', (payload) => PlayerBridge.seekTo(payload));
   listenEvent<number>('mpris-command-seek', (payload) => PlayerBridge.seekTo(payload));
   listenEvent<number>('player-volume', (payload) => PlayerBridge.setVolume(payload));
+
+  // Settings window emits this after a successful Save so toggles the
+  // registry gates (adblock/sponsorblock/lyrics/notifications/web_remote)
+  // take effect immediately instead of only on next app restart. Plugins
+  // that read ctx.config directly (audio_dsp, ambient_lighting, ...) pick up
+  // the change for free since `config` is mutated in place, not reassigned.
+  listenEvent<Record<string, unknown>>('config-updated', (payload) => {
+    if (!payload || typeof payload !== 'object') return;
+    Object.assign(config, payload);
+    const toggles = configToggleMap(config);
+    for (const [pluginId, shouldBeEnabled] of Object.entries(toggles)) {
+      if (shouldBeEnabled) {
+        registry.enable(pluginId).catch((e) =>
+          console.error(`[YTMD] Failed to enable plugin ${pluginId}:`, e)
+        );
+      } else {
+        registry.disable(pluginId).catch((e) =>
+          console.error(`[YTMD] Failed to disable plugin ${pluginId}:`, e)
+        );
+      }
+    }
+  });
 
   // Keyboard shortcut: Ctrl+, or F2 opens settings
   window.addEventListener('keydown', (e) => {
