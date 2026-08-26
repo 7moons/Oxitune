@@ -1,7 +1,7 @@
+use lofty::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use walkdir::WalkDir;
-use id3::TagLike;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LocalTrack {
@@ -101,8 +101,14 @@ pub fn scan_directory(dir_path: &Path) -> Vec<LocalTrack> {
             let mut album = None;
             let mut duration_secs = 0;
 
-            if ext == "mp3" {
-                if let Ok(tag) = id3::Tag::read_from_path(path) {
+            // lofty reads ID3v2/v1, Vorbis Comments, MP4 atoms and RIFF INFO
+            // through one API, so every format in ALLOWED_AUDIO_FORMATS gets
+            // real tag/duration data here — not just .mp3 (the old id3-crate
+            // path only understood ID3, so FLAC/OGG/OPUS/M4A/WAV/AAC fell
+            // back to filename guessing below with duration stuck at 0).
+            if let Ok(tagged_file) = lofty::read_from_path(path) {
+                duration_secs = tagged_file.properties().duration().as_secs();
+                if let Some(tag) = tagged_file.primary_tag().or_else(|| tagged_file.first_tag()) {
                     if let Some(t) = tag.title() {
                         title = t.to_string();
                     }
@@ -111,9 +117,6 @@ pub fn scan_directory(dir_path: &Path) -> Vec<LocalTrack> {
                     }
                     if let Some(al) = tag.album() {
                         album = Some(al.to_string());
-                    }
-                    if let Some(dur) = tag.duration() {
-                        duration_secs = (dur / 1000) as u64;
                     }
                 }
             }
@@ -164,6 +167,79 @@ mod tests {
     use super::*;
     use std::fs::File;
     use tempfile::tempdir;
+
+    // Hand-built, byte-accurate minimal WAV (RIFF/WAVE) container with a
+    // LIST/INFO tag (INAM=title, IART=artist) and a PCM `data` chunk sized
+    // for an exact, predictable duration — used to prove lofty actually
+    // extracts real tags/duration for a non-mp3 format, not just the
+    // filename-fallback heuristic. 8-bit mono @ 8kHz keeps the byte math
+    // trivial: 1 byte == 1 sample == 1/8000 second.
+    fn build_wav_with_info_tag(title: &str, artist: &str, duration_secs: u32) -> Vec<u8> {
+        fn chunk(fourcc: &[u8; 4], data: &[u8]) -> Vec<u8> {
+            let mut out = Vec::new();
+            out.extend_from_slice(fourcc);
+            out.extend_from_slice(&(data.len() as u32).to_le_bytes());
+            out.extend_from_slice(data);
+            if data.len() % 2 == 1 {
+                out.push(0); // RIFF pads every chunk to an even boundary
+            }
+            out
+        }
+
+        const SAMPLE_RATE: u32 = 8000;
+
+        let mut fmt_data = Vec::new();
+        fmt_data.extend_from_slice(&1u16.to_le_bytes()); // format_tag: PCM
+        fmt_data.extend_from_slice(&1u16.to_le_bytes()); // channels
+        fmt_data.extend_from_slice(&SAMPLE_RATE.to_le_bytes()); // sample_rate
+        fmt_data.extend_from_slice(&SAMPLE_RATE.to_le_bytes()); // byte_rate (rate * channels * bytes/sample)
+        fmt_data.extend_from_slice(&1u16.to_le_bytes()); // block_align (channels * bytes/sample)
+        fmt_data.extend_from_slice(&8u16.to_le_bytes()); // bits_per_sample
+        let fmt_chunk = chunk(b"fmt ", &fmt_data);
+
+        let mut inam = title.as_bytes().to_vec();
+        inam.push(0);
+        let mut iart = artist.as_bytes().to_vec();
+        iart.push(0);
+        let mut list_data = b"INFO".to_vec();
+        list_data.extend_from_slice(&chunk(b"INAM", &inam));
+        list_data.extend_from_slice(&chunk(b"IART", &iart));
+        let list_chunk = chunk(b"LIST", &list_data);
+
+        let pcm = vec![0x80u8; (SAMPLE_RATE * duration_secs) as usize];
+        let data_chunk = chunk(b"data", &pcm);
+
+        let mut body = Vec::new();
+        body.extend_from_slice(&fmt_chunk);
+        body.extend_from_slice(&list_chunk);
+        body.extend_from_slice(&data_chunk);
+
+        let mut wav = Vec::new();
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&((4 + body.len()) as u32).to_le_bytes());
+        wav.extend_from_slice(b"WAVE");
+        wav.extend_from_slice(&body);
+        wav
+    }
+
+    #[test]
+    fn test_scan_directory_reads_real_tags_and_duration_for_non_mp3_formats() {
+        // Regression guard: before switching to lofty, only .mp3 went
+        // through a tag reader at all — every other allowed format (this
+        // covers the same code path as flac/ogg/opus/m4a/aac) fell back to
+        // filename guessing with duration stuck at 0, even when the file
+        // actually shipped a real tag.
+        let dir = tempdir().expect("tempdir");
+        let wav_path = dir.path().join("track.wav");
+        std::fs::write(&wav_path, build_wav_with_info_tag("Real Tag Title", "Real Tag Artist", 2))
+            .expect("write wav");
+
+        let scanned = scan_directory(dir.path());
+        assert_eq!(scanned.len(), 1);
+        assert_eq!(scanned[0].title, "Real Tag Title");
+        assert_eq!(scanned[0].artist, "Real Tag Artist");
+        assert_eq!(scanned[0].duration_secs, 2);
+    }
 
     #[test]
     fn test_is_within_root_allows_root_and_descendants() {

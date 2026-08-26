@@ -16,7 +16,6 @@ export default defineConfig({
     sourcemap: !!process.env.TAURI_DEBUG,
     rollupOptions: {
       input: {
-        main: resolve(__dirname, 'index.html'),
         miniplayer: resolve(__dirname, 'miniplayer.html'),
         settings: resolve(__dirname, 'settings.html'),
         local: resolve(__dirname, 'local.html'),
