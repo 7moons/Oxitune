@@ -15,7 +15,6 @@ pub struct AppConfig {
     pub lyrics_enabled: bool,
     pub miniplayer_enabled: bool,
     pub wheel_volume_step: f64,
-    pub theme: String,
     pub custom_css: String,
     pub custom_user_agent: String,
     pub quality: String,
@@ -31,7 +30,6 @@ pub struct AppConfig {
     pub preserve_pitch: bool,
     pub ambient_lighting_enabled: bool,
     pub ambient_intensity: f64,
-    pub theme_preset: String,
     pub download_dir: String,
     pub download_format: String,
     pub embed_lyrics: bool,
@@ -70,7 +68,6 @@ impl Default for AppConfig {
             lyrics_enabled: true,
             miniplayer_enabled: true,
             wheel_volume_step: 0.05,
-            theme: "default-dark".to_string(),
             custom_css: "".to_string(),
             custom_user_agent: "".to_string(),
             quality: "high".to_string(),
@@ -86,7 +83,6 @@ impl Default for AppConfig {
             preserve_pitch: true,
             ambient_lighting_enabled: true,
             ambient_intensity: 0.6,
-            theme_preset: "default".to_string(),
             download_dir: default_download_dir,
             download_format: "mp3".to_string(),
             embed_lyrics: true,
@@ -333,7 +329,6 @@ mod tests {
         assert!(config.preserve_pitch);
         assert!(config.ambient_lighting_enabled);
         assert_eq!(config.ambient_intensity, 0.6);
-        assert_eq!(config.theme_preset, "default");
         assert_eq!(config.download_format, "mp3");
         assert!(config.embed_lyrics);
         assert!(config.remote_enabled);
@@ -355,7 +350,6 @@ mod tests {
             preserve_pitch: false,
             ambient_lighting_enabled: true,
             ambient_intensity: 0.8,
-            theme_preset: "catppuccin".to_string(),
             download_format: "flac".to_string(),
             embed_lyrics: true,
             remote_enabled: false,
@@ -364,7 +358,6 @@ mod tests {
         };
         let serialized = serde_json::to_string(&config).expect("Serialization failed");
         let deserialized: AppConfig = serde_json::from_str(&serialized).expect("Deserialization failed");
-        assert_eq!(deserialized.theme, "default-dark");
         assert!(deserialized.mpris_enabled);
         assert_eq!(deserialized.equalizer_gains.len(), 10);
         assert_eq!(deserialized.equalizer_gains[0], 3.0);
@@ -375,7 +368,6 @@ mod tests {
         assert!(!deserialized.preserve_pitch);
         assert!(deserialized.ambient_lighting_enabled);
         assert_eq!(deserialized.ambient_intensity, 0.8);
-        assert_eq!(deserialized.theme_preset, "catppuccin");
         assert_eq!(deserialized.download_format, "flac");
         assert!(deserialized.embed_lyrics);
         assert!(!deserialized.remote_enabled);
@@ -423,7 +415,7 @@ mod tests {
 
         assert!(manager.config_path().exists());
         let loaded = manager.load();
-        assert_eq!(loaded.theme, AppConfig::default().theme);
+        assert_eq!(loaded.custom_css, AppConfig::default().custom_css);
 
         // The write-then-rename must not leave its temp artifact behind.
         let mut tmp_os = manager.config_path().clone().into_os_string();
@@ -442,15 +434,15 @@ mod tests {
         // Simulate a crash mid-save under the old non-atomic write scheme:
         // a truncated, unparseable config.json plus a leftover temp file
         // from a write that never got renamed into place.
-        fs::write(manager.config_path(), b"{\"theme\": \"def").unwrap();
+        fs::write(manager.config_path(), b"{\"custom_css\": \"def").unwrap();
         fs::write(dir.path().join("config.json.tmp"), b"{}").unwrap();
 
         // load() must fail closed to defaults rather than panicking or
         // propagating the parse error, and it must repair the on-disk file.
         let loaded = manager.load();
-        assert_eq!(loaded.theme, AppConfig::default().theme);
+        assert_eq!(loaded.custom_css, AppConfig::default().custom_css);
 
         let loaded_again = manager.load();
-        assert_eq!(loaded_again.theme, AppConfig::default().theme);
+        assert_eq!(loaded_again.custom_css, AppConfig::default().custom_css);
     }
 }

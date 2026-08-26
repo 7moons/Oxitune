@@ -13,7 +13,6 @@ interface AppConfig {
   lyrics_enabled: boolean;
   miniplayer_enabled: boolean;
   wheel_volume_step: number;
-  theme: string;
   custom_css: string;
   custom_user_agent: string;
   quality: string;
@@ -29,7 +28,6 @@ interface AppConfig {
   preserve_pitch: boolean;
   ambient_lighting_enabled: boolean;
   ambient_intensity: number;
-  theme_preset: string;
   download_dir: string;
   download_format: string;
   embed_lyrics: boolean;
@@ -249,12 +247,7 @@ async function loadSettings() {
         if (intensityVal) intensityVal.textContent = `${Math.round(intVal * 100)}%`;
       }
 
-      // Theme Preset & Custom CSS
-      const themePresetSelect = document.getElementById('theme_preset') as HTMLSelectElement;
-      if (themePresetSelect) {
-        themePresetSelect.value = config.theme_preset || config.theme || 'default';
-      }
-
+      // Custom CSS
       const cssEditor = document.getElementById('custom_css') as HTMLTextAreaElement;
       if (cssEditor) {
         cssEditor.value = config.custom_css || '';
@@ -353,9 +346,6 @@ async function saveSettings() {
 
   const intensitySlider = document.getElementById('ambient_intensity') as HTMLInputElement;
   if (intensitySlider) currentConfig.ambient_intensity = parseFloat(intensitySlider.value);
-
-  const themePresetSelect = document.getElementById('theme_preset') as HTMLSelectElement;
-  if (themePresetSelect) currentConfig.theme_preset = themePresetSelect.value;
 
   const cssEditor = document.getElementById('custom_css') as HTMLTextAreaElement;
   if (cssEditor) currentConfig.custom_css = cssEditor.value;
@@ -586,14 +576,6 @@ document.addEventListener('DOMContentLoaded', () => {
       const val = parseFloat(ambientSlider.value);
       ambientVal.textContent = `${Math.round(val * 100)}%`;
       emitLiveEvent('set-ambient-intensity', val);
-    });
-  }
-
-  // Theme Preset select listener (Live Reload)
-  const themeSelect = document.getElementById('theme_preset') as HTMLSelectElement;
-  if (themeSelect) {
-    themeSelect.addEventListener('change', () => {
-      emitLiveEvent('set-theme-preset', themeSelect.value);
     });
   }
 

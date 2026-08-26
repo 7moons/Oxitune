@@ -1,39 +1,30 @@
 import { describe, expect, test } from 'bun:test';
-import { THEME_PRESETS } from '../plugins/themes/presets';
+import { AMBIENT_THEME_CSS, BASE_THEME_CSS } from '../plugins/themes/presets';
 
 describe('Visuals & Themes Suite', () => {
-  test('defines curated theme presets with valid CSS', () => {
-    const presetKeys = Object.keys(THEME_PRESETS);
-    expect(presetKeys.length).toBeGreaterThanOrEqual(7);
-
-    expect(THEME_PRESETS.default).toBeDefined();
-    expect(THEME_PRESETS.oled).toBeDefined();
-    expect(THEME_PRESETS.nord).toBeDefined();
-    expect(THEME_PRESETS.catppuccin).toBeDefined();
-    expect(THEME_PRESETS.gruvbox).toBeDefined();
-    expect(THEME_PRESETS.tokyo_night).toBeDefined();
-    expect(THEME_PRESETS.dracula).toBeDefined();
-    expect(THEME_PRESETS.rose_pine).toBeDefined();
-
-    for (const key of presetKeys) {
-      const preset = THEME_PRESETS[key];
-      expect(preset.id).toBe(key);
-      expect(preset.name.length).toBeGreaterThan(0);
-      expect(preset.css.length).toBeGreaterThan(10);
-    }
+  test('both theme modes define non-trivial CSS', () => {
+    expect(AMBIENT_THEME_CSS.length).toBeGreaterThan(10);
+    expect(BASE_THEME_CSS.length).toBeGreaterThan(10);
   });
 
-  test('OLED preset contains pure black #000000 background', () => {
-    expect(THEME_PRESETS.oled.css).toContain('#000000');
+  test('the Ambient theme reads its accent from the per-track custom property, never a hardcoded hex', () => {
+    expect(AMBIENT_THEME_CSS).toContain('var(--ytmd-accent');
+    expect(AMBIENT_THEME_CSS).not.toMatch(/--ytmusic-call-to-action:\s*#[0-9a-fA-F]{3,6}/);
   });
 
-  test('Nord preset contains signature polar night and frost colors', () => {
-    expect(THEME_PRESETS.nord.css).toContain('#2e3440');
-    expect(THEME_PRESETS.nord.css).toContain('#88c0d0');
+  test('the Ambient theme makes nav bar, player bar and sidebar translucent glass, not opaque boxes', () => {
+    expect(AMBIENT_THEME_CSS).toMatch(/ytmusic-nav-bar,\s*ytmusic-player-bar,\s*ytmusic-player-page\s*{[^}]*backdrop-filter:\s*blur/);
+    expect(AMBIENT_THEME_CSS).toMatch(/ytmusic-guide-renderer\s*{[^}]*backdrop-filter:\s*blur/);
   });
 
-  test('Catppuccin Mocha contains mauve and base colors', () => {
-    expect(THEME_PRESETS.catppuccin.css).toContain('#1e1e2e');
-    expect(THEME_PRESETS.catppuccin.css).toContain('#cba6f7');
+  test('the Base theme is fully static — no per-track custom property, no backdrop blur', () => {
+    expect(BASE_THEME_CSS).not.toContain('var(--ytmd-accent');
+    expect(BASE_THEME_CSS).not.toContain('backdrop-filter');
+    expect(BASE_THEME_CSS).toContain('#e8b06b');
+  });
+
+  test('both modes protect album artwork from background overrides', () => {
+    expect(AMBIENT_THEME_CSS).toContain('yt-img-shadow');
+    expect(BASE_THEME_CSS).toContain('yt-img-shadow');
   });
 });

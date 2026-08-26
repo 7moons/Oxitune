@@ -10,7 +10,6 @@ import { VisualizerPlugin } from '../plugins/visualizer';
 import { AudioDspPlugin } from '../plugins/audio-dsp';
 import { AmbientLightingPlugin } from '../plugins/ambient';
 import { ThemeEnginePlugin } from '../plugins/themes';
-import { THEME_PRESETS } from '../plugins/themes/presets';
 import { PipPlugin } from '../plugins/pip';
 import { DownloaderPlugin } from '../plugins/downloader';
 import { LocalFilesPlugin } from '../plugins/local-files';
@@ -162,24 +161,6 @@ function ensureBurgerStyles() {
     .ytmd-burger-item-label { font-weight: 500 !important; }
     .ytmd-burger-item-shortcut { font-size: 11px !important; color: #75727a !important; font-family: ui-monospace, monospace !important; }
     .ytmd-burger-divider { height: 1px !important; background: rgba(255, 255, 255, 0.09) !important; margin: 6px 4px !important; }
-    .ytmd-burger-theme-row { display: flex !important; gap: 5px !important; padding: 8px 8px 4px !important; flex-wrap: wrap !important; align-items: center !important; justify-content: space-between !important; }
-    .ytmd-burger-theme-label { font-size: 10.5px !important; color: #75727a !important; font-weight: 700 !important; text-transform: uppercase !important; letter-spacing: 0.5px !important; }
-    .ytmd-burger-theme-btn {
-      background: rgba(255, 255, 255, 0.045) !important;
-      border: 1px solid rgba(255, 255, 255, 0.1) !important;
-      color: #b4b1b8 !important;
-      padding: 3px 7px !important;
-      border-radius: 6px !important;
-      font-size: 10px !important;
-      font-weight: 700 !important;
-      cursor: pointer !important;
-      transition: border-color 0.12s ease, color 0.12s ease, background-color 0.12s ease !important;
-    }
-    .ytmd-burger-theme-btn:hover {
-      border-color: var(--ytmd-accent, #e8b06b) !important;
-      color: #ffffff !important;
-      background: color-mix(in srgb, var(--ytmd-accent, #e8b06b) 14%, transparent) !important;
-    }
     @media (prefers-reduced-motion: reduce) {
       #ytmd-burger-popover { transition: opacity 0.1s linear !important; transform: none !important; }
     }
@@ -317,25 +298,6 @@ function injectBurgerMenu(config: Record<string, unknown>) {
         }
       }
     ));
-
-    // Quick Theme Switcher Row
-    const themeRow = createEl('div', { className: 'ytmd-burger-theme-row' });
-
-    const themeLabel = createEl('span', { text: 'Theme:', className: 'ytmd-burger-theme-label' });
-    themeRow.appendChild(themeLabel);
-
-    ['oled', 'nord', 'catppuccin', 'tokyo_night', 'gruvbox'].forEach((themeId) => {
-      const tBtn = createEl('button', { text: themeId.toUpperCase(), className: 'ytmd-burger-theme-btn' });
-      tBtn.addEventListener('click', () => {
-        const themeStyle = document.getElementById('ytmd-active-theme');
-        if (themeStyle && THEME_PRESETS[themeId]) {
-          themeStyle.textContent = THEME_PRESETS[themeId].css;
-        }
-      });
-      themeRow.appendChild(tBtn);
-    });
-
-    popover.appendChild(themeRow);
 
     document.body.appendChild(popover);
 

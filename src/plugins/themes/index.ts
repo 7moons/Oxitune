@@ -1,12 +1,12 @@
 import { YTMDPlugin, PluginContext } from '../types';
-import { THEME_PRESETS } from './presets';
+import { AMBIENT_THEME_CSS, BASE_THEME_CSS } from './presets';
 
 let cleanup: (() => void) | null = null;
 
 export const ThemeEnginePlugin: YTMDPlugin = {
   id: 'theme_engine',
   name: 'Theme Engine & Live CSS',
-  description: 'Applies curated aesthetic themes and injects user custom CSS with instant hot-reload',
+  description: 'Switches YouTube Music\'s chrome between the Ambient and Base looks, and injects user custom CSS with instant hot-reload',
   defaultEnabled: true,
 
   onInit(ctx: PluginContext) {
@@ -23,12 +23,13 @@ export const ThemeEnginePlugin: YTMDPlugin = {
       return el;
     };
 
-    const applyTheme = (themeId: string) => {
-      const preset = THEME_PRESETS[themeId] || THEME_PRESETS.default;
+    // The Ambient Lighting toggle is the only visual mode switch — no
+    // separate preset picker. ON gets the full translucent-chrome look that
+    // reads the per-track ambient wash through the nav/player bars; OFF
+    // falls back to one static, polished dark theme.
+    const applyMode = (ambientEnabled: boolean) => {
       const themeStyle = getOrCreateStyle('ytmd-active-theme');
-      if (themeStyle) {
-        themeStyle.textContent = preset.css;
-      }
+      themeStyle.textContent = ambientEnabled ? AMBIENT_THEME_CSS : BASE_THEME_CSS;
     };
 
     const applyCustomCss = (cssText: string) => {
@@ -39,18 +40,18 @@ export const ThemeEnginePlugin: YTMDPlugin = {
     };
 
     // Initial load
-    const initialTheme = (ctx.config.theme_preset as string) || (ctx.config.theme as string) || 'default';
-    applyTheme(initialTheme);
+    applyMode(ctx.config.ambient_lighting_enabled !== false);
 
     const initialCustomCss = (ctx.config.custom_css as string) || '';
     applyCustomCss(initialCustomCss);
 
-    // Listen to live theme updates from settings
+    // Listen to live updates from settings — the same 'set-ambient-enabled'
+    // event AmbientLightingPlugin listens to for the glow orb's opacity.
     const unlistenPromises: Promise<() => void>[] = [];
     if (window.__TAURI__?.event) {
       unlistenPromises.push(
-        window.__TAURI__.event.listen<string>('set-theme-preset', (e) => {
-          applyTheme(e.payload);
+        window.__TAURI__.event.listen<boolean>('set-ambient-enabled', (e) => {
+          applyMode(e.payload);
         }),
         window.__TAURI__.event.listen<string>('set-custom-css', (e) => {
           applyCustomCss(e.payload);
