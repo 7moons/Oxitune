@@ -31,7 +31,7 @@ use tokio::sync::mpsc;
 use tokio::time::Instant;
 
 const DISCOVERY_UDP_PORT: u16 = 47863;
-const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(4);
+const DISCOVERY_TIMEOUT: Duration = Duration::from_millis(2500);
 const BEACON_INTERVAL: Duration = Duration::from_secs(2);
 const MAX_MEMBERS: usize = 16;
 const JOIN_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -116,6 +116,7 @@ pub(crate) enum WireMessage {
     Join { user_id: String, nickname: String },
     State { room: RoomStateWire },
     Playback { state: SyncPlaybackState },
+    Leave { user_id: String },
     Ack,
 }
 
@@ -280,6 +281,7 @@ impl SyncRoomManager {
         });
     }
 
+    #[cfg(test)]
     pub(crate) fn set_local_room(&self, room: RoomState) {
         *self.state.lock() = Some(room);
     }
@@ -304,8 +306,8 @@ impl SyncRoomManager {
         }
     }
 
-    /// Clears guest-side state after the P2P connection to the host drops,
-    /// mirroring the tail of the TCP `guest_reader_loop`.
+    /// Clears guest-side state after the connection to the host drops.
+    #[allow(dead_code)]
     pub(crate) fn clear_guest(&self) {
         *self.state.lock() = None;
         *self.guest.lock() = None;
@@ -653,8 +655,8 @@ async fn guest_reader_loop(
                         }
                         sink.playback_updated(&state);
                     }
-                    WireMessage::Join { .. } => {} // guests never receive Join
-                    WireMessage::Ack => {} // Ack only exists on the libp2p transport (p2p_sync.rs)
+                    WireMessage::Join { .. } | WireMessage::Leave { .. } => {} // guests never receive Join / Leave
+                    WireMessage::Ack => {} // Ack only exists on the internet transport
                 }
             }
         }
