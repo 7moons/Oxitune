@@ -95,6 +95,16 @@ export const AmbientLightingPlugin: YTMDPlugin = {
           radial-gradient(circle at 20% 80%, ${palette.secondary}66 0%, transparent 60%)
         `;
       }
+
+      // Exposed as custom properties on <html> so other injected UI (the
+      // burger menu button/popover) can pick up the same per-track accent
+      // via var(--ytmd-accent, ...) without re-extracting the palette
+      // themselves — independent of whether the glow backdrop above is
+      // toggled on, since this is a much subtler accent than a full wash.
+      const root = document.documentElement.style;
+      root.setProperty('--ytmd-accent', palette.accent);
+      root.setProperty('--ytmd-accent-primary', palette.primary);
+      root.setProperty('--ytmd-accent-secondary', palette.secondary);
     } catch {
       // Fallback
     }

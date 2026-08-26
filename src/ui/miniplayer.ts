@@ -1,5 +1,3 @@
-import { initAmbientBackdrop } from './ambient';
-
 interface TrackPayload {
   title: string;
   artist: string;
@@ -64,8 +62,6 @@ function updateTrackUI(track: TrackPayload) {
 }
 
 async function initMiniPlayer() {
-  initAmbientBackdrop();
-
   const tauri = window.__TAURI__;
 
   if (tauri?.event) {

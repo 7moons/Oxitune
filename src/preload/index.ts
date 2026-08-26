@@ -56,6 +56,137 @@ const invokeBackend = (cmd: string, args: Record<string, unknown> = {}): Promise
   });
 };
 
+/** Injects the one `<style>` block the burger button/popover rely on for
+ * hover states, the open/close transition, and reduced-motion handling —
+ * everything else about their look lives in this stylesheet, not inline, so
+ * `var(--ytmd-accent, ...)` (set per-track by the ambient plugin) only has
+ * to be written once. Uses `!important` throughout because it's competing
+ * with YouTube Music's own heavily-specific native styles. */
+function ensureBurgerStyles() {
+  if (document.getElementById('ytmd-burger-styles')) return;
+
+  const style = document.createElement('style');
+  style.id = 'ytmd-burger-styles';
+  style.textContent = `
+    #ytmd-burger-btn {
+      display: inline-flex !important;
+      align-items: center !important;
+      gap: 7px !important;
+      background: color-mix(in srgb, black 55%, transparent) !important;
+      backdrop-filter: blur(16px) saturate(160%) !important;
+      -webkit-backdrop-filter: blur(16px) saturate(160%) !important;
+      color: #f3f1ee !important;
+      border: 1px solid rgba(255, 255, 255, 0.14) !important;
+      padding: 6px 14px 6px 10px !important;
+      border-radius: 20px !important;
+      cursor: pointer !important;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+      margin: 0 8px !important;
+      flex-shrink: 0 !important;
+      z-index: 1000 !important;
+      transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.2s ease !important;
+    }
+    #ytmd-burger-btn:hover {
+      border-color: rgba(255, 255, 255, 0.3) !important;
+      box-shadow: 0 8px 20px -8px color-mix(in srgb, var(--ytmd-accent, #e8b06b) 55%, transparent) !important;
+    }
+    #ytmd-burger-btn svg {
+      color: var(--ytmd-accent, #e8b06b) !important;
+      transition: color 0.6s ease !important;
+      flex-shrink: 0 !important;
+    }
+    #ytmd-burger-btn span {
+      font-size: 12px !important;
+      font-weight: 700 !important;
+      letter-spacing: 0.3px !important;
+    }
+    #ytmd-burger-popover {
+      position: fixed !important;
+      width: 292px !important;
+      background: color-mix(in srgb, #0c0a10 78%, transparent) !important;
+      backdrop-filter: blur(28px) saturate(170%) !important;
+      -webkit-backdrop-filter: blur(28px) saturate(170%) !important;
+      border: 1px solid rgba(255, 255, 255, 0.12) !important;
+      border-radius: 16px !important;
+      box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06) inset, 0 24px 56px -20px rgba(0, 0, 0, 0.85) !important;
+      z-index: 2147483647 !important;
+      display: flex !important;
+      flex-direction: column !important;
+      padding: 8px !important;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+      color: #f3f1ee !important;
+      opacity: 0 !important;
+      transform: translateY(-6px) scale(0.98) !important;
+      pointer-events: none !important;
+      transition: opacity 0.14s ease, transform 0.14s ease !important;
+    }
+    #ytmd-burger-popover.ytmd-open {
+      opacity: 1 !important;
+      transform: translateY(0) scale(1) !important;
+      pointer-events: auto !important;
+    }
+    .ytmd-burger-item {
+      display: flex !important;
+      align-items: center !important;
+      justify-content: space-between !important;
+      width: 100% !important;
+      padding: 9px 10px !important;
+      background: transparent !important;
+      border: none !important;
+      border-radius: 9px !important;
+      color: #e7e5e2 !important;
+      font-size: 13px !important;
+      cursor: pointer !important;
+      font-family: inherit !important;
+      text-align: left !important;
+      transition: background-color 0.12s ease, color 0.12s ease !important;
+    }
+    .ytmd-burger-item:hover, .ytmd-burger-item:focus-visible {
+      background: color-mix(in srgb, var(--ytmd-accent, #e8b06b) 14%, white 4%) !important;
+      color: #ffffff !important;
+      outline: none !important;
+    }
+    .ytmd-burger-item:hover .ytmd-burger-item-icon, .ytmd-burger-item:focus-visible .ytmd-burger-item-icon {
+      color: var(--ytmd-accent, #e8b06b) !important;
+    }
+    .ytmd-burger-item-left { display: flex !important; align-items: center !important; gap: 10px !important; }
+    .ytmd-burger-item-icon {
+      display: inline-flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      width: 16px !important;
+      height: 16px !important;
+      color: #8f8c95 !important;
+      transition: color 0.12s ease !important;
+    }
+    .ytmd-burger-item-label { font-weight: 500 !important; }
+    .ytmd-burger-item-shortcut { font-size: 11px !important; color: #75727a !important; font-family: ui-monospace, monospace !important; }
+    .ytmd-burger-divider { height: 1px !important; background: rgba(255, 255, 255, 0.09) !important; margin: 6px 4px !important; }
+    .ytmd-burger-theme-row { display: flex !important; gap: 5px !important; padding: 8px 8px 4px !important; flex-wrap: wrap !important; align-items: center !important; justify-content: space-between !important; }
+    .ytmd-burger-theme-label { font-size: 10.5px !important; color: #75727a !important; font-weight: 700 !important; text-transform: uppercase !important; letter-spacing: 0.5px !important; }
+    .ytmd-burger-theme-btn {
+      background: rgba(255, 255, 255, 0.045) !important;
+      border: 1px solid rgba(255, 255, 255, 0.1) !important;
+      color: #b4b1b8 !important;
+      padding: 3px 7px !important;
+      border-radius: 6px !important;
+      font-size: 10px !important;
+      font-weight: 700 !important;
+      cursor: pointer !important;
+      transition: border-color 0.12s ease, color 0.12s ease, background-color 0.12s ease !important;
+    }
+    .ytmd-burger-theme-btn:hover {
+      border-color: var(--ytmd-accent, #e8b06b) !important;
+      color: #ffffff !important;
+      background: color-mix(in srgb, var(--ytmd-accent, #e8b06b) 14%, transparent) !important;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      #ytmd-burger-popover { transition: opacity 0.1s linear !important; transform: none !important; }
+    }
+  `;
+  document.head.appendChild(style);
+}
+
 // Pure DOM YTMD Navbar Menu
 function injectBurgerMenu(config: Record<string, unknown>) {
   if (document.getElementById('ytmd-burger-btn')) return;
@@ -67,128 +198,48 @@ function injectBurgerMenu(config: Record<string, unknown>) {
 
   if (!rightContent && !leftContent && !fallbackContainer) return;
 
+  ensureBurgerStyles();
+
   // Burger Button
   const burgerBtn = createEl('button', {
     id: 'ytmd-burger-btn',
-    title: 'YTMD Menu (Ctrl+,)',
-    style: `
-      display: inline-flex !important;
-      align-items: center !important;
-      gap: 6px !important;
-      background: #212121 !important;
-      color: #f4f4f5 !important;
-      border: 1px solid rgba(255, 255, 255, 0.15) !important;
-      padding: 6px 12px !important;
-      border-radius: 18px !important;
-      cursor: pointer !important;
-      font-family: inherit !important;
-      margin: 0 8px !important;
-      flex-shrink: 0 !important;
-      z-index: 1000 !important;
-      transition: background 0.15s ease, border-color 0.15s ease !important;
-    `
+    title: 'YTMD Menu (Ctrl+,)'
   });
 
   const burgerIcon = createSvg('M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z', 15, 15);
-  const burgerLabel = createEl('span', {
-    text: 'YTMD',
-    style: 'font-size: 12px; font-weight: 700; letter-spacing: 0.2px;'
-  });
+  const burgerLabel = createEl('span', { text: 'YTMD' });
 
   burgerBtn.appendChild(burgerIcon);
   burgerBtn.appendChild(burgerLabel);
 
-  burgerBtn.addEventListener('mouseenter', () => {
-    burgerBtn.style.background = '#333333';
-    burgerBtn.style.borderColor = 'rgba(255, 255, 255, 0.3)';
-    burgerBtn.style.color = '#ffffff';
-  });
-  burgerBtn.addEventListener('mouseleave', () => {
-    burgerBtn.style.background = '#212121';
-    burgerBtn.style.borderColor = 'rgba(255, 255, 255, 0.15)';
-    burgerBtn.style.color = '#f4f4f5';
-  });
-
   // Dropdown Popover Menu
   let popover = document.getElementById('ytmd-burger-popover');
   if (!popover) {
-    popover = createEl('div', {
-      id: 'ytmd-burger-popover',
-      style: `
-        position: fixed !important;
-        top: 56px !important;
-        right: 16px !important;
-        width: 290px !important;
-        background: #121215 !important;
-        border: 1px solid #27272a !important;
-        border-radius: 12px !important;
-        box-shadow: 0 20px 48px rgba(0,0,0,0.9) !important;
-        z-index: 2147483647 !important;
-        display: none;
-        flex-direction: column;
-        padding: 8px !important;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
-        color: #fafafa !important;
-        backdrop-filter: blur(16px) !important;
-      `
-    });
+    popover = createEl('div', { id: 'ytmd-burger-popover' });
 
     const createMenuItem = (iconSvg: string, label: string, shortcut: string, onClick: () => void) => {
-      const item = createEl('button', {
-        style: `
-          display: flex !important;
-          align-items: center !important;
-          justify-content: space-between !important;
-          width: 100% !important;
-          padding: 8px 10px !important;
-          background: transparent !important;
-          border: none !important;
-          border-radius: 6px !important;
-          color: #e4e4e7 !important;
-          font-size: 13px !important;
-          cursor: pointer !important;
-          font-family: inherit !important;
-          text-align: left !important;
-          transition: background 0.12s ease, color 0.12s ease !important;
-        `
-      });
+      const item = createEl('button', { className: 'ytmd-burger-item' });
 
-      const left = createEl('span', { style: 'display:flex; align-items:center; gap:10px;' });
-      const iconSpan = createEl('span', {
-        style: 'display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px; color:#a1a1aa;'
-      });
+      const left = createEl('span', { className: 'ytmd-burger-item-left' });
+      const iconSpan = createEl('span', { className: 'ytmd-burger-item-icon' });
       iconSpan.appendChild(createSvgIcon(iconSvg));
-      const labelSpan = createEl('span', { text: label, style: 'font-weight: 500;' });
+      const labelSpan = createEl('span', { text: label, className: 'ytmd-burger-item-label' });
       left.appendChild(iconSpan);
       left.appendChild(labelSpan);
 
-      const right = createEl('span', { text: shortcut, style: 'font-size: 11px; color: #71717a; font-family: monospace;' });
+      const right = createEl('span', { text: shortcut, className: 'ytmd-burger-item-shortcut' });
 
       item.appendChild(left);
       item.appendChild(right);
 
-      item.addEventListener('mouseenter', () => {
-        item.style.background = '#27272a';
-        item.style.color = '#ffffff';
-        iconSpan.style.color = '#ffffff';
-      });
-      item.addEventListener('mouseleave', () => {
-        item.style.background = 'transparent';
-        item.style.color = '#e4e4e7';
-        iconSpan.style.color = '#a1a1aa';
-      });
       item.addEventListener('click', () => {
-        if (popover) popover.style.display = 'none';
+        popover?.classList.remove('ytmd-open');
         onClick();
       });
       return item;
     };
 
-    const createDivider = () => {
-      return createEl('div', {
-        style: 'height: 1px !important; background: #27272a !important; margin: 6px 4px !important;'
-      });
-    };
+    const createDivider = () => createEl('div', { className: 'ytmd-burger-divider' });
 
     popover.appendChild(createMenuItem(
       '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
@@ -268,30 +319,13 @@ function injectBurgerMenu(config: Record<string, unknown>) {
     ));
 
     // Quick Theme Switcher Row
-    const themeRow = createEl('div', {
-      style: 'display: flex; gap: 4px; padding: 6px 8px; flex-wrap: wrap; align-items: center; justify-content: space-between;'
-    });
+    const themeRow = createEl('div', { className: 'ytmd-burger-theme-row' });
 
-    const themeLabel = createEl('span', {
-      text: 'Theme:',
-      style: 'font-size: 11px; color: #71717a; font-weight: 600; text-transform: uppercase;'
-    });
+    const themeLabel = createEl('span', { text: 'Theme:', className: 'ytmd-burger-theme-label' });
     themeRow.appendChild(themeLabel);
 
     ['oled', 'nord', 'catppuccin', 'tokyo_night', 'gruvbox'].forEach((themeId) => {
-      const tBtn = createEl('button', {
-        text: themeId.toUpperCase(),
-        style: `
-          background: #1c1c20;
-          border: 1px solid #27272a;
-          color: #a1a1aa;
-          padding: 3px 6px;
-          border-radius: 4px;
-          font-size: 10px;
-          font-weight: 600;
-          cursor: pointer;
-        `
-      });
+      const tBtn = createEl('button', { text: themeId.toUpperCase(), className: 'ytmd-burger-theme-btn' });
       tBtn.addEventListener('click', () => {
         const themeStyle = document.getElementById('ytmd-active-theme');
         if (themeStyle && THEME_PRESETS[themeId]) {
@@ -307,9 +341,9 @@ function injectBurgerMenu(config: Record<string, unknown>) {
 
     // Close on outside click
     document.addEventListener('click', (e) => {
-      if (popover && popover.style.display === 'flex') {
+      if (popover && popover.classList.contains('ytmd-open')) {
         if (!popover.contains(e.target as Node) && !burgerBtn.contains(e.target as Node)) {
-          popover.style.display = 'none';
+          popover.classList.remove('ytmd-open');
         }
       }
     });
@@ -322,7 +356,7 @@ function injectBurgerMenu(config: Record<string, unknown>) {
       popover.style.top = `${rect.bottom + 8}px`;
       popover.style.right = `${Math.max(16, window.innerWidth - rect.right)}px`;
       popover.style.left = 'auto';
-      popover.style.display = popover.style.display === 'flex' ? 'none' : 'flex';
+      popover.classList.toggle('ytmd-open');
     }
   });
 

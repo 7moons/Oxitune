@@ -779,69 +779,85 @@ input:checked + .slider:before {
   transform: translateX(16px);
 }
 
-/* Mini Player View */
+/* Mini Player View — full-bleed album art with a floating glass dock. There
+   is no separate chrome/content split here: the cover art fills the whole
+   window and *is* the backdrop, with window controls and transport floating
+   on translucent glass over it. A scrim gradient (top + bottom) keeps both
+   legible regardless of how bright the art is. */
 .mini-player-body {
+  position: relative;
   height: 100vh;
   width: 100vw;
-  display: flex;
-  flex-direction: column;
   background: var(--void);
   border: 1px solid var(--border);
   overflow: hidden;
 }
 
-.mini-header {
-  position: relative;
-  z-index: 10;
-  height: 36px;
-  padding: 0 8px 0 12px;
-  background: var(--bg-surface);
-  border-bottom: 1px solid var(--border-subtle);
-}
-
-.mini-header-title {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.2px;
-  color: var(--text-secondary);
-}
-
-.mini-player-container {
-  position: relative;
-  z-index: 5;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  overflow: hidden;
-}
-
-.mini-cover-wrapper {
-  width: 100%;
-  padding: 14px 16px 0 16px;
-  display: flex;
-  justify-content: center;
-}
-
 .mini-cover {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
   width: 100%;
-  max-width: 280px;
-  aspect-ratio: 1 / 1;
+  height: 100%;
   object-fit: cover;
-  border-radius: 14px;
-  border: 1px solid var(--border);
-  background-color: var(--bg-surface);
-  box-shadow: var(--shadow-float), 0 0 40px -12px var(--accent-glow);
-  transition: box-shadow 0.6s ease;
+  object-position: center;
 }
 
-.mini-details {
-  padding: 10px 14px 2px 14px;
+.mini-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(6, 5, 9, 0.55) 0%, rgba(6, 5, 9, 0) 26%, rgba(6, 5, 9, 0) 58%, rgba(6, 5, 9, 0.86) 100%);
+}
+
+.mini-topbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  height: 40px;
+  padding: 0 8px 0 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: default;
+}
+
+.mini-topbar-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.85);
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.6);
+}
+
+.mini-dock {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 10px;
+  z-index: 2;
+  background: var(--bg-surface);
+  backdrop-filter: var(--blur-panel);
+  -webkit-backdrop-filter: var(--blur-panel);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 12px 14px 10px 14px;
+  box-shadow: var(--shadow-panel);
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 8px;
+}
+
+.mini-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
   min-width: 0;
-  text-align: center;
 }
 
 .mini-title {
@@ -862,12 +878,30 @@ input:checked + .slider:before {
   text-overflow: ellipsis;
 }
 
-.mini-controls {
+.mini-scrub-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mini-time {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  width: 30px;
+  flex-shrink: 0;
+}
+
+.mini-time:last-child {
+  text-align: right;
+}
+
+.mini-transport {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 16px;
-  padding: 4px 14px 14px 14px;
+  gap: 14px;
+  padding-top: 2px;
 }
 
 .ctrl-btn {
@@ -908,16 +942,6 @@ input:checked + .slider:before {
 
 .ctrl-btn.play-btn:active {
   transform: scale(0.95);
-}
-
-.progress-bar-container {
-  padding: 4px 14px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 10.5px;
-  color: var(--text-muted);
-  font-family: var(--font-mono);
 }
 
 .progress-track {
