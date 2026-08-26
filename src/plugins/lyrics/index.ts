@@ -12,6 +12,12 @@ let cachedLyricsData: { syncedLyrics?: string; plainLyrics?: string } | null = n
 let currentSongKey = '';
 let cleanup: (() => void) | null = null;
 
+// Pure staleness check, covered directly by src/tests/lyrics.test.ts: a
+// `fetch_lyrics` response for one song must never be applied once the user
+// has already moved on to a different track while it was in flight.
+export const isCurrentSongKey = (requestedKey: string, latestKey: string): boolean =>
+  requestedKey === latestKey;
+
 export const LyricsPlugin: YTMDPlugin = {
   id: 'lyrics',
   name: 'Native Synced Lyrics (LRCLIB)',
@@ -148,6 +154,11 @@ export const LyricsPlugin: YTMDPlugin = {
         duration: track.durationSecs || null
       })) as { syncedLyrics?: string; plainLyrics?: string };
 
+      // The track may have changed again while this request was in flight —
+      // a stale response for a previous song must never clobber the lyrics
+      // of whatever is now playing.
+      if (!isCurrentSongKey(songKey, currentSongKey)) return;
+
       cachedLyricsData = lyricsData;
 
       if (lyricsData?.syncedLyrics) {
@@ -159,8 +170,10 @@ export const LyricsPlugin: YTMDPlugin = {
       ensureLyricsMounted(ctx);
       renderCurrentLyrics(ctx);
     } catch {
-      if (wrapper) {
-        wrapper.replaceChildren(
+      if (!isCurrentSongKey(songKey, currentSongKey)) return;
+      const staleWrapper = document.getElementById('ytmd-native-lyrics-wrapper');
+      if (staleWrapper) {
+        staleWrapper.replaceChildren(
           createEl('div', { className: 'ytmd-native-lyrics-status', text: 'No lyrics available for this track.' })
         );
       }

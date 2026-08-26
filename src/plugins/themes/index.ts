@@ -1,6 +1,8 @@
 import { YTMDPlugin, PluginContext } from '../types';
 import { THEME_PRESETS } from './presets';
 
+let cleanup: (() => void) | null = null;
+
 export const ThemeEnginePlugin: YTMDPlugin = {
   id: 'theme_engine',
   name: 'Theme Engine & Live CSS',
@@ -44,16 +46,29 @@ export const ThemeEnginePlugin: YTMDPlugin = {
     applyCustomCss(initialCustomCss);
 
     // Listen to live theme updates from settings
+    const unlistenPromises: Promise<() => void>[] = [];
     if (window.__TAURI__?.event) {
-      window.__TAURI__.event.listen<string>('set-theme-preset', (e) => {
-        applyTheme(e.payload);
-      });
-
-      window.__TAURI__.event.listen<string>('set-custom-css', (e) => {
-        applyCustomCss(e.payload);
-      });
+      unlistenPromises.push(
+        window.__TAURI__.event.listen<string>('set-theme-preset', (e) => {
+          applyTheme(e.payload);
+        }),
+        window.__TAURI__.event.listen<string>('set-custom-css', (e) => {
+          applyCustomCss(e.payload);
+        })
+      );
     }
 
+    cleanup = () => {
+      unlistenPromises.forEach((p) => p.then((unlisten) => unlisten()));
+    };
+
     console.log('[YTMD] Theme engine active.');
+  },
+
+  onDestroy() {
+    if (cleanup) {
+      cleanup();
+      cleanup = null;
+    }
   }
 };

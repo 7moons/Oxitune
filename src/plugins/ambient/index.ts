@@ -3,6 +3,7 @@ import { extractPalette } from './color';
 import { createEl } from '../../utils/dom';
 
 let setIntensity: ((val: number) => void) | null = null;
+let cleanup: (() => void) | null = null;
 
 export const AmbientLightingPlugin: YTMDPlugin = {
   id: 'ambient_lighting',
@@ -58,14 +59,24 @@ export const AmbientLightingPlugin: YTMDPlugin = {
       if (backdrop) backdrop.style.opacity = String(val);
     };
 
+    const unlistenPromises: Promise<() => void>[] = [];
     if (window.__TAURI__?.event) {
-      window.__TAURI__.event.listen<number>('set-ambient-intensity', (e) => {
-        setIntensity?.(e.payload);
-      });
-      window.__TAURI__.event.listen<boolean>('set-ambient-enabled', (e) => {
-        setIntensity?.(e.payload ? 0.6 : 0);
-      });
+      unlistenPromises.push(
+        window.__TAURI__.event.listen<number>('set-ambient-intensity', (e) => {
+          setIntensity?.(e.payload);
+        }),
+        window.__TAURI__.event.listen<boolean>('set-ambient-enabled', (e) => {
+          setIntensity?.(e.payload ? 0.6 : 0);
+        })
+      );
     }
+
+    cleanup = () => {
+      unlistenPromises.forEach((p) => p.then((unlisten) => unlisten()));
+      setIntensity = null;
+      document.getElementById('ytmd-ambient-styles')?.remove();
+      document.getElementById('ytmd-ambient-backdrop')?.remove();
+    };
 
     if (ctx.track) {
       this.onTrackChange!(ctx.track, ctx);
@@ -88,4 +99,11 @@ export const AmbientLightingPlugin: YTMDPlugin = {
       // Fallback
     }
   },
+
+  onDestroy() {
+    if (cleanup) {
+      cleanup();
+      cleanup = null;
+    }
+  }
 };

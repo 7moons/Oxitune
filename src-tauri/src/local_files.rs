@@ -53,12 +53,35 @@ pub fn scan_directory(dir_path: &Path) -> Vec<LocalTrack> {
         return tracks;
     }
 
+    // Canonicalized once so every walked entry below can be checked against
+    // it. `WalkDir::follow_links(true)` does NOT itself sandbox the walk to
+    // `dir_path` — a symlink anywhere inside the tree (planted by malware, a
+    // synced cloud folder, an extracted archive) that points outside of it
+    // is followed like any other entry, and its target's contents/metadata
+    // would otherwise be scanned and returned to the caller, which per
+    // commands.rs's `scan_local_music` can be the untrusted
+    // music.youtube.com origin.
+    let root_canon = match dir_path.canonicalize() {
+        Ok(p) => p,
+        Err(_) => return tracks,
+    };
+
     for entry in WalkDir::new(dir_path)
         .follow_links(true)
         .into_iter()
         .filter_map(|e| e.ok())
     {
         let path = entry.path();
+
+        // Reject anything (typically reached via a symlink hop) whose
+        // resolved location has escaped the scan root. Entries that can't
+        // be canonicalized (broken symlinks, permission errors) are
+        // skipped rather than trusted.
+        match path.canonicalize() {
+            Ok(resolved) if resolved.starts_with(&root_canon) => {}
+            _ => continue,
+        }
+
         if path.is_file() && is_audio_file(path) {
             let file_path_str = path.to_string_lossy().to_string();
             let ext = path
@@ -195,5 +218,53 @@ mod tests {
         assert_eq!(scanned[0].title, "One More Time");
         assert_eq!(scanned[1].artist, "Queen");
         assert_eq!(scanned[1].title, "Bohemian Rhapsody");
+    }
+
+    #[test]
+    fn test_scan_directory_does_not_follow_symlink_escaping_the_root() {
+        use std::os::unix::fs::symlink;
+
+        let root_dir = tempdir().expect("tempdir");
+        let outside_dir = tempdir().expect("tempdir");
+
+        let inside_track = root_dir.path().join("Inside Artist - Inside Track.mp3");
+        File::create(&inside_track).unwrap();
+
+        let outside_track = outside_dir.path().join("Secret Artist - Secret Track.mp3");
+        File::create(&outside_track).unwrap();
+
+        // Plant a symlink inside the scanned root that resolves to a file
+        // outside it — e.g. from a synced folder, a crafted archive, or
+        // malware. `follow_links(true)` would otherwise happily walk right
+        // through it.
+        let escape_link = root_dir.path().join("escape.mp3");
+        symlink(&outside_track, &escape_link).expect("create symlink");
+
+        let scanned = scan_directory(root_dir.path());
+
+        assert_eq!(scanned.len(), 1);
+        assert_eq!(scanned[0].artist, "Inside Artist");
+        assert_eq!(scanned[0].title, "Inside Track");
+        assert!(scanned.iter().all(|t| !t.file_path.contains("Secret")));
+    }
+
+    #[test]
+    fn test_scan_directory_handles_corrupt_id3_tags_without_panicking() {
+        let dir = tempdir().expect("tempdir");
+        let corrupt_path = dir.path().join("Not Real - Fake Song.mp3");
+        // Garbage bytes with an .mp3 extension but no valid ID3/MPEG frame
+        // structure at all — must not panic id3's parser.
+        std::fs::write(&corrupt_path, b"\x00\x01\x02not an mp3 or id3 tag, just garbage bytes")
+            .expect("write corrupt file");
+
+        let scanned = scan_directory(dir.path());
+
+        assert_eq!(scanned.len(), 1);
+        // id3::Tag::read_from_path fails gracefully on this input, so
+        // title/artist fall back to the "Artist - Title" filename heuristic
+        // instead of panicking or propagating the parse error.
+        assert_eq!(scanned[0].artist, "Not Real");
+        assert_eq!(scanned[0].title, "Fake Song");
+        assert_eq!(scanned[0].duration_secs, 0);
     }
 }

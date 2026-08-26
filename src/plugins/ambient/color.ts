@@ -4,6 +4,17 @@ export interface ColorPalette {
   accent: string;
 }
 
+// Callers append a two-digit alpha suffix directly (e.g. `${palette.primary}66`),
+// which is only valid CSS on a 6-digit hex color — an `rgb(r, g, b)` string
+// would produce an invalid `rgb(...)66` color that the browser silently
+// drops, so every extracted palette must be hex, matching the hex fallback
+// colors below. Covered by src/tests/ambient.test.ts.
+export const rgbToHex = (r: number, g: number, b: number): string => {
+  const clamp = (n: number) => Math.max(0, Math.min(255, Math.round(n)));
+  const toHex = (n: number) => clamp(n).toString(16).padStart(2, '0');
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+};
+
 export async function extractPalette(imageUrl: string): Promise<ColorPalette> {
   return new Promise((resolve) => {
     const fallback: ColorPalette = {
@@ -70,9 +81,9 @@ export async function extractPalette(imageUrl: string): Promise<ColorPalette> {
         const pb2 = count2 > 0 ? Math.round(b2 / count2) : 27;
 
         resolve({
-          primary: `rgb(${pr1}, ${pg1}, ${pb1})`,
-          secondary: `rgb(${pr2}, ${pg2}, ${pb2})`,
-          accent: `rgb(${Math.min(255, pr1 + 30)}, ${Math.min(255, pg1 + 30)}, ${Math.min(255, pb1 + 30)})`
+          primary: rgbToHex(pr1, pg1, pb1),
+          secondary: rgbToHex(pr2, pg2, pb2),
+          accent: rgbToHex(pr1 + 30, pg1 + 30, pb1 + 30)
         });
       } catch {
         resolve(fallback);

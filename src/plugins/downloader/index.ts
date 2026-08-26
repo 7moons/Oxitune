@@ -2,6 +2,7 @@ import { YTMDPlugin, PluginContext, TrackInfo } from '../types';
 import { createEl, createSvg } from '../../utils/dom';
 
 let setCurrentTrack: ((t: TrackInfo) => void) | null = null;
+let cleanup: (() => void) | null = null;
 
 export const DownloaderPlugin: YTMDPlugin = {
   id: 'downloader',
@@ -100,15 +101,28 @@ export const DownloaderPlugin: YTMDPlugin = {
       }
     };
 
-    setInterval(injectDownloadButton, 1000);
+    const pollInterval = window.setInterval(injectDownloadButton, 1000);
     injectDownloadButton();
 
     setCurrentTrack = (t: TrackInfo) => {
       currentTrack = t;
     };
+
+    cleanup = () => {
+      clearInterval(pollInterval);
+      document.getElementById('ytmd-download-btn')?.remove();
+      setCurrentTrack = null;
+    };
   },
 
   onTrackChange(track: TrackInfo) {
     setCurrentTrack?.(track);
+  },
+
+  onDestroy() {
+    if (cleanup) {
+      cleanup();
+      cleanup = null;
+    }
   }
 };

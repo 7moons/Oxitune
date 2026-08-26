@@ -91,7 +91,7 @@ async fn connect_discord() -> Option<tokio::net::UnixStream> {
     #[cfg(unix)]
     {
         let runtime_dir = std::env::var("XDG_RUNTIME_DIR")
-            .unwrap_or_else(|_| format!("/run/user/{}", libc_getuid()));
+            .unwrap_or_else(|_| format!("/run/user/{}", current_uid()));
 
         for i in 0..10 {
             let path = format!("{}/discord-ipc-{}", runtime_dir, i);
@@ -115,9 +115,38 @@ async fn connect_discord() -> Option<tokio::net::UnixStream> {
     None
 }
 
-#[cfg(unix)]
-fn libc_getuid() -> u32 {
-    1000 // Fallback UID
+/// The real UID of the current process, used only as the `XDG_RUNTIME_DIR`
+/// fallback when that env var is unset — the standard systemd/XDG runtime
+/// dir is `/run/user/<uid>`. Previously this returned a hardcoded `1000`
+/// regardless of who was actually running the process (despite the name
+/// implying an actual `getuid(2)` call), which silently pointed Discord IPC
+/// discovery at the wrong socket path for any user whose UID wasn't 1000
+/// (a second account, a service/system user, most container setups) on any
+/// session where `XDG_RUNTIME_DIR` happened not to be set. No `libc` crate
+/// is available in this crate's dependencies, so this reads the real UID
+/// straight from procfs instead of hardcoding a guess.
+#[cfg(target_os = "linux")]
+fn current_uid() -> u32 {
+    std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|content| {
+            content
+                .lines()
+                .find_map(|line| line.strip_prefix("Uid:").map(str::to_string))
+        })
+        .and_then(|rest| rest.split_whitespace().next().map(str::to_string))
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(1000)
+}
+
+/// No `/proc` on non-Linux unix (e.g. macOS), and the Discord IPC socket
+/// there doesn't live under `/run/user/<uid>` anyway (nor does
+/// `XDG_RUNTIME_DIR` normally get set) — this fallback constant preserves
+/// the pre-existing (already macOS-inapplicable) behavior rather than
+/// pretending to support a path scheme that platform doesn't use.
+#[cfg(all(unix, not(target_os = "linux")))]
+fn current_uid() -> u32 {
+    1000
 }
 
 async fn send_frame(stream: &mut tokio::net::UnixStream, opcode: u32, payload: &str) -> std::io::Result<()> {
@@ -229,6 +258,22 @@ fn uuid_nonce() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn test_current_uid_matches_the_process_real_uid() {
+        use std::os::unix::fs::MetadataExt;
+
+        // Deterministic, no subprocess: a file we just created is owned by
+        // our own real UID, so its owner is ground truth to compare
+        // against without hardcoding an assumption about what UID this
+        // test happens to run as (CI, a container, a second account, etc.
+        // may all differ from the developer's own 1000).
+        let tmp = tempfile::NamedTempFile::new().expect("tempfile");
+        let owner_uid = std::fs::metadata(tmp.path()).expect("metadata").uid();
+
+        assert_eq!(current_uid(), owner_uid);
+    }
 
     #[test]
     fn test_discord_rpc_handle_initialization() {

@@ -141,7 +141,13 @@ pub fn start_remote_server(app_handle: AppHandle, port: u16, token: String) {
                 let token = token.clone();
                 tokio::spawn(async move {
                     let mut buffer = [0u8; 8192];
-                    if let Ok(n) = socket.read(&mut buffer).await {
+                    // Bounded: an accepted connection that never sends a
+                    // request (deliberately or by a bad client) would
+                    // otherwise leak this task and its socket forever, since
+                    // the read below had no timeout.
+                    let read_result =
+                        tokio::time::timeout(std::time::Duration::from_secs(10), socket.read(&mut buffer)).await;
+                    if let Ok(Ok(n)) = read_result {
                         if n == 0 {
                             return;
                         }

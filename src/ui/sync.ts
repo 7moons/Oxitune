@@ -38,6 +38,7 @@ function renderRoomView(room: RoomState | null) {
 
   setupView.style.display = 'none';
   activeView.style.display = 'flex';
+  hideFormError('leave-room-error');
 
   const codeDisplay = document.getElementById('room-code-display');
   if (codeDisplay) codeDisplay.textContent = room.room_code;
@@ -290,16 +291,21 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Leave Room
-  const leaveBtn = document.getElementById('leave-room-btn');
+  const leaveBtn = document.getElementById('leave-room-btn') as HTMLButtonElement | null;
   if (leaveBtn) {
     leaveBtn.addEventListener('click', async () => {
       if (window.__TAURI__?.core) {
+        hideFormError('leave-room-error');
+        leaveBtn.disabled = true;
         try {
           await window.__TAURI__.core.invoke('leave_sync_room');
           activeRoom = null;
           renderRoomView(null);
         } catch (e) {
           console.error('[YTMD Sync] Failed to leave room:', e);
+          showFormError('leave-room-error', `Couldn't leave the room: ${errorMessage(e)}`);
+        } finally {
+          leaveBtn.disabled = false;
         }
       }
     });

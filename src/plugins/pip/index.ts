@@ -1,6 +1,8 @@
 import { YTMDPlugin, PluginContext } from '../types';
 import { createEl, createSvg } from '../../utils/dom';
 
+let cleanup: (() => void) | null = null;
+
 export const PipPlugin: YTMDPlugin = {
   id: 'pip',
   name: 'Floating Picture-in-Picture',
@@ -69,7 +71,19 @@ export const PipPlugin: YTMDPlugin = {
       }
     };
 
-    setInterval(injectPipButton, 1000);
+    const pollInterval = window.setInterval(injectPipButton, 1000);
     injectPipButton();
+
+    cleanup = () => {
+      clearInterval(pollInterval);
+      document.getElementById('ytmd-pip-btn')?.remove();
+    };
+  },
+
+  onDestroy() {
+    if (cleanup) {
+      cleanup();
+      cleanup = null;
+    }
   }
 };

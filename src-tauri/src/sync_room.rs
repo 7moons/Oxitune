@@ -11,11 +11,12 @@
 //!   3. Room-state and playback updates are relayed as newline-delimited
 //!      JSON over that TCP connection for as long as both sides stay open.
 //!
-//! This only works for devices on the same local network (Wi-Fi/LAN) — there
-//! is no public relay server, so it cannot bridge two different networks
-//! behind separate NATs. That's an intentional scope boundary, not an
-//! oversight: bridging arbitrary networks needs infrastructure this project
-//! doesn't run or control.
+//! This transport only works for devices on the same local network
+//! (Wi-Fi/LAN) — it cannot bridge two different networks behind separate
+//! NATs, and is tried first for its lower latency. `create_room`/`join_room`
+//! below also drive `p2p_sync.rs`, a second transport over a public MQTT
+//! broker, so two peers on different networks/NATs (e.g. different cities)
+//! can still find each other; see that module for the internet path.
 
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};

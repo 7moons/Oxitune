@@ -9,6 +9,12 @@ interface Segment {
 let segments: Segment[] = [];
 let lastVideoId = '';
 
+// Pure staleness check, covered directly by src/tests/sponsorblock.test.ts:
+// a fetch kicked off for one video must never overwrite `segments` after the
+// user has already skipped ahead to a different video.
+export const isFreshSegmentResponse = (requestedVideoId: string, latestVideoId: string): boolean =>
+  requestedVideoId === latestVideoId;
+
 export const SponsorblockPlugin: YTMDPlugin = {
   id: 'sponsorblock',
   name: 'SponsorBlock for Music',
@@ -22,17 +28,21 @@ export const SponsorblockPlugin: YTMDPlugin = {
 
   async onTrackChange(track: TrackInfo) {
     if (!track.videoId || track.videoId === lastVideoId) return;
-    lastVideoId = track.videoId;
+    const requestedVideoId = track.videoId;
+    lastVideoId = requestedVideoId;
     segments = [];
 
     try {
       const categories = JSON.stringify(['music_offtopic', 'intro', 'outro', 'sponsor', 'selfpromo']);
-      const url = `https://sponsor.ajay.app/api/skipSegments?videoID=${track.videoId}&categories=${encodeURIComponent(categories)}`;
+      const url = `https://sponsor.ajay.app/api/skipSegments?videoID=${requestedVideoId}&categories=${encodeURIComponent(categories)}`;
       const res = await fetch(url);
       if (res.ok) {
         const data = (await res.json()) as Segment[];
+        // Guard against a slower, now-stale response for a previous video
+        // landing after the user has already moved on to another track.
+        if (!isFreshSegmentResponse(requestedVideoId, lastVideoId)) return;
         segments = data;
-        console.log(`[YTMD SponsorBlock] Loaded ${data.length} segments for ${track.videoId}`);
+        console.log(`[YTMD SponsorBlock] Loaded ${data.length} segments for ${requestedVideoId}`);
       }
     } catch (e) {
       // SponsorBlock segment not found or network offline

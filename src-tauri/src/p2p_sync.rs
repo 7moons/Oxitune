@@ -16,16 +16,22 @@
 use crate::sync_room::{
     generate_user_id, RoomState, RoomStateWire, SyncEventSink, SyncRoomManager, WireMessage,
 };
-use rumqttc::{AsyncClient, Event, EventLoop, MqttOptions, Packet, QoS};
+use rumqttc::{AsyncClient, Event, EventLoop, MqttOptions, Packet, QoS, Transport};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
+/// TLS (8883), not plaintext MQTT (1883): the payload is room codes,
+/// nicknames, and now-playing title/artist, and this traffic transits a
+/// public broker over the open internet — anyone on-path (public Wi-Fi, a
+/// transit ISP, or the broker operator itself) could otherwise read or
+/// tamper with it. All three brokers below serve anonymous TLS on 8883
+/// with a publicly-trusted cert, so this costs nothing in reliability.
 pub const PUBLIC_BROKERS: &[(&str, u16)] = &[
-    ("broker.hivemq.com", 1883),
-    ("broker.emqx.io", 1883),
-    ("test.mosquitto.org", 1883),
+    ("broker.hivemq.com", 8883),
+    ("broker.emqx.io", 8883),
+    ("test.mosquitto.org", 8883),
 ];
 
 const JOIN_TIMEOUT: Duration = Duration::from_secs(8);
@@ -52,6 +58,7 @@ fn create_mqtt_client(prefix: &str, host: &str, port: u16) -> (AsyncClient, Even
     let mut mqttoptions = MqttOptions::new(client_id, host, port);
     mqttoptions.set_keep_alive(Duration::from_secs(15));
     mqttoptions.set_clean_session(true);
+    mqttoptions.set_transport(Transport::tls_with_default_config());
     AsyncClient::new(mqttoptions, 64)
 }
 
@@ -340,6 +347,25 @@ mod tests {
             assert!(!host.is_empty());
             assert!(*port > 0);
         }
+    }
+
+    #[test]
+    fn test_public_brokers_use_tls_port_not_plaintext() {
+        // Regression guard: room codes, nicknames, and now-playing metadata
+        // cross these brokers over the open internet. Port 1883 is
+        // unauthenticated plaintext MQTT — anyone on-path can read or
+        // tamper with it. Every broker here must be the TLS listener (8883),
+        // and create_mqtt_client must actually select a TLS transport.
+        for (host, port) in PUBLIC_BROKERS {
+            assert_eq!(*port, 8883, "{host} must use the TLS port, not plaintext 1883");
+        }
+
+        let (client, eventloop) = create_mqtt_client("test", PUBLIC_BROKERS[0].0, PUBLIC_BROKERS[0].1);
+        assert!(
+            matches!(eventloop.mqtt_options.transport(), rumqttc::Transport::Tls(_)),
+            "create_mqtt_client must configure a TLS transport, not plaintext TCP"
+        );
+        drop(client);
     }
 
     #[test]

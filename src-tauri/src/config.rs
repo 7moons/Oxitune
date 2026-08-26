@@ -195,7 +195,15 @@ impl ConfigManager {
         if self.config_path.exists() {
             if let Ok(content) = fs::read_to_string(&self.config_path) {
                 if let Ok(config) = serde_json::from_str::<AppConfig>(&content) {
-                    return config;
+                    // Every on-disk config must be re-sanitized on the way
+                    // back in, not just on the way out through `save()`:
+                    // the legacy-path migration in `new()` copies the old
+                    // file's bytes verbatim (never through `save()`), and a
+                    // hand-edited or pre-clamp-era file bypasses it too.
+                    // Without this, a stale out-of-range value (e.g. a
+                    // privileged remote_port or a NaN gain) would be loaded
+                    // as-is into the running app on every single startup.
+                    return config.sanitized();
                 }
             }
         }
@@ -207,7 +215,22 @@ impl ConfigManager {
     pub fn save(&self, config: &AppConfig) -> Result<(), String> {
         let sanitized = config.clone().sanitized();
         let json = serde_json::to_string_pretty(&sanitized).map_err(|e| e.to_string())?;
-        fs::write(&self.config_path, json).map_err(|e| e.to_string())
+
+        // Write to a sibling temp file and rename it into place instead of
+        // truncating config.json directly. `fs::write` truncates then
+        // writes as two separate steps; a crash, power loss, or kill -9 of
+        // the app between those steps leaves a zero-byte or partial
+        // config.json that fails to parse on the next launch, silently
+        // discarding every saved setting (see `load()`'s fallback to
+        // `AppConfig::default()`). `rename` within the same directory is a
+        // single atomic syscall on the filesystems this app ships on, so a
+        // reader only ever observes the fully-old or fully-new file.
+        let mut tmp_os = self.config_path.clone().into_os_string();
+        tmp_os.push(".tmp");
+        let tmp_path = PathBuf::from(tmp_os);
+
+        fs::write(&tmp_path, &json).map_err(|e| e.to_string())?;
+        fs::rename(&tmp_path, &self.config_path).map_err(|e| e.to_string())
     }
 }
 
@@ -217,16 +240,18 @@ mod tests {
 
     #[test]
     fn test_sanitized_clamps_malicious_out_of_range_values() {
-        let mut config = AppConfig::default();
-        config.wheel_volume_step = 999.0;
-        config.preamp_gain = -9999.0;
-        config.crossfade_seconds = -5.0;
-        config.playback_speed = f64::INFINITY;
-        config.ambient_intensity = f64::NAN;
-        config.remote_port = 22; // SSH — a malicious save_config trying to steer us onto a privileged port
-        config.download_dir = "".to_string();
-        config.local_music_dir = "   ".to_string();
-        config.equalizer_gains = vec![1000.0; 5000];
+        let config = AppConfig {
+            wheel_volume_step: 999.0,
+            preamp_gain: -9999.0,
+            crossfade_seconds: -5.0,
+            playback_speed: f64::INFINITY,
+            ambient_intensity: f64::NAN,
+            remote_port: 22, // SSH — a malicious save_config trying to steer us onto a privileged port
+            download_dir: "".to_string(),
+            local_music_dir: "   ".to_string(),
+            equalizer_gains: vec![1000.0; 5000],
+            ..AppConfig::default()
+        };
 
         let clean = config.sanitized();
 
@@ -244,14 +269,16 @@ mod tests {
 
     #[test]
     fn test_sanitized_preserves_valid_values() {
-        let mut config = AppConfig::default();
-        config.wheel_volume_step = 0.1;
-        config.preamp_gain = 3.5;
-        config.crossfade_seconds = 5.0;
-        config.playback_speed = 1.25;
-        config.ambient_intensity = 0.6;
-        config.remote_port = 9863;
-        config.equalizer_gains = vec![1.0, -2.0, 3.0];
+        let config = AppConfig {
+            wheel_volume_step: 0.1,
+            preamp_gain: 3.5,
+            crossfade_seconds: 5.0,
+            playback_speed: 1.25,
+            ambient_intensity: 0.6,
+            remote_port: 9863,
+            equalizer_gains: vec![1.0, -2.0, 3.0],
+            ..AppConfig::default()
+        };
 
         let clean = config.sanitized();
 
@@ -272,8 +299,10 @@ mod tests {
             config_path: dir.path().join("config.json"),
         };
 
-        let mut config = AppConfig::default();
-        config.remote_port = 1; // would otherwise let an attacker steer us onto a privileged port
+        let config = AppConfig {
+            remote_port: 1, // would otherwise let an attacker steer us onto a privileged port
+            ..AppConfig::default()
+        };
 
         manager.save(&config).expect("save should succeed");
         let loaded = manager.load();
@@ -299,55 +328,129 @@ mod tests {
         assert_eq!(config.equalizer_gains.len(), 10);
         assert_eq!(config.equalizer_preset, "flat");
         assert_eq!(config.crossfade_seconds, 0.0);
-        assert_eq!(config.skip_silence_enabled, false);
+        assert!(!config.skip_silence_enabled);
         assert_eq!(config.playback_speed, 1.0);
-        assert_eq!(config.preserve_pitch, true);
-        assert_eq!(config.ambient_lighting_enabled, true);
+        assert!(config.preserve_pitch);
+        assert!(config.ambient_lighting_enabled);
         assert_eq!(config.ambient_intensity, 0.6);
         assert_eq!(config.theme_preset, "default");
         assert_eq!(config.download_format, "mp3");
-        assert_eq!(config.embed_lyrics, true);
-        assert_eq!(config.remote_enabled, true);
+        assert!(config.embed_lyrics);
+        assert!(config.remote_enabled);
         assert_eq!(config.remote_port, 9863);
-        assert_eq!(config.inhibit_sleep, true);
-        assert_eq!(config.pause_on_lock, true);
+        assert!(config.inhibit_sleep);
+        assert!(config.pause_on_lock);
         assert_eq!(config.wheel_volume_step, 0.05);
         assert_eq!(config.quality, "high");
     }
 
     #[test]
     fn test_config_serialization() {
-        let mut config = AppConfig::default();
-        config.equalizer_gains = vec![3.0, 2.5, 1.0, 0.0, -1.0, -2.0, 0.0, 1.5, 3.0, 4.0];
-        config.preamp_gain = 1.5;
-        config.crossfade_seconds = 5.0;
-        config.skip_silence_enabled = true;
-        config.playback_speed = 1.25;
-        config.preserve_pitch = false;
-        config.ambient_lighting_enabled = true;
-        config.ambient_intensity = 0.8;
-        config.theme_preset = "catppuccin".to_string();
-        config.download_format = "flac".to_string();
-        config.embed_lyrics = true;
-        config.remote_enabled = false;
-        config.remote_port = 8888;
+        let config = AppConfig {
+            equalizer_gains: vec![3.0, 2.5, 1.0, 0.0, -1.0, -2.0, 0.0, 1.5, 3.0, 4.0],
+            preamp_gain: 1.5,
+            crossfade_seconds: 5.0,
+            skip_silence_enabled: true,
+            playback_speed: 1.25,
+            preserve_pitch: false,
+            ambient_lighting_enabled: true,
+            ambient_intensity: 0.8,
+            theme_preset: "catppuccin".to_string(),
+            download_format: "flac".to_string(),
+            embed_lyrics: true,
+            remote_enabled: false,
+            remote_port: 8888,
+            ..AppConfig::default()
+        };
         let serialized = serde_json::to_string(&config).expect("Serialization failed");
         let deserialized: AppConfig = serde_json::from_str(&serialized).expect("Deserialization failed");
         assert_eq!(deserialized.theme, "default-dark");
-        assert_eq!(deserialized.mpris_enabled, true);
+        assert!(deserialized.mpris_enabled);
         assert_eq!(deserialized.equalizer_gains.len(), 10);
         assert_eq!(deserialized.equalizer_gains[0], 3.0);
         assert_eq!(deserialized.preamp_gain, 1.5);
         assert_eq!(deserialized.crossfade_seconds, 5.0);
-        assert_eq!(deserialized.skip_silence_enabled, true);
+        assert!(deserialized.skip_silence_enabled);
         assert_eq!(deserialized.playback_speed, 1.25);
-        assert_eq!(deserialized.preserve_pitch, false);
-        assert_eq!(deserialized.ambient_lighting_enabled, true);
+        assert!(!deserialized.preserve_pitch);
+        assert!(deserialized.ambient_lighting_enabled);
         assert_eq!(deserialized.ambient_intensity, 0.8);
         assert_eq!(deserialized.theme_preset, "catppuccin");
         assert_eq!(deserialized.download_format, "flac");
-        assert_eq!(deserialized.embed_lyrics, true);
-        assert_eq!(deserialized.remote_enabled, false);
+        assert!(deserialized.embed_lyrics);
+        assert!(!deserialized.remote_enabled);
         assert_eq!(deserialized.remote_port, 8888);
+    }
+
+    #[test]
+    fn test_load_sanitizes_a_hand_edited_or_legacy_config_file() {
+        use tempfile::tempdir;
+        let dir = tempdir().expect("tempdir");
+        let manager = ConfigManager {
+            config_path: dir.path().join("config.json"),
+        };
+
+        // Simulate a config.json that never went through `save()`'s
+        // sanitize step: a hand-edited file, one written by an older
+        // version predating a clamp, or one copied verbatim by the
+        // legacy-path migration in `ConfigManager::new()`.
+        let malicious = AppConfig {
+            remote_port: 22,
+            preamp_gain: 999.0,
+            equalizer_gains: vec![1000.0; 5000],
+            ..AppConfig::default()
+        };
+        let raw_json = serde_json::to_string(&malicious).expect("serialize");
+        fs::write(manager.config_path(), raw_json).expect("write raw config");
+
+        let loaded = manager.load();
+
+        assert_eq!(loaded.remote_port, AppConfig::default().remote_port);
+        assert_eq!(loaded.preamp_gain, 24.0);
+        assert_eq!(loaded.equalizer_gains.len(), 32);
+        assert!(loaded.equalizer_gains.iter().all(|g| *g == 24.0));
+    }
+
+    #[test]
+    fn test_config_manager_save_is_atomic_no_leftover_tmp_file() {
+        use tempfile::tempdir;
+        let dir = tempdir().expect("tempdir");
+        let manager = ConfigManager {
+            config_path: dir.path().join("config.json"),
+        };
+
+        manager.save(&AppConfig::default()).expect("save should succeed");
+
+        assert!(manager.config_path().exists());
+        let loaded = manager.load();
+        assert_eq!(loaded.theme, AppConfig::default().theme);
+
+        // The write-then-rename must not leave its temp artifact behind.
+        let mut tmp_os = manager.config_path().clone().into_os_string();
+        tmp_os.push(".tmp");
+        assert!(!PathBuf::from(tmp_os).exists());
+    }
+
+    #[test]
+    fn test_load_recovers_from_a_torn_write_left_by_a_previous_crash() {
+        use tempfile::tempdir;
+        let dir = tempdir().expect("tempdir");
+        let manager = ConfigManager {
+            config_path: dir.path().join("config.json"),
+        };
+
+        // Simulate a crash mid-save under the old non-atomic write scheme:
+        // a truncated, unparseable config.json plus a leftover temp file
+        // from a write that never got renamed into place.
+        fs::write(manager.config_path(), b"{\"theme\": \"def").unwrap();
+        fs::write(dir.path().join("config.json.tmp"), b"{}").unwrap();
+
+        // load() must fail closed to defaults rather than panicking or
+        // propagating the parse error, and it must repair the on-disk file.
+        let loaded = manager.load();
+        assert_eq!(loaded.theme, AppConfig::default().theme);
+
+        let loaded_again = manager.load();
+        assert_eq!(loaded_again.theme, AppConfig::default().theme);
     }
 }

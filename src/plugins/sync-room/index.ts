@@ -84,6 +84,7 @@ export class RoomSyncController {
 }
 
 let controllerRef: RoomSyncController | null = null;
+let cleanup: (() => void) | null = null;
 
 export const SyncRoomPlugin: YTMDPlugin = {
   id: 'sync_room',
@@ -95,24 +96,37 @@ export const SyncRoomPlugin: YTMDPlugin = {
     const controller = new RoomSyncController();
     controllerRef = controller;
 
+    const unlistenPromises: Promise<() => void>[] = [];
     if (window.__TAURI__?.event) {
-      window.__TAURI__.event.listen<{ room_code: string; is_host: boolean }>('sync-room-updated', (e) => {
-        controller.setRoomState(true, e.payload.is_host);
-      });
-
-      window.__TAURI__.event.listen('sync-room-left', () => {
-        controller.setRoomState(false, false);
-      });
-
-      window.__TAURI__.event.listen<SyncPlaybackPayload>('sync-playback-remote', (e) => {
-        controller.handleRemotePlayback(e.payload, ctx.getVideoElement());
-      });
+      unlistenPromises.push(
+        window.__TAURI__.event.listen<{ room_code: string; is_host: boolean }>('sync-room-updated', (e) => {
+          controller.setRoomState(true, e.payload.is_host);
+        }),
+        window.__TAURI__.event.listen('sync-room-left', () => {
+          controller.setRoomState(false, false);
+        }),
+        window.__TAURI__.event.listen<SyncPlaybackPayload>('sync-playback-remote', (e) => {
+          controller.handleRemotePlayback(e.payload, ctx.getVideoElement());
+        })
+      );
     }
+
+    cleanup = () => {
+      unlistenPromises.forEach((p) => p.then((unlisten) => unlisten()));
+      controllerRef = null;
+    };
   },
 
   onTick(_currentTimeSecs: number, ctx: PluginContext) {
     if (controllerRef && controllerRef.isInRoom() && controllerRef.isRoomHost()) {
       controllerRef.broadcastLocalState(ctx.track, ctx.getVideoElement(), ctx.invoke);
+    }
+  },
+
+  onDestroy() {
+    if (cleanup) {
+      cleanup();
+      cleanup = null;
     }
   }
 };
