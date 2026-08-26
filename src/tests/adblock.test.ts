@@ -4,7 +4,12 @@ import {
   isAdShowingFromClassList,
   MuteSyncState,
   AdblockPlugin,
-  shouldRunTickSafetyNet
+  shouldRunTickSafetyNet,
+  AD_VIDEO_HIDE_STYLE,
+  deleteNestedKey,
+  pruneAdFields,
+  isAdResponseUrl,
+  AD_RESPONSE_ENDPOINTS
 } from '../plugins/adblock';
 import { PluginRegistry } from '../plugins/registry';
 import { PluginContext } from '../plugins/types';
@@ -101,6 +106,129 @@ describe('shouldRunTickSafetyNet — throttles the onTick skip/dismiss safety ne
     // lastRunMs = 0 is the initial sentinel before any tick has run, so a
     // real Date.now() timestamp is always far past the interval from it.
     expect(shouldRunTickSafetyNet(Date.now(), 0, 1000)).toBe(true);
+  });
+});
+
+describe('AD_VIDEO_HIDE_STYLE — must not suspend the ad video\'s decode pipeline', () => {
+  test('never uses display or visibility to hide the ad video', () => {
+    // display:none / visibility:hidden pull the element out of the render
+    // tree, which makes WebKit suspend decode/paint on a hidden <video> —
+    // the ad then stalls looking like it's stuck loading instead of playing
+    // out silently and firing `ended` on schedule. Regression test for
+    // that exact bug report.
+    expect(AD_VIDEO_HIDE_STYLE).not.toMatch(/display\s*:/);
+    expect(AD_VIDEO_HIDE_STYLE).not.toMatch(/visibility\s*:/);
+  });
+
+  test('hides via opacity while staying inert to clicks', () => {
+    expect(AD_VIDEO_HIDE_STYLE).toMatch(/opacity\s*:\s*0\s*!important/);
+    expect(AD_VIDEO_HIDE_STYLE).toMatch(/pointer-events\s*:\s*none\s*!important/);
+  });
+
+  test('targets exactly the ad-showing and ad-interrupting video', () => {
+    expect(AD_VIDEO_HIDE_STYLE).toMatch(/\.ad-showing video/);
+    expect(AD_VIDEO_HIDE_STYLE).toMatch(/\.ad-interrupting video/);
+  });
+});
+
+describe('deleteNestedKey', () => {
+  test('deletes a top-level key and reports it removed', () => {
+    const obj: Record<string, unknown> = { adPlacements: [1, 2], videoDetails: {} };
+    expect(deleteNestedKey(obj, 'adPlacements')).toBe(true);
+    expect(obj).not.toHaveProperty('adPlacements');
+    expect(obj).toHaveProperty('videoDetails');
+  });
+
+  test('deletes a nested dotted-path key without touching siblings', () => {
+    const obj = { playerResponse: { adPlacements: [1], videoDetails: { title: 'x' } } };
+    expect(deleteNestedKey(obj, 'playerResponse.adPlacements')).toBe(true);
+    expect(obj.playerResponse).not.toHaveProperty('adPlacements');
+    expect(obj.playerResponse.videoDetails.title).toBe('x');
+  });
+
+  test('returns false when the path is absent, without throwing', () => {
+    expect(deleteNestedKey({ videoDetails: {} }, 'adPlacements')).toBe(false);
+    expect(deleteNestedKey({ videoDetails: {} }, 'playerResponse.adPlacements')).toBe(false);
+  });
+
+  test('returns false when an intermediate segment is missing or not an object', () => {
+    expect(deleteNestedKey({}, 'playerResponse.adPlacements')).toBe(false);
+    expect(deleteNestedKey({ playerResponse: null }, 'playerResponse.adPlacements')).toBe(false);
+    expect(deleteNestedKey({ playerResponse: 'not-an-object' }, 'playerResponse.adPlacements')).toBe(false);
+  });
+
+  test('returns false for non-object input instead of throwing', () => {
+    expect(deleteNestedKey(null, 'adPlacements')).toBe(false);
+    expect(deleteNestedKey(42, 'adPlacements')).toBe(false);
+  });
+});
+
+describe('pruneAdFields — strips ad-scheduling metadata before the player reads it', () => {
+  test('prunes every known ad key present on a realistic player response', () => {
+    const response = {
+      videoDetails: { videoId: 'abc123', title: 'Some Track' },
+      playabilityStatus: { status: 'OK' },
+      adPlacements: [{ adPlacementRenderer: {} }],
+      adSlots: [{}],
+      playerAds: [{}],
+      adBreakHeartbeatParams: 'xyz'
+    };
+    expect(pruneAdFields(response)).toBe(true);
+    expect(response).not.toHaveProperty('adPlacements');
+    expect(response).not.toHaveProperty('adSlots');
+    expect(response).not.toHaveProperty('playerAds');
+    expect(response).not.toHaveProperty('adBreakHeartbeatParams');
+    // Untouched: pruning must not collaterally remove real content fields.
+    expect(response.videoDetails.videoId).toBe('abc123');
+    expect(response.playabilityStatus.status).toBe('OK');
+  });
+
+  test('prunes the playerResponse-wrapped shape used by /next and /browse', () => {
+    const response = {
+      playerResponse: {
+        videoDetails: { videoId: 'abc123' },
+        adPlacements: [{}],
+        adBreakHeartbeatParams: 'xyz'
+      }
+    };
+    expect(pruneAdFields(response)).toBe(true);
+    expect(response.playerResponse).not.toHaveProperty('adPlacements');
+    expect(response.playerResponse).not.toHaveProperty('adBreakHeartbeatParams');
+    expect(response.playerResponse.videoDetails.videoId).toBe('abc123');
+  });
+
+  test('prunes the upsell dialog renderer at both known nesting depths', () => {
+    const a = { auxiliaryUi: { messageRenderers: { upsellDialogRenderer: {} } } };
+    const b = { playerResponse: { auxiliaryUi: { messageRenderers: { upsellDialogRenderer: {} } } } };
+    expect(pruneAdFields(a)).toBe(true);
+    expect(pruneAdFields(b)).toBe(true);
+  });
+
+  test('returns false and does nothing for a response with no ad-related fields', () => {
+    const response = { videoDetails: { videoId: 'abc123' } };
+    expect(pruneAdFields(response)).toBe(false);
+    expect(response).toEqual({ videoDetails: { videoId: 'abc123' } });
+  });
+
+  test('is a no-op for non-object JSON.parse results (arrays, primitives, null)', () => {
+    expect(pruneAdFields(null)).toBe(false);
+    expect(pruneAdFields(42)).toBe(false);
+    expect(pruneAdFields('a string')).toBe(false);
+    expect(pruneAdFields([1, 2, 3])).toBe(false);
+  });
+});
+
+describe('isAdResponseUrl', () => {
+  test('matches every declared ad-scheduling endpoint', () => {
+    for (const endpoint of AD_RESPONSE_ENDPOINTS) {
+      expect(isAdResponseUrl(`https://music.youtube.com${endpoint}?prettyPrint=false`)).toBe(true);
+    }
+  });
+
+  test('does not match unrelated endpoints', () => {
+    expect(isAdResponseUrl('https://music.youtube.com/youtubei/v1/log_event')).toBe(false);
+    expect(isAdResponseUrl('https://music.youtube.com/youtubei/v1/att/get')).toBe(false);
+    expect(isAdResponseUrl('https://music.youtube.com/generate_204')).toBe(false);
   });
 });
 
