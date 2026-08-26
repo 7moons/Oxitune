@@ -2,6 +2,8 @@ import { YTMDPlugin, PluginContext, TrackInfo } from '../types';
 import { extractPalette } from './color';
 import { createEl } from '../../utils/dom';
 
+let setIntensity: ((val: number) => void) | null = null;
+
 export const AmbientLightingPlugin: YTMDPlugin = {
   id: 'ambient_lighting',
   name: 'Dynamic Ambient Lighting',
@@ -52,16 +54,16 @@ export const AmbientLightingPlugin: YTMDPlugin = {
     backdrop.appendChild(orb1);
     backdrop.appendChild(orb2);
 
-    (this as any)._setIntensity = (val: number) => {
+    setIntensity = (val: number) => {
       if (backdrop) backdrop.style.opacity = String(val);
     };
 
     if (window.__TAURI__?.event) {
       window.__TAURI__.event.listen<number>('set-ambient-intensity', (e) => {
-        (this as any)._setIntensity(e.payload);
+        setIntensity?.(e.payload);
       });
       window.__TAURI__.event.listen<boolean>('set-ambient-enabled', (e) => {
-        (this as any)._setIntensity(e.payload ? 0.6 : 0);
+        setIntensity?.(e.payload ? 0.6 : 0);
       });
     }
 

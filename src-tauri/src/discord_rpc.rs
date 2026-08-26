@@ -32,6 +32,12 @@ pub struct DiscordRpcHandle {
     _running: Arc<AtomicBool>,
 }
 
+impl Default for DiscordRpcHandle {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DiscordRpcHandle {
     pub fn new() -> Self {
         let (tx, mut rx) = mpsc::channel::<DiscordCommand>(32);

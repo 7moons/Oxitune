@@ -1,6 +1,8 @@
 import { YTMDPlugin, PluginContext, TrackInfo } from '../types';
 import { createEl, createSvg } from '../../utils/dom';
 
+let setCurrentTrack: ((t: TrackInfo) => void) | null = null;
+
 export const DownloaderPlugin: YTMDPlugin = {
   id: 'downloader',
   name: 'Built-in Audio Downloader',
@@ -101,14 +103,12 @@ export const DownloaderPlugin: YTMDPlugin = {
     setInterval(injectDownloadButton, 1000);
     injectDownloadButton();
 
-    (this as any)._setCurrentTrack = (t: TrackInfo) => {
+    setCurrentTrack = (t: TrackInfo) => {
       currentTrack = t;
     };
   },
 
   onTrackChange(track: TrackInfo) {
-    if ((this as any)._setCurrentTrack) {
-      (this as any)._setCurrentTrack(track);
-    }
+    setCurrentTrack?.(track);
   }
 };

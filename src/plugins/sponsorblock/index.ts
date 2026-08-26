@@ -6,6 +6,9 @@ interface Segment {
   UUID: string;
 }
 
+let segments: Segment[] = [];
+let lastVideoId = '';
+
 export const SponsorblockPlugin: YTMDPlugin = {
   id: 'sponsorblock',
   name: 'SponsorBlock for Music',
@@ -13,14 +16,14 @@ export const SponsorblockPlugin: YTMDPlugin = {
   defaultEnabled: true,
 
   onInit() {
-    (this as any)._segments = [] as Segment[];
-    (this as any)._lastVideoId = '';
+    segments = [];
+    lastVideoId = '';
   },
 
   async onTrackChange(track: TrackInfo) {
-    if (!track.videoId || track.videoId === (this as any)._lastVideoId) return;
-    (this as any)._lastVideoId = track.videoId;
-    (this as any)._segments = [];
+    if (!track.videoId || track.videoId === lastVideoId) return;
+    lastVideoId = track.videoId;
+    segments = [];
 
     try {
       const categories = JSON.stringify(['music_offtopic', 'intro', 'outro', 'sponsor', 'selfpromo']);
@@ -28,7 +31,7 @@ export const SponsorblockPlugin: YTMDPlugin = {
       const res = await fetch(url);
       if (res.ok) {
         const data = (await res.json()) as Segment[];
-        (this as any)._segments = data;
+        segments = data;
         console.log(`[YTMD SponsorBlock] Loaded ${data.length} segments for ${track.videoId}`);
       }
     } catch (e) {
@@ -37,7 +40,6 @@ export const SponsorblockPlugin: YTMDPlugin = {
   },
 
   onTick(currentTimeSecs: number, ctx: PluginContext) {
-    const segments = (this as any)._segments as Segment[];
     if (!segments || segments.length === 0) return;
 
     for (const seg of segments) {

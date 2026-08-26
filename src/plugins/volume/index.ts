@@ -1,5 +1,7 @@
 import { YTMDPlugin, PluginContext } from '../types';
 
+let cleanup: (() => void) | null = null;
+
 export const VolumePlugin: YTMDPlugin = {
   id: 'volume',
   name: 'Wheel Volume Controller',
@@ -32,14 +34,15 @@ export const VolumePlugin: YTMDPlugin = {
 
     window.addEventListener('wheel', handleWheel, { passive: false });
 
-    (this as any)._cleanup = () => {
+    cleanup = () => {
       window.removeEventListener('wheel', handleWheel);
     };
   },
 
   onDestroy() {
-    if ((this as any)._cleanup) {
-      (this as any)._cleanup();
+    if (cleanup) {
+      cleanup();
+      cleanup = null;
     }
   }
 };

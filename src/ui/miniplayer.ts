@@ -62,10 +62,10 @@ function updateTrackUI(track: TrackPayload) {
 }
 
 async function initMiniPlayer() {
-  const tauri = (window as any).__TAURI__;
+  const tauri = window.__TAURI__;
 
   if (tauri?.event) {
-    tauri.event.listen('track-changed', (e: any) => {
+    tauri.event.listen<TrackPayload>('track-changed', (e) => {
       if (e.payload) updateTrackUI(e.payload);
     });
   }

@@ -25,7 +25,7 @@ let currentPluginContext: PluginContext | null = null;
 
 const invokeBackend = (cmd: string, args: Record<string, unknown> = {}): Promise<unknown> => {
   return new Promise((resolve) => {
-    const tauri = (window as any).__TAURI__;
+    const tauri = window.__TAURI__;
     if (!tauri?.event?.emit) {
       resolve(null);
       return;
@@ -40,12 +40,12 @@ const invokeBackend = (cmd: string, args: Record<string, unknown> = {}): Promise
     }, 4000);
 
     tauri.event
-      .listen(`ytmd-response-${id}`, (event: any) => {
+      .listen(`ytmd-response-${id}`, (event) => {
         clearTimeout(timer);
         if (unlisten) unlisten();
         resolve(event.payload);
       })
-      .then((unlistenFn: any) => {
+      .then((unlistenFn) => {
         unlisten = unlistenFn;
         tauri.event.emit('ytmd-invoke', { id, cmd, args });
       })
@@ -474,20 +474,20 @@ async function initYTMD() {
   }
 
   // Listen to Tauri IPC events
-  const listenEvent = (eventName: string, handler: (payload: any) => void) => {
-    const tauri = (window as any).__TAURI__;
+  const listenEvent = <T>(eventName: string, handler: (payload: T) => void) => {
+    const tauri = window.__TAURI__;
     if (tauri?.event?.listen) {
-      tauri.event.listen(eventName, (e: any) => handler(e.payload));
+      tauri.event.listen<T>(eventName, (e) => handler(e.payload));
     }
   };
 
-  listenEvent('player-command', (payload) => handlePlayerCommand(payload));
-  listenEvent('tray-command', (payload) => handlePlayerCommand(payload));
-  listenEvent('mpris-command', (payload) => handlePlayerCommand(payload));
-  listenEvent('global-shortcut-event', (payload) => handlePlayerCommand(payload));
-  listenEvent('player-seek', (payload) => PlayerBridge.seekTo(payload));
-  listenEvent('mpris-command-seek', (payload) => PlayerBridge.seekTo(payload));
-  listenEvent('player-volume', (payload) => PlayerBridge.setVolume(payload));
+  listenEvent<string>('player-command', (payload) => handlePlayerCommand(payload));
+  listenEvent<string>('tray-command', (payload) => handlePlayerCommand(payload));
+  listenEvent<string>('mpris-command', (payload) => handlePlayerCommand(payload));
+  listenEvent<string>('global-shortcut-event', (payload) => handlePlayerCommand(payload));
+  listenEvent<number>('player-seek', (payload) => PlayerBridge.seekTo(payload));
+  listenEvent<number>('mpris-command-seek', (payload) => PlayerBridge.seekTo(payload));
+  listenEvent<number>('player-volume', (payload) => PlayerBridge.setVolume(payload));
 
   // Keyboard shortcut: Ctrl+, or F2 opens settings
   window.addEventListener('keydown', (e) => {

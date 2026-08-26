@@ -231,7 +231,7 @@ pub fn notify_track_change(
             .notification()
             .builder()
             .title(&title)
-            .body(&format!("Now playing: {}", artist))
+            .body(format!("Now playing: {}", artist))
             .show();
     }
     Ok(())

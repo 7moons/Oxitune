@@ -4,6 +4,12 @@ pub struct PowerManager {
     is_inhibited: Mutex<bool>,
 }
 
+impl Default for PowerManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PowerManager {
     pub fn new() -> Self {
         Self {

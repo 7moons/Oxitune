@@ -243,9 +243,13 @@ export class AudioEngine {
 
   public setPreservesPitch(preserve: boolean): void {
     if (this.hookedVideo) {
-      (this.hookedVideo as any).preservesPitch = preserve;
-      (this.hookedVideo as any).mozPreservesPitch = preserve;
-      (this.hookedVideo as any).webkitPreservesPitch = preserve;
+      this.hookedVideo.preservesPitch = preserve;
+      const vendorPrefixed = this.hookedVideo as HTMLVideoElement & {
+        mozPreservesPitch?: boolean;
+        webkitPreservesPitch?: boolean;
+      };
+      vendorPrefixed.mozPreservesPitch = preserve;
+      vendorPrefixed.webkitPreservesPitch = preserve;
     }
   }
 }

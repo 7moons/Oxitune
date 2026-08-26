@@ -237,24 +237,21 @@ pub(crate) async fn join_room(
         match poll_result {
             Ok(Ok(Event::Incoming(Packet::Publish(publish)))) => {
                 if publish.topic == guest_topic || publish.topic == broadcast_topic {
-                    if let Ok(msg) = serde_json::from_slice::<WireMessage>(&publish.payload) {
-                        match msg {
-                            WireMessage::State { room } => {
-                                let local_room = manager.apply_remote_room_update(room, &user_id);
-                                let guest_client = client.clone();
-                                let m = manager.clone();
-                                let s = sink.clone();
-                                let uid = user_id.clone();
-                                let rcode = clean_code.clone();
+                    if let Ok(WireMessage::State { room }) =
+                        serde_json::from_slice::<WireMessage>(&publish.payload)
+                    {
+                        let local_room = manager.apply_remote_room_update(room, &user_id);
+                        let guest_client = client.clone();
+                        let m = manager.clone();
+                        let s = sink.clone();
+                        let uid = user_id.clone();
+                        let rcode = clean_code.clone();
 
-                                let reader_task = tauri::async_runtime::spawn(async move {
-                                    run_guest_loop(guest_client, eventloop, m, s, uid, rcode).await;
-                                });
-                                manager.set_p2p_guest_session(reader_task);
-                                return Ok(local_room);
-                            }
-                            _ => {}
-                        }
+                        let reader_task = tauri::async_runtime::spawn(async move {
+                            run_guest_loop(guest_client, eventloop, m, s, uid, rcode).await;
+                        });
+                        manager.set_p2p_guest_session(reader_task);
+                        return Ok(local_room);
                     }
                 }
             }

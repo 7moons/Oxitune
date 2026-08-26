@@ -1,5 +1,7 @@
 import { YTMDPlugin, PluginContext } from '../types';
 
+let cleanup: (() => void) | null = null;
+
 export const AdblockPlugin: YTMDPlugin = {
   id: 'adblock',
   name: 'Ad Blocker & Anti-Nag',
@@ -83,7 +85,7 @@ export const AdblockPlugin: YTMDPlugin = {
 
     adCheckInterval = window.setInterval(blockAds, 100);
 
-    (this as any)._cleanup = () => {
+    cleanup = () => {
       if (adCheckInterval) clearInterval(adCheckInterval);
       const injected = document.getElementById('ytmd-adblock-styles');
       if (injected) injected.remove();
@@ -91,8 +93,9 @@ export const AdblockPlugin: YTMDPlugin = {
   },
 
   onDestroy() {
-    if ((this as any)._cleanup) {
-      (this as any)._cleanup();
+    if (cleanup) {
+      cleanup();
+      cleanup = null;
     }
   }
 };

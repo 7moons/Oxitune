@@ -193,6 +193,12 @@ pub struct SyncRoomManager {
     peers: Mutex<HashMap<String, mpsc::UnboundedSender<WireMessage>>>,
 }
 
+impl Default for SyncRoomManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SyncRoomManager {
     pub fn new() -> Self {
         Self {
@@ -410,17 +416,12 @@ pub async fn create_room(
 }
 
 async fn accept_loop(listener: TcpListener, manager: Arc<SyncRoomManager>, sink: Arc<dyn SyncEventSink>) {
-    loop {
-        match listener.accept().await {
-            Ok((stream, _)) => {
-                let m = manager.clone();
-                let s = sink.clone();
-                tokio::spawn(async move {
-                    peer_task(stream, m, s).await;
-                });
-            }
-            Err(_) => break,
-        }
+    while let Ok((stream, _)) = listener.accept().await {
+        let m = manager.clone();
+        let s = sink.clone();
+        tokio::spawn(async move {
+            peer_task(stream, m, s).await;
+        });
     }
 }
 

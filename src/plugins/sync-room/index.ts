@@ -83,6 +83,8 @@ export class RoomSyncController {
   }
 }
 
+let controllerRef: RoomSyncController | null = null;
+
 export const SyncRoomPlugin: YTMDPlugin = {
   id: 'sync_room',
   name: 'P2P Room Sync',
@@ -91,7 +93,7 @@ export const SyncRoomPlugin: YTMDPlugin = {
 
   onInit(ctx: PluginContext) {
     const controller = new RoomSyncController();
-    (this as any)._controller = controller;
+    controllerRef = controller;
 
     if (window.__TAURI__?.event) {
       window.__TAURI__.event.listen<{ room_code: string; is_host: boolean }>('sync-room-updated', (e) => {
@@ -109,9 +111,8 @@ export const SyncRoomPlugin: YTMDPlugin = {
   },
 
   onTick(_currentTimeSecs: number, ctx: PluginContext) {
-    const controller = (this as any)._controller as RoomSyncController;
-    if (controller && controller.isInRoom() && controller.isRoomHost()) {
-      controller.broadcastLocalState(ctx.track, ctx.getVideoElement(), ctx.invoke);
+    if (controllerRef && controllerRef.isInRoom() && controllerRef.isRoomHost()) {
+      controllerRef.broadcastLocalState(ctx.track, ctx.getVideoElement(), ctx.invoke);
     }
   }
 };

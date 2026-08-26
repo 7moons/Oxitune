@@ -3,6 +3,9 @@ import { AudioEngine } from './engine';
 import { CrossfadeController } from './crossfade';
 import { SkipSilenceController } from './skip-silence';
 
+let crossfadeRef: CrossfadeController | null = null;
+let skipSilenceRef: SkipSilenceController | null = null;
+
 export const AudioDspPlugin: YTMDPlugin = {
   id: 'audio_dsp',
   name: 'Audio DSP & 10-Band Equalizer',
@@ -15,8 +18,8 @@ export const AudioDspPlugin: YTMDPlugin = {
     const crossfade = new CrossfadeController();
     const skipSilence = new SkipSilenceController();
 
-    (this as any)._crossfade = crossfade;
-    (this as any)._skipSilence = skipSilence;
+    crossfadeRef = crossfade;
+    skipSilenceRef = skipSilence;
 
     if (video) {
       engine.init(video);
@@ -107,18 +110,12 @@ export const AudioDspPlugin: YTMDPlugin = {
   },
 
   onTrackChange(track: TrackInfo) {
-    const crossfade = (this as any)._crossfade as CrossfadeController;
-    const skipSilence = (this as any)._skipSilence as SkipSilenceController;
-
-    if (crossfade) crossfade.onTrackChange(track);
-    if (skipSilence) skipSilence.onTrackChange();
+    if (crossfadeRef) crossfadeRef.onTrackChange(track);
+    if (skipSilenceRef) skipSilenceRef.onTrackChange();
   },
 
   onTick(currentTimeSecs: number, ctx: PluginContext) {
-    const crossfade = (this as any)._crossfade as CrossfadeController;
-    const skipSilence = (this as any)._skipSilence as SkipSilenceController;
-
-    if (crossfade) crossfade.onTick(currentTimeSecs, ctx.track);
-    if (skipSilence) skipSilence.onTick(currentTimeSecs, ctx.track, ctx.getVideoElement());
+    if (crossfadeRef) crossfadeRef.onTick(currentTimeSecs, ctx.track);
+    if (skipSilenceRef) skipSilenceRef.onTick(currentTimeSecs, ctx.track, ctx.getVideoElement());
   }
 };

@@ -7,14 +7,14 @@ export const PowerPlugin: YTMDPlugin = {
   defaultEnabled: true,
 
   onInit(ctx: PluginContext) {
-    let wakeLock: any = null;
+    let wakeLock: WakeLockSentinel | null = null;
     const inhibitSleep = ctx.config.inhibit_sleep !== false;
 
     const requestWakeLock = async () => {
       if (!inhibitSleep || wakeLock !== null) return;
       try {
         if ('wakeLock' in navigator) {
-          wakeLock = await (navigator as any).wakeLock.request('screen');
+          wakeLock = await navigator.wakeLock.request('screen');
           wakeLock.addEventListener('release', () => {
             wakeLock = null;
           });

@@ -1,5 +1,7 @@
 import { YTMDPlugin, PluginContext } from '../types';
 
+let cleanup: (() => void) | null = null;
+
 export const VisualizerPlugin: YTMDPlugin = {
   id: 'visualizer',
   name: 'Modern Clean Theme & Custom CSS',
@@ -63,14 +65,15 @@ export const VisualizerPlugin: YTMDPlugin = {
     style.textContent = `${baseThemeCss}\n${customCss}`;
     document.head.appendChild(style);
 
-    (this as any)._cleanup = () => {
+    cleanup = () => {
       style.remove();
     };
   },
 
   onDestroy() {
-    if ((this as any)._cleanup) {
-      (this as any)._cleanup();
+    if (cleanup) {
+      cleanup();
+      cleanup = null;
     }
   }
 };

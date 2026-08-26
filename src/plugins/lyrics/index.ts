@@ -10,6 +10,7 @@ let pluginLines: LrcLine[] = [];
 let currentActiveIdx = -1;
 let cachedLyricsData: { syncedLyrics?: string; plainLyrics?: string } | null = null;
 let currentSongKey = '';
+let cleanup: (() => void) | null = null;
 
 export const LyricsPlugin: YTMDPlugin = {
   id: 'lyrics',
@@ -111,7 +112,7 @@ export const LyricsPlugin: YTMDPlugin = {
     const pollInterval = window.setInterval(checkTab, 600);
     checkTab();
 
-    (this as any)._cleanup = () => {
+    cleanup = () => {
       clearInterval(pollInterval);
       style.remove();
       const wrappers = document.querySelectorAll('#ytmd-native-lyrics-wrapper');
@@ -205,8 +206,9 @@ export const LyricsPlugin: YTMDPlugin = {
   },
 
   onDestroy() {
-    if ((this as any)._cleanup) {
-      (this as any)._cleanup();
+    if (cleanup) {
+      cleanup();
+      cleanup = null;
     }
   }
 };
@@ -230,7 +232,7 @@ function unlockLyricsTabHeader(): void {
       text.includes('paroles') ||
       text.includes('letras')
     ) {
-      (tab as any).disabled = false;
+      (tab as HTMLElement & { disabled?: boolean }).disabled = false;
       tab.removeAttribute('disabled');
       tab.removeAttribute('aria-disabled');
       tab.classList.remove('disabled');

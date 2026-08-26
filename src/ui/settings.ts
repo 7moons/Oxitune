@@ -186,7 +186,7 @@ function updateSpeedPresetButtons(currentSpeed: number) {
 }
 
 async function emitLiveEvent(event: string, payload: unknown) {
-  const tauri = (window as unknown as { __TAURI__?: { event?: { emit: (event: string, payload: unknown) => Promise<void> } } }).__TAURI__;
+  const tauri = window.__TAURI__;
   if (tauri?.event) {
     try {
       await tauri.event.emit(event, payload);

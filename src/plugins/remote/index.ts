@@ -15,7 +15,7 @@ export const RemotePlugin: YTMDPlugin = {
   defaultEnabled: true,
 
   onInit(ctx: PluginContext) {
-    (window as any).__ytmd_show_remote_qr = () => showQrModal(ctx);
+    window.__ytmd_show_remote_qr = () => showQrModal(ctx);
     console.log('[YTMD] Mobile remote module ready.');
   }
 };
