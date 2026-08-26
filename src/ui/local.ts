@@ -191,8 +191,30 @@ async function loadTracks() {
   if (table) table.style.display = 'none';
   if (emptyState) emptyState.style.display = 'none';
 
+  const loadingLabel = loadingState?.querySelector('span:last-child') ?? null;
+  const resetLoadingLabel = () => {
+    if (loadingLabel) loadingLabel.textContent = 'Scanning music files…';
+  };
+  resetLoadingLabel();
+
+  let unlistenProgress: (() => void) | null = null;
+
   try {
     if (window.__TAURI__?.core) {
+      if (window.__TAURI__.event) {
+        // Large libraries (10k+ files) can take a while to walk and tag-read;
+        // without this the user just stares at an indefinite spinner with no
+        // sign anything is happening.
+        unlistenProgress = await window.__TAURI__.event.listen<{ scanned: number; found: number }>(
+          'local-scan-progress',
+          (e) => {
+            if (loadingLabel) {
+              loadingLabel.textContent = `Scanning music files… ${e.payload.found} found (${e.payload.scanned} checked)`;
+            }
+          },
+        );
+      }
+
       const tracks = (await window.__TAURI__.core.invoke('scan_local_music')) as LocalTrack[];
       allTracks = tracks || [];
       setEmptyStateError(null);
@@ -207,6 +229,8 @@ async function loadTracks() {
     setEmptyStateError(`Couldn't scan your music folder: ${reason}`);
     renderTable([]);
   } finally {
+    unlistenProgress?.();
+    resetLoadingLabel();
     scanInFlight = false;
     if (rescanBtn) rescanBtn.disabled = false;
     if (rescanIcon) rescanIcon.style.animation = 'none';

@@ -8,13 +8,19 @@ export const VisualizerPlugin: YTMDPlugin = {
   description: 'Applies sleek dark aesthetics, subtle scrollbars, and user-defined custom CSS',
   defaultEnabled: true,
 
-  onInit(ctx: PluginContext) {
-    const style = document.createElement('style');
-    style.id = 'ytmd-theme-styles';
+  onInit(_ctx: PluginContext) {
+    // Custom CSS is owned exclusively by theme_engine (src/plugins/themes) —
+    // it has the live-reload plumbing (`set-custom-css` event listener) that
+    // keeps it in sync with the settings window. This plugin used to bake
+    // its own copy of custom_css into a separate <style> tag once at
+    // onInit, which immediately went stale relative to any live edit.
+    let style = document.getElementById('ytmd-theme-styles') as HTMLStyleElement | null;
+    if (!style) {
+      style = document.createElement('style');
+      style.id = 'ytmd-theme-styles';
+    }
 
-    const customCss = (ctx.config.custom_css as string) || '';
-
-    let baseThemeCss = `
+    const baseThemeCss = `
       /* Clean subtle scrollbar colors only — deliberately NOT overriding
          ::-webkit-scrollbar width/height. YouTube Music's own layout code
          reserves gutter space sized for the native (wider) scrollbar; shrinking
@@ -64,11 +70,11 @@ export const VisualizerPlugin: YTMDPlugin = {
       }
     `;
 
-    style.textContent = `${baseThemeCss}\n${customCss}`;
-    document.head.appendChild(style);
+    style.textContent = baseThemeCss;
+    if (!style.isConnected) document.head.appendChild(style);
 
     cleanup = () => {
-      style.remove();
+      style?.remove();
     };
   },
 

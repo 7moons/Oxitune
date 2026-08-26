@@ -7,6 +7,23 @@ let muteState: MuteSyncState = { adWasShowing: false, preAdMuted: false };
 let clickedButtons = new WeakSet<Element>();
 let playerClassObserver: MutationObserver | null = null;
 let lastObservedPlayer: Element | null = null;
+let lastTickSkipCheckMs = 0;
+
+/**
+ * How often `onTick`'s safety-net `skipAndDismiss()` sweep is allowed to
+ * run, in ms. `onTick` fires on every `PlayerObserver` tick (native
+ * `timeupdate`, which can be many times a second, plus a 250ms fallback
+ * poll) — without this throttle, the safety net re-runs `skipAndDismiss()`'s
+ * `:has()` `querySelectorAll` calls that often on top of the already-present
+ * rAF-throttled `MutationObserver` doing the same job. It exists to catch a
+ * *missed* observer event, not to replace the observer, so a 1s cap still
+ * bounds worst-case skip latency to something no user will notice while
+ * cutting the redundant work by orders of magnitude.
+ */
+const TICK_SKIP_CHECK_INTERVAL_MS = 1000;
+
+export const shouldRunTickSafetyNet = (nowMs: number, lastRunMs: number, intervalMs: number): boolean =>
+  nowMs - lastRunMs >= intervalMs;
 
 const SKIP_BUTTON_SELECTOR =
   '.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button, button.ytp-ad-skip-button, .ytp-ad-skip-button-container button, .ytp-ad-skip-button-slot button';
@@ -140,6 +157,7 @@ export const AdblockPlugin: YTMDPlugin = {
   onInit(ctx: PluginContext) {
     muteState = { adWasShowing: false, preAdMuted: false };
     clickedButtons = new WeakSet<Element>();
+    lastTickSkipCheckMs = 0;
 
     const style = document.createElement('style');
     style.id = 'ytmd-adblock-styles';
@@ -185,7 +203,12 @@ export const AdblockPlugin: YTMDPlugin = {
       attachPlayerClassObserver(ctx);
     }
     syncMuteForAdState(ctx);
-    skipAndDismiss();
+
+    const now = Date.now();
+    if (shouldRunTickSafetyNet(now, lastTickSkipCheckMs, TICK_SKIP_CHECK_INTERVAL_MS)) {
+      lastTickSkipCheckMs = now;
+      skipAndDismiss();
+    }
   },
 
   onDestroy() {

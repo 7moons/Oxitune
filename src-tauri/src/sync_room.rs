@@ -36,6 +36,22 @@ const DISCOVERY_TIMEOUT: Duration = Duration::from_millis(2500);
 const BEACON_INTERVAL: Duration = Duration::from_secs(2);
 const MAX_MEMBERS: usize = 16;
 const JOIN_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
+/// Hard cap on a single wire-protocol line. Without this, a peer that never
+/// sends `\n` can grow `read_line`'s buffer without bound (memory exhaustion
+/// from one malformed/hostile LAN connection). Generous for our JSON messages.
+const MAX_LINE_LEN: u64 = 64 * 1024;
+
+/// `read_line`, but capped at `MAX_LINE_LEN` bytes. If the peer never sends a
+/// newline within the cap, this returns once the limit is hit (as if EOF),
+/// leaving `buf` without a trailing `\n` so the caller's message parsing
+/// naturally rejects it and the connection gets dropped.
+async fn read_line_capped<R: tokio::io::AsyncBufRead + Unpin>(
+    reader: &mut R,
+    buf: &mut String,
+) -> std::io::Result<usize> {
+    use tokio::io::AsyncReadExt;
+    (&mut *reader).take(MAX_LINE_LEN).read_line(buf).await
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RoomMember {
@@ -431,7 +447,7 @@ async fn peer_task(stream: TcpStream, manager: Arc<SyncRoomManager>, sink: Arc<d
     let mut reader = BufReader::new(read_half);
     let mut line = String::new();
 
-    let n = match tokio::time::timeout(JOIN_HANDSHAKE_TIMEOUT, reader.read_line(&mut line)).await {
+    let n = match tokio::time::timeout(JOIN_HANDSHAKE_TIMEOUT, read_line_capped(&mut reader, &mut line)).await {
         Ok(Ok(n)) => n,
         _ => return,
     };
@@ -460,7 +476,7 @@ async fn peer_task(stream: TcpStream, manager: Arc<SyncRoomManager>, sink: Arc<d
     loop {
         line.clear();
         tokio::select! {
-            read_res = reader.read_line(&mut line) => {
+            read_res = read_line_capped(&mut reader, &mut line) => {
                 match read_res {
                     Ok(0) | Err(_) => break,
                     // Guests don't send further protocol messages today
@@ -597,7 +613,7 @@ async fn connect_to_host(
         .map_err(|e| format!("Failed to send join request: {e}"))?;
 
     let mut line = String::new();
-    let n = tokio::time::timeout(JOIN_HANDSHAKE_TIMEOUT, reader.read_line(&mut line))
+    let n = tokio::time::timeout(JOIN_HANDSHAKE_TIMEOUT, read_line_capped(&mut reader, &mut line))
         .await
         .map_err(|_| "Timed out waiting for host confirmation.".to_string())?
         .map_err(|e| format!("Connection to host failed: {e}"))?;
@@ -639,7 +655,7 @@ async fn guest_reader_loop(
     let mut line = String::new();
     loop {
         line.clear();
-        match reader.read_line(&mut line).await {
+        match read_line_capped(&mut reader, &mut line).await {
             Ok(0) | Err(_) => break,
             Ok(_) => {
                 let Ok(msg) = serde_json::from_str::<WireMessage>(line.trim()) else {
@@ -947,6 +963,44 @@ mod tests {
 
         leave_room(&host_manager);
         assert!(host_manager.get_room_state().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_read_line_capped_bounds_memory_on_unterminated_line() {
+        // Regression test: a peer that never sends `\n` (hostile or just
+        // buggy) must not be able to grow `read_line`'s buffer without
+        // bound. Write well over MAX_LINE_LEN with no newline and confirm
+        // the read still returns (capped), instead of blocking forever
+        // waiting for a terminator that never arrives.
+        use tokio::io::AsyncWriteExt;
+
+        let (mut writer, reader) = tokio::io::duplex(1024 * 1024);
+        let mut buf_reader = BufReader::new(reader);
+
+        let write_task = tokio::spawn(async move {
+            let chunk = vec![b'a'; 8192];
+            for _ in 0..16 {
+                // 128KB, no newline, more than double MAX_LINE_LEN (64KB)
+                let _ = writer.write_all(&chunk).await;
+            }
+            // Keep the writer open past the cap so the duplex doesn't look
+            // like a clean EOF before the cap kicks in.
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        });
+
+        let mut line = String::new();
+        let result = tokio::time::timeout(
+            Duration::from_secs(2),
+            read_line_capped(&mut buf_reader, &mut line),
+        )
+        .await;
+
+        assert!(result.is_ok(), "read_line_capped must not block forever on an unterminated line");
+        let n = result.unwrap().expect("capped read should succeed");
+        assert!(n as u64 <= MAX_LINE_LEN, "must never read more than MAX_LINE_LEN bytes in one call");
+        assert!(!line.ends_with('\n'), "a capped read has no terminator");
+
+        write_task.abort();
     }
 
     #[test]

@@ -127,6 +127,101 @@ fn token_ok(path: &str, expected: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Hard cap on a single HTTP request (headers + body) the local remote
+/// server will buffer. Bounds memory from any one connection and gives a
+/// real `413` response instead of the previous behavior: a single fixed
+/// 8KB `read()` that silently truncated any larger `/api/invoke` body,
+/// which then failed JSON parsing with no error surfaced to the caller.
+const MAX_REQUEST_SIZE: usize = 1024 * 1024; // 1MB — generous for JSON bodies this API ever sends
+/// Hard cap on concurrent in-flight connections. Previously every accepted
+/// connection spawned an unbounded tokio task; since this server must bind
+/// `0.0.0.0` (see `start_remote_server`) to be reachable from a phone on the
+/// same Wi-Fi, anything else on the LAN could open unlimited connections
+/// and grow task/socket count without bound.
+const MAX_CONNECTIONS: usize = 32;
+
+#[derive(Debug, PartialEq, Eq)]
+enum RequestReadError {
+    /// Request (headers + declared body) exceeds `MAX_REQUEST_SIZE`.
+    TooLarge,
+    /// The peer closed the connection or a read failed before a complete
+    /// request was assembled.
+    Closed,
+}
+
+/// Reads one HTTP/1.1 request from `reader`: accumulates bytes until the
+/// header terminator (`\r\n\r\n`) is seen, reads `Content-Length` from the
+/// headers, then keeps reading until that many body bytes have arrived too.
+/// Unlike a single fixed-size `read()`, this correctly receives bodies
+/// larger than one OS-level read (previously anything over ~8KB was
+/// truncated and failed JSON parsing downstream with no error surfaced to
+/// the caller). Generic over `AsyncRead` so tests can drive it with an
+/// in-memory duplex stream instead of a real `TcpStream`.
+async fn read_http_request<R>(reader: &mut R) -> Result<Vec<u8>, RequestReadError>
+where
+    R: tokio::io::AsyncRead + Unpin,
+{
+    let mut buf = Vec::with_capacity(8192);
+    let mut chunk = [0u8; 8192];
+    let mut headers_end: Option<usize> = None;
+    let mut content_length: usize = 0;
+
+    loop {
+        let n = reader.read(&mut chunk).await.map_err(|_| RequestReadError::Closed)?;
+        if n == 0 {
+            break;
+        }
+        buf.extend_from_slice(&chunk[..n]);
+        if buf.len() > MAX_REQUEST_SIZE {
+            return Err(RequestReadError::TooLarge);
+        }
+
+        if headers_end.is_none() {
+            if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                let end = pos + 4;
+                let declared_len = String::from_utf8_lossy(&buf[..pos])
+                    .lines()
+                    .find_map(|line| {
+                        let (k, v) = line.split_once(':')?;
+                        if k.trim().eq_ignore_ascii_case("content-length") {
+                            v.trim().parse::<usize>().ok()
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(0);
+
+                if end.saturating_add(declared_len) > MAX_REQUEST_SIZE {
+                    return Err(RequestReadError::TooLarge);
+                }
+                headers_end = Some(end);
+                content_length = declared_len;
+            }
+        }
+
+        if let Some(end) = headers_end {
+            if buf.len() >= end + content_length {
+                break;
+            }
+        }
+    }
+
+    if buf.is_empty() {
+        return Err(RequestReadError::Closed);
+    }
+
+    Ok(buf)
+}
+
+/// Tries to admit one more connection under `MAX_CONNECTIONS`. Split out
+/// from the accept loop so the backpressure decision itself can be
+/// exercised in a test without needing a live `AppHandle`/TCP server.
+fn try_acquire_connection_permit(
+    limiter: &Arc<tokio::sync::Semaphore>,
+) -> Option<tokio::sync::OwnedSemaphorePermit> {
+    limiter.clone().try_acquire_owned().ok()
+}
+
 async fn write_forbidden(socket: &mut tokio::net::TcpStream) {
     let body = "Forbidden: missing or invalid pairing token";
     let response = format!(
@@ -164,6 +259,7 @@ pub fn get_remote_info(port: u16, token: &str) -> RemoteInfo {
 
 pub fn start_remote_server(app_handle: AppHandle, port: u16, token: String) {
     let token: Arc<str> = Arc::from(token);
+    let connection_limiter = Arc::new(tokio::sync::Semaphore::new(MAX_CONNECTIONS));
 
     tauri::async_runtime::spawn(async move {
         let addr = SocketAddr::from(([0, 0, 0, 0], port));
@@ -180,21 +276,43 @@ pub fn start_remote_server(app_handle: AppHandle, port: u16, token: String) {
 
         loop {
             if let Ok((mut socket, _)) = listener.accept().await {
+                let permit = match try_acquire_connection_permit(&connection_limiter) {
+                    Some(p) => p,
+                    None => {
+                        // Fan-out cap reached: reject immediately instead of
+                        // spawning an unbounded number of tasks.
+                        let _ = socket
+                            .write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                            .await;
+                        continue;
+                    }
+                };
                 let handle = app_handle.clone();
                 let token = token.clone();
                 tokio::spawn(async move {
-                    let mut buffer = [0u8; 8192];
+                    let _permit = permit; // held for the task's lifetime, freeing a slot on drop
                     // Bounded: an accepted connection that never sends a
                     // request (deliberately or by a bad client) would
                     // otherwise leak this task and its socket forever, since
                     // the read below had no timeout.
                     let read_result =
-                        tokio::time::timeout(std::time::Duration::from_secs(10), socket.read(&mut buffer)).await;
-                    if let Ok(Ok(n)) = read_result {
-                        if n == 0 {
+                        tokio::time::timeout(std::time::Duration::from_secs(10), read_http_request(&mut socket)).await;
+                    let buf = match read_result {
+                        Ok(Ok(buf)) => buf,
+                        Ok(Err(RequestReadError::TooLarge)) => {
+                            let body = "Payload Too Large";
+                            let response = format!(
+                                "HTTP/1.1 413 Payload Too Large\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
+                                body.len(),
+                                body
+                            );
+                            let _ = socket.write_all(response.as_bytes()).await;
                             return;
                         }
-                        let request_str = String::from_utf8_lossy(&buffer[..n]);
+                        _ => return,
+                    };
+                    {
+                        let request_str = String::from_utf8_lossy(&buf);
                         let first_line = request_str.lines().next().unwrap_or("");
                         let parts: Vec<&str> = first_line.split_whitespace().collect();
 
@@ -574,5 +692,82 @@ mod tests {
         let html = get_mobile_html("secret-token");
         assert!(html.contains("const TOKEN = \"secret-token\";"));
         assert!(!html.contains("Access-Control-Allow-Origin"));
+    }
+
+    #[test]
+    fn test_connection_permit_enforces_cap() {
+        let limiter = Arc::new(tokio::sync::Semaphore::new(2));
+        let p1 = try_acquire_connection_permit(&limiter).expect("first permit should succeed");
+        let p2 = try_acquire_connection_permit(&limiter).expect("second permit should succeed");
+        assert!(
+            try_acquire_connection_permit(&limiter).is_none(),
+            "a third connection must be rejected once the cap is reached"
+        );
+
+        drop(p1);
+        let p3 = try_acquire_connection_permit(&limiter);
+        assert!(p3.is_some(), "releasing a permit should free a slot for a new connection");
+
+        drop(p2);
+        drop(p3);
+    }
+
+    #[tokio::test]
+    async fn test_read_http_request_reads_body_larger_than_one_os_read() {
+        // The old implementation did a single fixed 8KB `read()`, so any
+        // body larger than that was silently truncated. This body is ~25x
+        // that, spanning many internal 8KB reads.
+        let (mut client, mut server) = tokio::io::duplex(2 * 1024 * 1024);
+        let body = "x".repeat(200_000);
+        let request = format!(
+            "POST /api/invoke HTTP/1.1\r\nContent-Length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        );
+
+        let write_task = tokio::spawn(async move {
+            client.write_all(request.as_bytes()).await.unwrap();
+        });
+
+        let result = tokio::time::timeout(std::time::Duration::from_secs(5), read_http_request(&mut server))
+            .await
+            .expect("must not hang")
+            .expect("should successfully read the full request");
+        write_task.await.unwrap();
+
+        let text = String::from_utf8(result).unwrap();
+        let body_start = text.find("\r\n\r\n").unwrap() + 4;
+        assert_eq!(&text[body_start..], body.as_str());
+    }
+
+    #[tokio::test]
+    async fn test_read_http_request_rejects_body_over_max_size() {
+        let (mut client, mut server) = tokio::io::duplex(4 * 1024 * 1024);
+        let body = "x".repeat(MAX_REQUEST_SIZE + 1);
+        let request = format!(
+            "POST /api/invoke HTTP/1.1\r\nContent-Length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        );
+
+        let write_task = tokio::spawn(async move {
+            let _ = client.write_all(request.as_bytes()).await;
+        });
+
+        let result = tokio::time::timeout(std::time::Duration::from_secs(5), read_http_request(&mut server))
+            .await
+            .expect("must not hang even when rejecting an oversized request");
+
+        assert_eq!(result, Err(RequestReadError::TooLarge));
+        let _ = write_task.await;
+    }
+
+    #[tokio::test]
+    async fn test_read_http_request_returns_closed_on_empty_connection() {
+        let (client, mut server) = tokio::io::duplex(1024);
+        drop(client); // peer closes without sending anything
+
+        let result = read_http_request(&mut server).await;
+        assert_eq!(result, Err(RequestReadError::Closed));
     }
 }

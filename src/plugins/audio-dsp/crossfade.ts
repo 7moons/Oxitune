@@ -6,6 +6,7 @@ export class CrossfadeController {
   private crossfadeSeconds = 0;
   private fadeOutTriggered = false;
   private currentTrackId = '';
+  private pendingAdvanceTimeout: ReturnType<typeof setTimeout> | null = null;
 
   public setCrossfadeSeconds(secs: number): void {
     this.crossfadeSeconds = Math.max(0, Math.min(12, secs));
@@ -16,6 +17,10 @@ export class CrossfadeController {
   }
 
   public onTrackChange(track: TrackInfo): void {
+    // A new track means any auto-advance scheduled for the previous one is
+    // no longer relevant — cancel it instead of letting it fire and rely on
+    // the currentTrackId check as the only guard.
+    this.clearPendingAdvance();
     this.fadeOutTriggered = false;
     this.currentTrackId = track.videoId || `${track.title}-${track.artist}`;
 
@@ -38,7 +43,9 @@ export class CrossfadeController {
       AudioEngine.getInstance().fadeOut(remaining);
 
       // Auto-advance to next song at boundary
-      setTimeout(() => {
+      this.clearPendingAdvance();
+      this.pendingAdvanceTimeout = setTimeout(() => {
+        this.pendingAdvanceTimeout = null;
         const id = track.videoId || `${track.title}-${track.artist}`;
         if (this.currentTrackId === id) {
           console.log('[YTMD Crossfade] Advancing to next track...');
@@ -46,5 +53,19 @@ export class CrossfadeController {
         }
       }, Math.max(100, (remaining - 0.2) * 1000));
     }
+  }
+
+  private clearPendingAdvance(): void {
+    if (this.pendingAdvanceTimeout !== null) {
+      clearTimeout(this.pendingAdvanceTimeout);
+      this.pendingAdvanceTimeout = null;
+    }
+  }
+
+  /** Cancels any pending auto-advance. Called when the plugin tears down
+   * (`onDestroy`) so a scheduled advance never fires after the controller
+   * that owns it is gone. */
+  public destroy(): void {
+    this.clearPendingAdvance();
   }
 }

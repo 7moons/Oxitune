@@ -46,8 +46,29 @@ pub fn is_audio_file(path: &Path) -> bool {
     }
 }
 
+/// How many filesystem entries `scan_directory_with_progress` visits between
+/// progress callbacks. Small enough that a UI watching progress on a large
+/// library gets frequent updates; large enough that the callback (which for
+/// `scan_local_music` means a Tauri IPC event) isn't fired on every single
+/// file.
+const PROGRESS_BATCH_SIZE: usize = 200;
+
 pub fn scan_directory(dir_path: &Path) -> Vec<LocalTrack> {
+    scan_directory_with_progress(dir_path, |_scanned, _found| {})
+}
+
+/// Same walk as `scan_directory`, but calls `on_progress(files_scanned,
+/// tracks_found)` every `PROGRESS_BATCH_SIZE` entries (and once more at the
+/// end). A 10k+ file library previously scanned silently with no feedback
+/// until the whole tree had been walked and every file's tags read; this
+/// lets a caller (`commands::scan_local_music`) surface incremental
+/// progress instead.
+pub fn scan_directory_with_progress(
+    dir_path: &Path,
+    mut on_progress: impl FnMut(usize, usize),
+) -> Vec<LocalTrack> {
     let mut tracks = Vec::new();
+    let mut scanned: usize = 0;
 
     if !dir_path.exists() || !dir_path.is_dir() {
         return tracks;
@@ -80,6 +101,11 @@ pub fn scan_directory(dir_path: &Path) -> Vec<LocalTrack> {
         match path.canonicalize() {
             Ok(resolved) if resolved.starts_with(&root_canon) => {}
             _ => continue,
+        }
+
+        scanned += 1;
+        if scanned.is_multiple_of(PROGRESS_BATCH_SIZE) {
+            on_progress(scanned, tracks.len());
         }
 
         if path.is_file() && is_audio_file(path) {
@@ -142,6 +168,8 @@ pub fn scan_directory(dir_path: &Path) -> Vec<LocalTrack> {
             });
         }
     }
+
+    on_progress(scanned, tracks.len());
 
     // Sort by artist, then title
     tracks.sort_by(|a, b| {
@@ -322,6 +350,51 @@ mod tests {
         assert_eq!(scanned[0].artist, "Inside Artist");
         assert_eq!(scanned[0].title, "Inside Track");
         assert!(scanned.iter().all(|t| !t.file_path.contains("Secret")));
+    }
+
+    #[test]
+    fn test_scan_directory_with_progress_reports_final_totals() {
+        let dir = tempdir().expect("tempdir");
+        for i in 0..3 {
+            File::create(dir.path().join(format!("Artist - Track {i}.mp3"))).unwrap();
+        }
+        File::create(dir.path().join("notes.txt")).unwrap();
+
+        let mut calls: Vec<(usize, usize)> = Vec::new();
+        let scanned = scan_directory_with_progress(dir.path(), |files_scanned, tracks_found| {
+            calls.push((files_scanned, tracks_found));
+        });
+
+        assert_eq!(scanned.len(), 3);
+        // Below PROGRESS_BATCH_SIZE, the only callback is the guaranteed
+        // final one, and it must reflect the true totals — this is what a
+        // UI uses to know the scan is complete. WalkDir yields the root
+        // directory itself as an entry too, so the count is 5 (root + 3
+        // tracks + 1 non-audio file), not just the file count.
+        assert_eq!(calls.last(), Some(&(5, 3)));
+    }
+
+    #[test]
+    fn test_scan_directory_with_progress_batches_during_large_scan() {
+        let dir = tempdir().expect("tempdir");
+        // More than PROGRESS_BATCH_SIZE (200) plain (non-audio) files so the
+        // walk crosses at least one batch boundary before the final call.
+        for i in 0..450 {
+            File::create(dir.path().join(format!("file-{i}.txt"))).unwrap();
+        }
+
+        let mut calls: Vec<(usize, usize)> = Vec::new();
+        scan_directory_with_progress(dir.path(), |files_scanned, tracks_found| {
+            calls.push((files_scanned, tracks_found));
+        });
+
+        // At least the two 200/400 batch boundaries, plus the final flush.
+        assert!(calls.len() >= 3, "expected multiple progress callbacks, got {:?}", calls);
+        assert!(calls.iter().any(|&(scanned, _)| scanned == 200));
+        assert!(calls.iter().any(|&(scanned, _)| scanned == 400));
+        // +1 for the root directory entry itself, which WalkDir yields
+        // before any of the 450 files inside it.
+        assert_eq!(calls.last().unwrap().0, 451);
     }
 
     #[test]

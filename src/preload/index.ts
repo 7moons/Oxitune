@@ -347,7 +347,13 @@ async function initYTMD() {
 
   // Inject burger menu immediately
   injectBurgerMenu(config);
-  setInterval(() => injectBurgerMenu(config), 1000);
+  const burgerMenuPoll = setInterval(() => injectBurgerMenu(config), 1000);
+  // No other teardown path exists for this injected script today (its
+  // lifetime is normally the page's), but `pagehide` fires on the one case
+  // that does end it early without a full reload — bfcache eviction /
+  // navigating away from music.youtube.com — so the poll doesn't keep
+  // ticking against a torn-down document.
+  window.addEventListener('pagehide', () => clearInterval(burgerMenuPoll));
 
   // Load config in background
   invokeBackend('get_config').then((loaded) => {

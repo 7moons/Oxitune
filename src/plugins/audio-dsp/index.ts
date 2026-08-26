@@ -118,6 +118,7 @@ export const AudioDspPlugin: YTMDPlugin = {
         checkVideo = null;
       }
       unlistenPromises.forEach((p) => p.then((unlisten) => unlisten()));
+      crossfadeRef?.destroy();
       crossfadeRef = null;
       skipSilenceRef = null;
     };

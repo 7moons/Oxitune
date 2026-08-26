@@ -77,40 +77,48 @@ impl Default for DiscordRpcHandle {
     }
 }
 
-impl DiscordRpcHandle {
-    pub fn new() -> Self {
-        let (tx, mut rx) = mpsc::channel::<DiscordCommand>(32);
-        let running = Arc::new(AtomicBool::new(true));
-        let running_clone = running.clone();
+/// The handle's background task body, split out from `new()` so the
+/// channel-closed shutdown path can be exercised directly in a test without
+/// needing a real Discord IPC socket. Runs until `Shutdown` is received, the
+/// `running` flag is cleared, or the channel closes (all senders dropped) —
+/// the last of which previously had no match arm and fell through to an
+/// immediately-ready `None` on every poll, busy-spinning the task forever
+/// once Discord RPC was toggled off.
+async fn run_command_loop(mut rx: mpsc::Receiver<DiscordCommand>, running: Arc<AtomicBool>) {
+    let mut stream: Option<DiscordStream> = None;
 
-        tauri::async_runtime::spawn(async move {
-            let mut stream: Option<DiscordStream> = None;
+    while running.load(Ordering::Relaxed) {
+        match rx.recv().await {
+            Some(DiscordCommand::Shutdown) => break,
+            Some(DiscordCommand::Clear) => {
+                if let Some(ref mut s) = stream {
+                    let _ = send_activity(s, None).await;
+                }
+            }
+            Some(DiscordCommand::Update(track)) => {
+                if stream.is_none() {
+                    stream = connect_discord().await;
+                }
 
-            while running_clone.load(Ordering::Relaxed) {
-                if let Some(cmd) = rx.recv().await {
-                    match cmd {
-                        DiscordCommand::Shutdown => break,
-                        DiscordCommand::Clear => {
-                            if let Some(ref mut s) = stream {
-                                let _ = send_activity(s, None).await;
-                            }
-                        }
-                        DiscordCommand::Update(track) => {
-                            if stream.is_none() {
-                                stream = connect_discord().await;
-                            }
-
-                            if let Some(ref mut s) = stream {
-                                if let Err(e) = send_activity(s, Some(&track)).await {
-                                    log::warn!("[YTMD Discord RPC] Failed to send activity: {e}");
-                                    stream = None;
-                                }
-                            }
-                        }
+                if let Some(ref mut s) = stream {
+                    if let Err(e) = send_activity(s, Some(&track)).await {
+                        log::warn!("[YTMD Discord RPC] Failed to send activity: {e}");
+                        stream = None;
                     }
                 }
             }
-        });
+            None => break,
+        }
+    }
+}
+
+impl DiscordRpcHandle {
+    pub fn new() -> Self {
+        let (tx, rx) = mpsc::channel::<DiscordCommand>(32);
+        let running = Arc::new(AtomicBool::new(true));
+        let running_clone = running.clone();
+
+        tauri::async_runtime::spawn(run_command_loop(rx, running_clone));
 
         Self {
             sender: tx,
@@ -613,6 +621,40 @@ mod tests {
         // Clear (None)
         let payload_clear = build_activity_payload(None, 1234, "nonce-3");
         assert!(payload_clear["args"]["activity"].is_null());
+    }
+
+    #[tokio::test]
+    async fn test_command_loop_exits_promptly_when_channel_closes() {
+        // Regression test for the busy-spin bug: dropping every sender
+        // closes the channel, so `rx.recv()` resolves to `Ready(None)` on
+        // every poll thereafter. Before the `None => break` arm existed,
+        // this loop had no way to observe that and spun the task forever,
+        // pinning a CPU core. If that regresses, this task will still be
+        // running (and this test will time out) instead of finishing well
+        // under the deadline below.
+        let (tx, rx) = mpsc::channel::<DiscordCommand>(32);
+        let running = Arc::new(AtomicBool::new(true));
+        let task = tokio::spawn(run_command_loop(rx, running));
+
+        drop(tx);
+
+        let result = tokio::time::timeout(std::time::Duration::from_millis(500), task).await;
+        assert!(
+            result.is_ok(),
+            "command loop must exit promptly when the channel closes, not busy-spin"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_command_loop_exits_on_shutdown_command() {
+        let (tx, rx) = mpsc::channel::<DiscordCommand>(32);
+        let running = Arc::new(AtomicBool::new(true));
+        let task = tokio::spawn(run_command_loop(rx, running));
+
+        tx.send(DiscordCommand::Shutdown).await.unwrap();
+
+        let result = tokio::time::timeout(std::time::Duration::from_millis(500), task).await;
+        assert!(result.is_ok(), "command loop must exit on an explicit Shutdown command");
     }
 
     #[tokio::test]

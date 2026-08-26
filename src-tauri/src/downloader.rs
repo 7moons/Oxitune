@@ -3,6 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use tauri::{AppHandle, Emitter};
+use tokio::io::AsyncBufReadExt;
 use tokio::process::Command;
 use id3::TagLike;
 
@@ -86,7 +87,11 @@ pub async fn execute_download(
         },
     );
 
-    let status = cmd.status().await;
+    // Spawn (not `.status()`) and drain stdout/stderr concurrently: yt-dlp writes
+    // frequent progress output, and once the OS pipe buffer (~64KB) fills without
+    // a reader, the child blocks on write() and the download hangs forever.
+    let child = cmd.spawn().map_err(|e| e.to_string())?;
+    let status = drain_and_wait(child).await;
 
     match status {
         Ok(s) if s.success() => {
@@ -132,6 +137,34 @@ pub async fn execute_download(
     }
 }
 
+/// Drains a spawned child's stdout/stderr pipes concurrently with waiting
+/// for it to exit. Split out from `execute_download` so the deadlock this
+/// prevents can be reproduced directly in a test: `.wait()` alone would
+/// block forever once the child writes more than the OS pipe buffer
+/// (~64KB) to a stream nothing is reading.
+async fn drain_and_wait(mut child: tokio::process::Child) -> std::io::Result<std::process::ExitStatus> {
+    let child_stdout = child.stdout.take();
+    let child_stderr = child.stderr.take();
+
+    let stdout_drain = tokio::spawn(async move {
+        if let Some(out) = child_stdout {
+            let mut lines = tokio::io::BufReader::new(out).lines();
+            while let Ok(Some(_line)) = lines.next_line().await {}
+        }
+    });
+    let stderr_drain = tokio::spawn(async move {
+        if let Some(err) = child_stderr {
+            let mut lines = tokio::io::BufReader::new(err).lines();
+            while let Ok(Some(_line)) = lines.next_line().await {}
+        }
+    });
+
+    let status = child.wait().await;
+    let _ = stdout_drain.await;
+    let _ = stderr_drain.await;
+    status
+}
+
 async fn embed_id3_metadata(
     path: &Path,
     title: &str,
@@ -148,7 +181,10 @@ async fn embed_id3_metadata(
 
     if embed_lyrics {
         // Fetch synced or plain lyrics from LRCLIB
-        let client = reqwest::Client::new();
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .build()
+            .unwrap_or_default();
         let url = format!(
             "https://lrclib.net/api/get?artist_name={}&track_name={}",
             url::form_urlencoded::byte_serialize(artist.as_bytes()).collect::<String>(),
@@ -220,6 +256,28 @@ mod tests {
         assert_eq!(sanitize_format(None), "mp3");
         assert_eq!(sanitize_format(Some("")), "mp3");
         assert_eq!(sanitize_format(Some("EXE")), "mp3");
+    }
+
+    #[tokio::test]
+    async fn test_drain_and_wait_does_not_deadlock_on_output_exceeding_pipe_buffer() {
+        // Regression test for the yt-dlp deadlock: a child that writes more
+        // than the OS pipe buffer (~64KB) to stdout/stderr blocks on write()
+        // once the buffer fills, unless something is concurrently reading
+        // it. `.wait()` alone (the old code) would hang forever here.
+        let mut cmd = Command::new("sh");
+        cmd.arg("-c")
+            .arg("for i in $(seq 1 20000); do echo \"line $i padded to exceed the pipe buffer quickly\"; done")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let child = cmd.spawn().expect("failed to spawn sh");
+
+        let result = tokio::time::timeout(std::time::Duration::from_secs(10), drain_and_wait(child)).await;
+        assert!(
+            result.is_ok(),
+            "drain_and_wait must not hang when the child writes more than the OS pipe buffer"
+        );
+        let status = result.unwrap().expect("child process should exit cleanly");
+        assert!(status.success());
     }
 
     #[tokio::test]

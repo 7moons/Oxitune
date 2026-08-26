@@ -13,7 +13,7 @@ export interface SyncPlaybackPayload {
 export class RoomSyncController {
   private isHost = false;
   private inRoom = false;
-  private lastAppliedTimestamp = 0;
+  private lastBroadcastTimestamp = 0;
 
   public setRoomState(inRoom: boolean, isHost: boolean) {
     this.inRoom = inRoom;
@@ -37,11 +37,9 @@ export class RoomSyncController {
       ? payload.current_time_secs + Math.max(0, elapsedSinceSent)
       : payload.current_time_secs;
 
-    this.lastAppliedTimestamp = now;
-
     // 1. Check if track needs to change
     const currentVideoId = new URLSearchParams(window.location.search).get('v');
-    if (payload.video_id && currentVideoId !== payload.video_id) {
+    if (payload.video_id && /^[A-Za-z0-9_-]{11}$/.test(payload.video_id) && currentVideoId !== payload.video_id) {
       console.log(`[YTMD Room Sync] Switching to track: ${payload.video_id}`);
       window.location.href = `https://music.youtube.com/watch?v=${payload.video_id}`;
       return;
@@ -65,8 +63,10 @@ export class RoomSyncController {
   public broadcastLocalState(track: TrackInfo | null, video: HTMLVideoElement | null, invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>) {
     if (!this.inRoom || !this.isHost || !track || !track.videoId || !video) return;
 
-    // Throttle if we just applied a command
-    if (Date.now() - this.lastAppliedTimestamp < 1000) return;
+    // Throttle so we don't spam broadcast_sync_state on every tick
+    const now = Date.now();
+    if (now - this.lastBroadcastTimestamp < 1000) return;
+    this.lastBroadcastTimestamp = now;
 
     invoke('broadcast_sync_state', {
       playback: {

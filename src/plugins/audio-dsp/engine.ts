@@ -12,6 +12,11 @@ export class AudioEngine {
   private isInitialized = false;
   private isNormalizing = false;
   private hookedVideo: HTMLVideoElement | null = null;
+  // Reused across every getAudioPowerDb() call instead of allocating a new
+  // Float32Array(256) per call (every tick when skip-silence is enabled) —
+  // the buffer's size is fixed to analyserNode.fftSize for its lifetime, so
+  // there's nothing to gain from a fresh allocation each time.
+  private powerBuffer: Float32Array<ArrayBuffer> | null = null;
 
   public static getInstance(): AudioEngine {
     if (!AudioEngine.instance) {
@@ -214,7 +219,10 @@ export class AudioEngine {
   // Silence Detection (RMS audio power in dB)
   public getAudioPowerDb(): number {
     if (!this.analyserNode) return -100;
-    const buffer = new Float32Array(this.analyserNode.fftSize);
+    if (!this.powerBuffer || this.powerBuffer.length !== this.analyserNode.fftSize) {
+      this.powerBuffer = new Float32Array(this.analyserNode.fftSize);
+    }
+    const buffer = this.powerBuffer;
     this.analyserNode.getFloatTimeDomainData(buffer);
 
     let sum = 0;

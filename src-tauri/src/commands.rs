@@ -1,6 +1,7 @@
 use crate::config::AppConfig;
 use crate::discord_rpc::TrackPayload;
 use crate::AppState;
+use serde::Serialize;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::NotificationExt;
@@ -294,6 +295,7 @@ pub async fn fetch_lyrics(
 ) -> Result<serde_json::Value, String> {
     let client = reqwest::Client::builder()
         .user_agent("YTMD-Desktop/1.0 (https://github.com/dachluczaj/ytmd)")
+        .timeout(std::time::Duration::from_secs(10))
         .build()
         .map_err(|e| e.to_string())?;
 
@@ -411,8 +413,15 @@ pub async fn download_track(
     crate::downloader::execute_download(app_handle, request, output_dir).await
 }
 
+#[derive(Serialize, Clone)]
+struct LocalScanProgress {
+    scanned: usize,
+    found: usize,
+}
+
 #[tauri::command]
 pub fn scan_local_music(
+    app_handle: AppHandle,
     state: State<'_, Arc<AppState>>,
     directory: Option<String>,
 ) -> Vec<crate::local_files::LocalTrack> {
@@ -435,7 +444,13 @@ pub fn scan_local_music(
         None => library_root,
     };
 
-    crate::local_files::scan_directory(&target_dir)
+    // Large (10k+ file) libraries used to scan silently with zero feedback
+    // until the entire tree was walked and every file's tags read. Emit
+    // incremental progress so the local-library window can show the user
+    // something is actually happening instead of an indefinite spinner.
+    crate::local_files::scan_directory_with_progress(&target_dir, |scanned, found| {
+        let _ = app_handle.emit("local-scan-progress", LocalScanProgress { scanned, found });
+    })
 }
 
 #[tauri::command]

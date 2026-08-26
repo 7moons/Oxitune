@@ -18,6 +18,19 @@ export class PlayerObserver {
   private onTickCallbacks: ((time: number) => void)[] = [];
   private tickInterval: number | null = null;
   private pauseDebounceTimeout: any = null;
+  private mutationObserver: MutationObserver | null = null;
+  private attachedVideo: HTMLVideoElement | null = null;
+
+  // Named instance methods (not per-call anonymous closures) so
+  // detachVideoListeners can remove the exact same listener reference that
+  // attachVideoListeners registered.
+  private readonly handleVideoPlay = () => this.handlePlaybackChange(true);
+  private readonly handleVideoPause = () => this.handlePlaybackChange(false);
+  private readonly handleVideoTimeUpdate = () => {
+    if (!this.attachedVideo) return;
+    const current = this.attachedVideo.currentTime;
+    this.onTickCallbacks.forEach((cb) => cb(current));
+  };
 
   constructor() {
     this.initObservers();
@@ -61,19 +74,13 @@ export class PlayerObserver {
     }
 
     // 2. Poll & observe video element
-    const setupVideoListeners = () => {
-      const video = document.querySelector('video');
-      if (video) {
-        video.addEventListener('play', () => this.handlePlaybackChange(true));
-        video.addEventListener('playing', () => this.handlePlaybackChange(true));
-        video.addEventListener('pause', () => this.handlePlaybackChange(false));
-        video.addEventListener('ended', () => this.handlePlaybackChange(false));
-        video.addEventListener('timeupdate', () => {
-          const current = video.currentTime;
-          this.onTickCallbacks.forEach((cb) => cb(current));
-        });
-      }
-    };
+    // YTM's SPA can swap out the <video> element (navigation/player
+    // reload). `syncVideoListeners` is re-run from the 250ms fallback poll
+    // below so listeners always follow the live element instead of
+    // silently going stale (falling back to tick-resolution-only updates)
+    // for the rest of the session — same class of bug as the power
+    // plugin's wake-lock listeners, same fix shape.
+    this.syncVideoListeners();
 
     // 3. MutationObserver throttled via requestAnimationFrame
     let isChecking = false;
@@ -91,17 +98,42 @@ export class PlayerObserver {
     if (target) {
       observer.observe(target, { childList: true, subtree: true, characterData: true });
     }
-
-    setupVideoListeners();
+    this.mutationObserver = observer;
 
     // 4. Regular polling fallback to guarantee accuracy
     this.tickInterval = window.setInterval(() => {
+      this.syncVideoListeners();
       this.checkTrackUpdate();
       const video = document.querySelector('video');
       if (video && !video.paused) {
         this.onTickCallbacks.forEach((cb) => cb(video.currentTime));
       }
     }, 250);
+  }
+
+  private attachVideoListeners(video: HTMLVideoElement): void {
+    video.addEventListener('play', this.handleVideoPlay);
+    video.addEventListener('playing', this.handleVideoPlay);
+    video.addEventListener('pause', this.handleVideoPause);
+    video.addEventListener('ended', this.handleVideoPause);
+    video.addEventListener('timeupdate', this.handleVideoTimeUpdate);
+    this.attachedVideo = video;
+  }
+
+  private detachVideoListeners(video: HTMLVideoElement): void {
+    video.removeEventListener('play', this.handleVideoPlay);
+    video.removeEventListener('playing', this.handleVideoPlay);
+    video.removeEventListener('pause', this.handleVideoPause);
+    video.removeEventListener('ended', this.handleVideoPause);
+    video.removeEventListener('timeupdate', this.handleVideoTimeUpdate);
+  }
+
+  private syncVideoListeners(): void {
+    const video = document.querySelector('video');
+    if (video && video !== this.attachedVideo) {
+      if (this.attachedVideo) this.detachVideoListeners(this.attachedVideo);
+      this.attachVideoListeners(video);
+    }
   }
 
   private extractTrackInfo(): TrackInfo | null {
@@ -311,6 +343,14 @@ export class PlayerObserver {
     if (this.tickInterval !== null) {
       clearInterval(this.tickInterval);
       this.tickInterval = null;
+    }
+    if (this.mutationObserver !== null) {
+      this.mutationObserver.disconnect();
+      this.mutationObserver = null;
+    }
+    if (this.attachedVideo !== null) {
+      this.detachVideoListeners(this.attachedVideo);
+      this.attachedVideo = null;
     }
   }
 }

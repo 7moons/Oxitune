@@ -65,16 +65,18 @@ export const PowerPlugin: YTMDPlugin = {
     const video = ctx.getVideoElement();
     if (video) {
       attachVideoListeners(video);
-    } else {
-      checkVideoInterval = window.setInterval(() => {
-        const v = ctx.getVideoElement();
-        if (v) {
-          if (checkVideoInterval !== null) clearInterval(checkVideoInterval);
-          checkVideoInterval = null;
-          attachVideoListeners(v);
-        }
-      }, 1000);
     }
+
+    // YTM's SPA can swap out the <video> element (navigation/player reload).
+    // Keep polling so listeners always follow the live element instead of
+    // silently going stale for the rest of the session.
+    checkVideoInterval = window.setInterval(() => {
+      const v = ctx.getVideoElement();
+      if (v && v !== attachedVideo) {
+        if (attachedVideo) detachVideoListeners(attachedVideo);
+        attachVideoListeners(v);
+      }
+    }, 1000);
 
     // Auto-pause when the screen locks or the window/tab is hidden, if enabled.
     const handleVisibilityChange = () => {

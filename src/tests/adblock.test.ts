@@ -1,5 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import { computeMuteSync, isAdShowingFromClassList, MuteSyncState, AdblockPlugin } from '../plugins/adblock';
+import {
+  computeMuteSync,
+  isAdShowingFromClassList,
+  MuteSyncState,
+  AdblockPlugin,
+  shouldRunTickSafetyNet
+} from '../plugins/adblock';
 import { PluginRegistry } from '../plugins/registry';
 import { PluginContext } from '../plugins/types';
 
@@ -77,6 +83,24 @@ describe('computeMuteSync — edge-triggered mute-only ad suppression', () => {
     r = computeMuteSync(true, state, true);
     expect(r.setMutedTo).toBe(true);
     expect(r.nextState).toEqual({ adWasShowing: true, preAdMuted: true });
+  });
+});
+
+describe('shouldRunTickSafetyNet — throttles the onTick skip/dismiss safety net', () => {
+  test('does not run again immediately after a run', () => {
+    expect(shouldRunTickSafetyNet(1000, 1000, 1000)).toBe(false);
+    expect(shouldRunTickSafetyNet(1500, 1000, 1000)).toBe(false);
+  });
+
+  test('runs once the interval has elapsed', () => {
+    expect(shouldRunTickSafetyNet(2000, 1000, 1000)).toBe(true);
+    expect(shouldRunTickSafetyNet(2500, 1000, 1000)).toBe(true);
+  });
+
+  test('always runs on the very first tick (lastRunMs = 0)', () => {
+    // lastRunMs = 0 is the initial sentinel before any tick has run, so a
+    // real Date.now() timestamp is always far past the interval from it.
+    expect(shouldRunTickSafetyNet(Date.now(), 0, 1000)).toBe(true);
   });
 });
 
