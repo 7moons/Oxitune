@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "YTMD",
-  "version": "1.0.0",
+  "version": "0.0.1",
   "identifier": "com.ytmd.desktop",
   "build": {
     "beforeDevCommand": "bun run dev",
@@ -85,7 +85,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQ2NzVENDIyRkM4NkI0OEYKUldTUHRJYjhJdFIxUmh3c1Y3QkFIbEszOVErSjh5VmxDZElNNDQyd2hLbXJDTXhCakR4ZmJxZi8K",
       "endpoints": [
-        "https://github.com/KayZedd/ytmd/releases/latest/download/latest.json"
+        "https://ytmd-updates.kayzed.workers.dev/latest.json"
       ]
     }
   }

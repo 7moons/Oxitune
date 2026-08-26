@@ -6424,7 +6424,7 @@ dependencies = [
 
 [[package]]
 name = "ytmd"
-version = "1.0.0"
+version = "0.0.1"
 dependencies = [
  "ctor 0.4.3",
  "dirs 5.0.1",

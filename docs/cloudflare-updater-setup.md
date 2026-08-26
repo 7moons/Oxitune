@@ -96,7 +96,7 @@ Edit `src-tauri/tauri.conf.json`:
   "updater": {
     "pubkey": "...", // unchanged
     "endpoints": [
-      "https://ytmd-updates.<your-subdomain>.workers.dev/latest.json"
+      "https://ytmd-updates.kayzed.workers.dev/latest.json"
     ]
   }
 }
