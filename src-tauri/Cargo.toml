@@ -36,5 +36,9 @@ qrcode = "0.14"
 rand = "0.9"
 rumqttc = { version = "0.25.1", default-features = false, features = ["use-rustls"] }
 
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.38"
+windows = { version = "0.61", features = ["Win32_System_Com"] }
+
 [dev-dependencies]
 tempfile = "3.10"

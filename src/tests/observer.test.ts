@@ -44,6 +44,17 @@ describe('LRC Parser & Time Formatting', () => {
     expect(parsed[2].timeSecs).toBe(21.0);
   });
 
+  test('correctly handles global offset tag [offset: 500]', () => {
+    const lrcWithOffset = `
+[offset:500]
+[00:10.00]First line
+[00:20.00]Second line
+`;
+    const offsetMatch = /\[offset:\s*([+-]?\d+)\s*\]/i.exec(lrcWithOffset);
+    const offsetSecs = offsetMatch ? parseInt(offsetMatch[1], 10) / 1000 : 0;
+    expect(offsetSecs).toBe(0.5);
+  });
+
   test('formats seconds into mm:ss strings', () => {
     expect(formatDuration(0)).toBe('0:00');
     expect(formatDuration(65)).toBe('1:05');

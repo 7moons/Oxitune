@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { computeMuteSync, isAdShowingFromClassList, MuteSyncState } from '../plugins/adblock';
+import { computeMuteSync, isAdShowingFromClassList, MuteSyncState, AdblockPlugin } from '../plugins/adblock';
+import { PluginRegistry } from '../plugins/registry';
+import { PluginContext } from '../plugins/types';
 
 describe('isAdShowingFromClassList', () => {
   test('detects ad-showing class', () => {
@@ -75,5 +77,29 @@ describe('computeMuteSync — edge-triggered mute-only ad suppression', () => {
     r = computeMuteSync(true, state, true);
     expect(r.setMutedTo).toBe(true);
     expect(r.nextState).toEqual({ adWasShowing: true, preAdMuted: true });
+  });
+});
+
+describe('AdblockPlugin registry lifecycle', () => {
+  const dummyContext: PluginContext = {
+    track: null,
+    config: {},
+    invoke: async () => null,
+    sendPlayerCommand: () => {},
+    getVideoElement: () => null
+  };
+
+  test('initializes and registers in PluginRegistry', async () => {
+    const registry = new PluginRegistry(dummyContext);
+    registry.register(AdblockPlugin);
+
+    expect(registry.getRegisteredPlugins().length).toBe(1);
+    expect(registry.isEnabled('adblock')).toBe(true);
+
+    await registry.initAll();
+    expect(registry.isEnabled('adblock')).toBe(true);
+
+    await registry.disable('adblock');
+    expect(registry.isEnabled('adblock')).toBe(false);
   });
 });

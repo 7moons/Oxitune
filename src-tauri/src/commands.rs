@@ -28,9 +28,19 @@ pub fn update_track_info(
 
     // Update Discord RPC if enabled
     if config.discord_rpc_enabled {
-        if let Some(ref rpc) = *state.discord_rpc.lock() {
+        let mut rpc_lock = state.discord_rpc.lock();
+        if rpc_lock.is_none() {
+            *rpc_lock = Some(crate::discord_rpc::DiscordRpcHandle::new());
+        }
+        if let Some(ref rpc) = *rpc_lock {
             rpc.update(track.clone());
         }
+    } else {
+        let mut rpc_lock = state.discord_rpc.lock();
+        if let Some(ref rpc) = *rpc_lock {
+            rpc.clear();
+        }
+        *rpc_lock = None;
     }
 
     // Update MPRIS if enabled
@@ -94,25 +104,185 @@ pub fn send_volume_command(app_handle: AppHandle, volume: f64) -> Result<(), Str
     Ok(())
 }
 
+fn normalize_for_comparison(s: &str) -> String {
+    let mut clean = s.to_lowercase();
+    // Strip parenthetical/bracketed content
+    while let Some(start) = clean.find('(') {
+        if let Some(end) = clean[start..].find(')') {
+            clean.replace_range(start..=start + end, " ");
+        } else {
+            break;
+        }
+    }
+    while let Some(start) = clean.find('[') {
+        if let Some(end) = clean[start..].find(']') {
+            clean.replace_range(start..=start + end, " ");
+        } else {
+            break;
+        }
+    }
+    clean = clean.replace(|c: char| !c.is_alphanumeric() && !c.is_whitespace(), " ");
+    clean.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn calculate_token_similarity(a: &str, b: &str) -> f64 {
+    let norm_a = normalize_for_comparison(a);
+    let norm_b = normalize_for_comparison(b);
+
+    if norm_a.is_empty() || norm_b.is_empty() {
+        return 0.0;
+    }
+    if norm_a == norm_b {
+        return 1.0;
+    }
+    if norm_a.contains(&norm_b) || norm_b.contains(&norm_a) {
+        return 0.85;
+    }
+
+    let tokens_a: std::collections::HashSet<&str> = norm_a.split_whitespace().collect();
+    let tokens_b: std::collections::HashSet<&str> = norm_b.split_whitespace().collect();
+
+    if tokens_a.is_empty() || tokens_b.is_empty() {
+        return 0.0;
+    }
+
+    let intersection = tokens_a.intersection(&tokens_b).count();
+    let union = tokens_a.union(&tokens_b).count();
+
+    if union == 0 {
+        0.0
+    } else {
+        intersection as f64 / union as f64
+    }
+}
+
 fn clean_track_name(title: &str) -> String {
     let mut cleaned = title.to_string();
-    let patterns = [
-        "(Official Video)", "(Official Music Video)", "(Official Audio)",
-        "[Official Video]", "[Official Music Video]", "[Official Audio]",
-        "(Official Visualizer)", "[Official Visualizer]", "(Official)",
-        "(Audio)", "[Audio]", "(Lyrics)", "[Lyrics]", "(Lyric Video)",
-        "(Visualizer)", "[Visualizer]", "(Clip Officiel)", "(Video)",
-        "(Remastered)", "[Remastered]", "(Teledysk)", "(Oficjalny teledysk)"
-    ];
-    for p in &patterns {
-        cleaned = cleaned.replace(p, "");
+
+    // If title is formatted as "Artist - Title", extract the Title portion
+    if let Some(idx) = cleaned.find(" - ") {
+        cleaned = cleaned[idx + 3..].to_string();
+    } else if let Some(idx) = cleaned.find(" – ") {
+        cleaned = cleaned[idx + 3..].to_string();
     }
-    cleaned = cleaned.trim().to_string();
-    if cleaned.is_empty() {
+
+    let mut noise_patterns = [
+        "official music video",
+        "official visualizer",
+        "oficjalny teledysk",
+        "official video",
+        "official audio",
+        "lyrics video",
+        "lyric video",
+        "music video",
+        "clip officiel",
+        "visualizer",
+        "remastered",
+        "teledysk",
+        "official",
+        "prod by",
+        "prod.",
+        "lyrics",
+        "audio",
+        "video",
+        "4k",
+        "hd",
+        "hq",
+    ];
+    noise_patterns.sort_by_key(|b| std::cmp::Reverse(b.len()));
+
+    for pat in &noise_patterns {
+        let mut start = 0;
+        while let Some(pos) = cleaned[start..].to_lowercase().find(pat) {
+            let abs_pos = start + pos;
+            let end_pos = abs_pos + pat.len();
+            let mut rem_start = abs_pos;
+            let mut rem_end = end_pos;
+
+            if rem_start > 0 && (cleaned.as_bytes()[rem_start - 1] == b'(' || cleaned.as_bytes()[rem_start - 1] == b'[') {
+                rem_start -= 1;
+            }
+            if rem_end < cleaned.len() && (cleaned.as_bytes()[rem_end] == b')' || cleaned.as_bytes()[rem_end] == b']') {
+                rem_end += 1;
+            }
+
+            cleaned.replace_range(rem_start..rem_end, " ");
+            start = rem_start;
+        }
+    }
+
+    let result = cleaned.trim().to_string();
+    if result.is_empty() {
         title.to_string()
     } else {
-        cleaned
+        result
     }
+}
+
+fn score_candidate(
+    item: &serde_json::Value,
+    clean_title: &str,
+    clean_artist: &str,
+    target_duration: Option<f64>,
+) -> f64 {
+    let cand_title = item.get("trackName").and_then(|v| v.as_str()).unwrap_or("");
+    let cand_artist = item.get("artistName").and_then(|v| v.as_str()).unwrap_or("");
+
+    let title_sim = calculate_token_similarity(cand_title, clean_title);
+    let artist_sim = calculate_token_similarity(cand_artist, clean_artist);
+
+    // Reject candidates that have no title resemblance whatsoever
+    if title_sim < 0.25 && !cand_title.to_lowercase().contains(&clean_title.to_lowercase()) {
+        return 0.0;
+    }
+
+    let mut score = title_sim * 50.0 + artist_sim * 25.0;
+
+    let has_synced = item.get("syncedLyrics")
+        .and_then(|s| s.as_str())
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(false);
+
+    if has_synced {
+        score += 20.0;
+    }
+
+    if let Some(target) = target_duration {
+        if let Some(cand_dur) = item.get("duration").and_then(|d| d.as_f64()) {
+            let diff = (cand_dur - target).abs();
+            if diff <= 2.0 {
+                score += 25.0;
+            } else if diff <= 5.0 {
+                score += 15.0;
+            } else if diff <= 10.0 {
+                score += 5.0;
+            } else if diff > 30.0 {
+                score -= 20.0;
+            }
+        }
+    }
+
+    score
+}
+
+fn pick_best_match(
+    items: &[serde_json::Value],
+    clean_title: &str,
+    clean_artist: &str,
+    target_duration: Option<f64>,
+) -> Option<serde_json::Value> {
+    let mut best_item: Option<serde_json::Value> = None;
+    let mut best_score = 0.0;
+
+    for item in items {
+        let score = score_candidate(item, clean_title, clean_artist, target_duration);
+        if score > 35.0 && score > best_score {
+            best_score = score;
+            best_item = Some(item.clone());
+        }
+    }
+
+    best_item
 }
 
 #[tauri::command]
@@ -120,7 +290,7 @@ pub async fn fetch_lyrics(
     artist: String,
     title: String,
     album_name: Option<String>,
-    _duration: Option<f64>,
+    duration: Option<f64>,
 ) -> Result<serde_json::Value, String> {
     let client = reqwest::Client::builder()
         .user_agent("YTMD-Desktop/1.0 (https://github.com/dachluczaj/ytmd)")
@@ -130,7 +300,7 @@ pub async fn fetch_lyrics(
     let clean_title = clean_track_name(&title);
     let clean_artist = artist.trim();
 
-    // 1. Try exact get without rigid duration filter
+    // 1. Try the exact-match endpoint with duration
     let mut get_url = format!(
         "https://lrclib.net/api/get?artist_name={}&track_name={}",
         urlencoding::encode(clean_artist),
@@ -140,6 +310,9 @@ pub async fn fetch_lyrics(
         if !album.is_empty() {
             get_url.push_str(&format!("&album_name={}", urlencoding::encode(album)));
         }
+    }
+    if let Some(d) = duration {
+        get_url.push_str(&format!("&duration={}", d.round() as i64));
     }
 
     if let Ok(res) = client.get(&get_url).send().await {
@@ -162,12 +335,8 @@ pub async fn fetch_lyrics(
         if search_res.status().is_success() {
             if let Ok(items) = search_res.json::<serde_json::Value>().await {
                 if let Some(arr) = items.as_array() {
-                    // Prefer item with synced lyrics first
-                    if let Some(synced) = arr.iter().find(|it| it.get("syncedLyrics").and_then(|s| s.as_str()).map(|s| !s.is_empty()).unwrap_or(false)) {
-                        return Ok(synced.clone());
-                    }
-                    if let Some(first) = arr.first() {
-                        return Ok(first.clone());
+                    if let Some(best) = pick_best_match(arr, &clean_title, clean_artist, duration) {
+                        return Ok(best);
                     }
                 }
             }
@@ -184,11 +353,8 @@ pub async fn fetch_lyrics(
         if broad_res.status().is_success() {
             if let Ok(items) = broad_res.json::<serde_json::Value>().await {
                 if let Some(arr) = items.as_array() {
-                    if let Some(synced) = arr.iter().find(|it| it.get("syncedLyrics").and_then(|s| s.as_str()).map(|s| !s.is_empty()).unwrap_or(false)) {
-                        return Ok(synced.clone());
-                    }
-                    if let Some(first) = arr.first() {
-                        return Ok(first.clone());
+                    if let Some(best) = pick_best_match(arr, &clean_title, clean_artist, duration) {
+                        return Ok(best);
                     }
                 }
             }
@@ -204,11 +370,8 @@ pub async fn fetch_lyrics(
         if raw_res.status().is_success() {
             if let Ok(items) = raw_res.json::<serde_json::Value>().await {
                 if let Some(arr) = items.as_array() {
-                    if let Some(synced) = arr.iter().find(|it| it.get("syncedLyrics").and_then(|s| s.as_str()).map(|s| !s.is_empty()).unwrap_or(false)) {
-                        return Ok(synced.clone());
-                    }
-                    if let Some(first) = arr.first() {
-                        return Ok(first.clone());
+                    if let Some(best) = pick_best_match(arr, &clean_title, clean_artist, duration) {
+                        return Ok(best);
                     }
                 }
             }
@@ -398,5 +561,59 @@ pub fn close_window(window: tauri::Window) -> Result<(), String> {
 mod urlencoding {
     pub fn encode(s: &str) -> String {
         url::form_urlencoded::byte_serialize(s.as_bytes()).collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_clean_track_name_removes_video_noise_and_artist_prefix() {
+        assert_eq!(
+            clean_track_name("bbno$ - check (Official Music Video)"),
+            "check"
+        );
+        assert_eq!(
+            clean_track_name("Glass Animals - Take A Slice [Official Audio]"),
+            "Take A Slice"
+        );
+        assert_eq!(
+            clean_track_name("Kaz Bałagane - ale to MOCNA VIXA (Oficjalny teledysk)"),
+            "ale to MOCNA VIXA"
+        );
+    }
+
+    #[test]
+    fn test_token_similarity_matches_relevant_titles() {
+        let sim1 = calculate_token_similarity("Take A Slice", "take a slice");
+        assert!(sim1 >= 0.9);
+
+        let sim2 = calculate_token_similarity("Blinding Lights", "Save Your Tears");
+        assert!(sim2 < 0.3);
+    }
+
+    #[test]
+    fn test_pick_best_match_rejects_unrelated_songs_even_with_matching_duration() {
+        let candidates = vec![
+            json!({
+                "trackName": "Different Song",
+                "artistName": "Glass Animals",
+                "duration": 210.0,
+                "syncedLyrics": "[00:10.00]Wrong lyrics"
+            }),
+            json!({
+                "trackName": "Take A Slice",
+                "artistName": "Glass Animals",
+                "duration": 212.0,
+                "syncedLyrics": "[00:10.00]Right lyrics"
+            }),
+        ];
+
+        let best = pick_best_match(&candidates, "Take A Slice", "Glass Animals", Some(210.0));
+        assert!(best.is_some());
+        let item = best.unwrap();
+        assert_eq!(item["trackName"], "Take A Slice");
     }
 }

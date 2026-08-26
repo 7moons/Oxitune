@@ -95,6 +95,12 @@ fn ytmd_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
 }
 
 pub fn run() {
+    // Without this, every log::info!/warn!/error! call in the app (including
+    // ones diagnosing real startup failures) is silently discarded — the
+    // `log` facade is a no-op until some logger implementation registers
+    // itself, and nothing here was doing that.
+    env_logger::init();
+
     let config_manager = ConfigManager::new();
     let initial_config = config_manager.load();
 
@@ -128,10 +134,6 @@ pub fn run() {
         .manage(app_state)
         .setup(move |app| {
             let handle = app.handle().clone();
-
-            // Initialize MPRIS
-            let mpris_manager = MprisManager::new(handle.clone());
-            *app_state_for_setup.mpris.lock() = Some(mpris_manager);
 
             // Initialize Tray
             let _ = tray::setup_tray(&handle);
@@ -257,7 +259,11 @@ pub fn run() {
             )
             .title("YouTube Music")
             .inner_size(1280.0, 820.0)
-            .min_inner_size(480.0, 360.0)
+            // YouTube Music's own UI isn't built for anything much narrower than this: its
+            // right-side flyout panels (queue, "up next") are a fixed ~400-460px wide and
+            // anchored to the right edge, so at the old 480px minimum they had almost no
+            // margin and got visibly clipped on their left edge.
+            .min_inner_size(700.0, 500.0)
             .resizable(true)
             .initialization_script(include_str!("../inject/preload.js"));
 
@@ -267,7 +273,11 @@ pub fn run() {
                 main_builder = main_builder.icon(icon.clone())?;
             }
 
-            let _main_win = main_builder.build()?;
+            let main_win = main_builder.build()?;
+
+            // Initialize MPRIS (needs the main window's HWND on Windows)
+            let mpris_manager = MprisManager::new(handle.clone(), &main_win);
+            *app_state_for_setup.mpris.lock() = Some(mpris_manager);
 
             Ok(())
         })

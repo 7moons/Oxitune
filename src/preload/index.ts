@@ -395,8 +395,13 @@ async function initYTMD() {
   // Initialize Player Observer
   const observer = new PlayerObserver();
 
+  let lastSyncedPosition = 0;
+  let lastSyncRealTime = Date.now();
+
   observer.onTrackChange(async (track) => {
     currentActiveTrack = track;
+    lastSyncedPosition = track.currentTimeSecs || 0;
+    lastSyncRealTime = Date.now();
     registry.handleTrackChange(track);
     try {
       await invokeBackend('update_track_info', {
@@ -405,8 +410,8 @@ async function initYTMD() {
           artist: track.artist,
           album: track.album || null,
           cover_url: track.coverUrl || null,
-          duration_secs: track.durationSecs,
-          current_time_secs: track.currentTimeSecs,
+          duration_secs: Math.round(track.durationSecs || 0),
+          current_time_secs: Math.round(track.currentTimeSecs || 0),
           is_playing: track.isPlaying,
           video_id: track.videoId || null
         }
@@ -421,6 +426,8 @@ async function initYTMD() {
     const track = observer.getCurrentTrack();
     if (track) {
       track.isPlaying = isPlaying;
+      lastSyncedPosition = track.currentTimeSecs || 0;
+      lastSyncRealTime = Date.now();
       try {
         await invokeBackend('update_track_info', {
           track: {
@@ -428,8 +435,8 @@ async function initYTMD() {
             artist: track.artist,
             album: track.album || null,
             cover_url: track.coverUrl || null,
-            duration_secs: track.durationSecs,
-            current_time_secs: track.currentTimeSecs,
+            duration_secs: Math.round(track.durationSecs || 0),
+            current_time_secs: Math.round(track.currentTimeSecs || 0),
             is_playing: isPlaying,
             video_id: track.videoId || null
           }
@@ -442,6 +449,33 @@ async function initYTMD() {
 
   observer.onTick((positionSecs) => {
     registry.handleTick(positionSecs);
+
+    const track = observer.getCurrentTrack();
+    if (!track || !track.isPlaying) return;
+
+    const now = Date.now();
+    const elapsedSecs = (now - lastSyncRealTime) / 1000;
+    const expectedPosition = lastSyncedPosition + elapsedSecs;
+    const drift = Math.abs(positionSecs - expectedPosition);
+
+    // Sync whenever a seek (>2s drift) occurs or periodically every 15s to guarantee tight Discord RPC time sync
+    if (drift > 2.0 || elapsedSecs >= 15.0) {
+      lastSyncedPosition = positionSecs;
+      lastSyncRealTime = now;
+      track.currentTimeSecs = Math.round(positionSecs);
+      invokeBackend('update_track_info', {
+        track: {
+          title: track.title,
+          artist: track.artist,
+          album: track.album || null,
+          cover_url: track.coverUrl || null,
+          duration_secs: Math.round(track.durationSecs || 0),
+          current_time_secs: Math.round(positionSecs),
+          is_playing: true,
+          video_id: track.videoId || null
+        }
+      }).catch((e) => console.error('[YTMD] Failed to sync seek/progress to backend:', e));
+    }
   });
 
   function handlePlayerCommand(command: string) {
@@ -500,9 +534,21 @@ async function initYTMD() {
   console.log('[YTMD] Integration successfully activated.');
 }
 
-// Start as soon as possible
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => initYTMD());
-} else {
-  initYTMD();
+// Tauri's initialization_script runs in every frame of the webview, including
+// third-party iframes YouTube Music itself loads (ad creatives served from
+// tpc.googlesyndication.com and similar). Bootstrapping the full plugin stack
+// there wastes resources, spams "event.listen not allowed" errors (those
+// origins aren't in our Tauri capability allowlist — by design, since they're
+// untrusted), and runs a duplicate copy of every setInterval polling loop
+// (adblock, lyrics, downloader, burger menu, DSP...) per ad iframe. Only the
+// top-level music.youtube.com frame should ever run this.
+const isTopLevelYTMFrame =
+  window.self === window.top && /(^|\.)music\.youtube\.com$/.test(location.hostname);
+
+if (isTopLevelYTMFrame) {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => initYTMD());
+  } else {
+    initYTMD();
+  }
 }

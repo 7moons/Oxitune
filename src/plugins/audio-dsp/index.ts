@@ -22,22 +22,30 @@ export const AudioDspPlugin: YTMDPlugin = {
     crossfadeRef = crossfade;
     skipSilenceRef = skipSilence;
 
+    const config = ctx.config;
+    const isDspActive = Boolean(
+      config.equalizer_enabled ||
+      config.loudness_normalization ||
+      (config.equalizer_gains && Array.isArray(config.equalizer_gains) && (config.equalizer_gains as number[]).some(g => g !== 0))
+    );
+
     let checkVideo: number | null = null;
-    if (video) {
-      engine.init(video);
-    } else {
-      checkVideo = window.setInterval(() => {
-        const v = ctx.getVideoElement();
-        if (v) {
-          if (checkVideo !== null) clearInterval(checkVideo);
-          checkVideo = null;
-          engine.init(v);
-        }
-      }, 500);
+    if (isDspActive) {
+      if (video) {
+        engine.init(video);
+      } else {
+        checkVideo = window.setInterval(() => {
+          const v = ctx.getVideoElement();
+          if (v) {
+            if (checkVideo !== null) clearInterval(checkVideo);
+            checkVideo = null;
+            engine.init(v);
+          }
+        }, 500);
+      }
     }
 
     // Apply configuration
-    const config = ctx.config;
     if (config.equalizer_gains && Array.isArray(config.equalizer_gains)) {
       engine.setAllGains(config.equalizer_gains as number[]);
     } else if (config.equalizer_preset && typeof config.equalizer_preset === 'string') {

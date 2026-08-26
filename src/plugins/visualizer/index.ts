@@ -15,11 +15,13 @@ export const VisualizerPlugin: YTMDPlugin = {
     const customCss = (ctx.config.custom_css as string) || '';
 
     let baseThemeCss = `
-      /* Clean subtle scrollbars */
-      ::-webkit-scrollbar {
-        width: 8px;
-        height: 8px;
-      }
+      /* Clean subtle scrollbar colors only — deliberately NOT overriding
+         ::-webkit-scrollbar width/height. YouTube Music's own layout code
+         reserves gutter space sized for the native (wider) scrollbar; shrinking
+         the rendered scrollbar to a custom width leaves a stale gap the size of
+         the difference wherever that reserved space gets exposed (e.g. when
+         focusing/expanding the now-playing view triggers a layout recalc) —
+         seen as empty space where the scrollbar used to be. */
       ::-webkit-scrollbar-track {
         background: transparent;
       }

@@ -1,8 +1,8 @@
-use local_ip_address::local_ip;
+use local_ip_address::{list_afinet_netifas, local_ip};
 use qrcode::render::svg;
 use qrcode::QrCode;
 use serde::{Deserialize, Serialize};
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -32,7 +32,50 @@ struct DownloadRequestWrapper {
     request: crate::downloader::DownloadRequest,
 }
 
+fn looks_like_virtual_adapter(name: &str) -> bool {
+    let name = name.to_lowercase();
+    [
+        "vpn", "zerotier", "tailscale", "wireguard", "nord", "proton", "openvpn", "tap", "tun",
+        "ppp", "virtual", "hyper-v", "vmware", "virtualbox", "docker", "teredo", "isatap",
+        "loopback",
+    ]
+    .iter()
+    .any(|kw| name.contains(kw))
+}
+
+/// The `local_ip_address` crate picks its address from whichever interface owns the
+/// system's default route. VPN and mesh-networking clients (ZeroTier, Tailscale, etc.)
+/// commonly install their own default route, so on a machine running one of those the
+/// "default route" interface is the VPN tunnel, not the physical LAN/Wi-Fi adapter —
+/// producing a QR/URL a phone on the same Wi-Fi can never actually reach. Prefer a real
+/// private-LAN address on a non-VPN-looking adapter first, falling back to the OS's
+/// default-route pick only if nothing better is found.
 pub fn get_local_ip() -> String {
+    if let Ok(interfaces) = list_afinet_netifas() {
+        let mut candidates: Vec<_> = interfaces
+            .into_iter()
+            .filter_map(|(name, ip)| match ip {
+                IpAddr::V4(v4) if v4.is_private() && !looks_like_virtual_adapter(&name) => {
+                    Some(v4)
+                }
+                _ => None,
+            })
+            .collect();
+
+        // 192.168.x.x is almost always a home/office router subnet and is rarely used
+        // by VPNs, so prefer it; 10.x.x.x is common for both LANs and VPNs, so it comes
+        // after; 172.16-31.x.x is the least common of the three.
+        candidates.sort_by_key(|ip| match ip.octets()[0] {
+            192 => 0,
+            10 => 1,
+            _ => 2,
+        });
+
+        if let Some(ip) = candidates.into_iter().next() {
+            return ip.to_string();
+        }
+    }
+
     local_ip()
         .map(|ip| ip.to_string())
         .unwrap_or_else(|_| "127.0.0.1".to_string())
