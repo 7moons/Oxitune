@@ -1,4 +1,4 @@
-export {};
+import { initAmbientBackdrop } from './ambient';
 
 interface LocalTrack {
   id: string;
@@ -238,6 +238,7 @@ async function loadTracks() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  initAmbientBackdrop();
   loadTracks();
 
   const searchInput = document.getElementById('search-input') as HTMLInputElement;

@@ -1,4 +1,5 @@
 import { EQ_FREQUENCIES, EQ_PRESETS } from '../plugins/audio-dsp/presets';
+import { initAmbientBackdrop } from './ambient';
 
 interface AppConfig {
   autostart: boolean;
@@ -487,6 +488,7 @@ function initUpdateChecker() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  initAmbientBackdrop();
   loadSettings();
   initUpdateChecker();
 

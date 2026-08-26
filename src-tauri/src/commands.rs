@@ -383,6 +383,14 @@ pub async fn fetch_lyrics(
     Err("Lyrics not found in database".to_string())
 }
 
+/// Lets a companion window (settings, local library, sync) that opens or
+/// reloads mid-song fetch the track already playing, instead of sitting
+/// blank until the next `track-changed` broadcast.
+#[tauri::command]
+pub fn get_current_track(state: State<'_, Arc<AppState>>) -> Option<TrackPayload> {
+    state.current_track.lock().clone()
+}
+
 #[tauri::command]
 pub fn notify_track_change(
     app_handle: AppHandle,

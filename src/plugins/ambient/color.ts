@@ -18,9 +18,9 @@ export const rgbToHex = (r: number, g: number, b: number): string => {
 export async function extractPalette(imageUrl: string): Promise<ColorPalette> {
   return new Promise((resolve) => {
     const fallback: ColorPalette = {
-      primary: '#18181b',
-      secondary: '#09090b',
-      accent: '#dc2626'
+      primary: '#3a2f1f',
+      secondary: '#0e0c11',
+      accent: '#e8b06b'
     };
 
     if (!imageUrl) {

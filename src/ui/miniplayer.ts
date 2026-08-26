@@ -1,3 +1,5 @@
+import { initAmbientBackdrop } from './ambient';
+
 interface TrackPayload {
   title: string;
   artist: string;
@@ -20,7 +22,7 @@ let lastDuration = 0;
 let isAlwaysOnTop = true;
 
 const FALLBACK_COVER =
-  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='320' height='320' viewBox='0 0 320 320'%3E%3Crect width='320' height='320' fill='%23121216'/%3E%3Ccircle cx='160' cy='160' r='50' fill='%2327272a'/%3E%3Cpolygon points='150,140 180,160 150,180' fill='%2371717a'/%3E%3C/svg%3E";
+  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='320' height='320' viewBox='0 0 320 320'%3E%3Crect width='320' height='320' fill='%23151119'/%3E%3Ccircle cx='160' cy='160' r='50' fill='%232a2430'/%3E%3Cpolygon points='150,140 180,160 150,180' fill='%23e8b06b'/%3E%3C/svg%3E";
 
 function updateTrackUI(track: TrackPayload) {
   const titleEl = document.getElementById('mini-title');
@@ -62,6 +64,8 @@ function updateTrackUI(track: TrackPayload) {
 }
 
 async function initMiniPlayer() {
+  initAmbientBackdrop();
+
   const tauri = window.__TAURI__;
 
   if (tauri?.event) {

@@ -1,4 +1,4 @@
-export {};
+import { initAmbientBackdrop } from './ambient';
 
 interface RoomMember {
   id: string;
@@ -147,6 +147,7 @@ async function loadRoomState() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  initAmbientBackdrop();
   loadRoomState();
 
   // Tab switching
