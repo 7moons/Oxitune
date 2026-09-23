@@ -3,7 +3,7 @@ import { PlayerBridge } from '../../preload/bridge';
 import { setSyncStatus } from '../../preload/ui/navMenu';
 import { showReaction, showToast } from '../../preload/ui/kit';
 import { t } from '../../preload/ui/i18n';
-import { setSyncGuest } from '../../preload/syncRole';
+import { setRoomNextOverride, setSyncGuest } from '../../preload/syncRole';
 import { canControl, MemberRole, roleOf, votesNeeded } from '../../preload/syncRoles';
 import { hideQueuePanel, queueAddFromMenuData, showQueuePanel, syncQueuePanel } from './queuePanel';
 
@@ -306,8 +306,8 @@ export class RoomSyncController {
   /** Guest: whether our role may skip/pause/pick (not a listener). */
   private canControl = true;
 
-  /** Host: the song we last moved on from to the shared queue. */
-  private queueAdvancedFrom: string | null = null;
+  /** Host: the song we last moved on from to the shared queue, and when. */
+  private queueAdvance: { from: string | null; atMs: number } | null = null;
 
   /** `notify` shows a message to the user (a toast outside of tests). */
   constructor(private readonly notify: (message: string) => void = showToast) {}
@@ -549,24 +549,51 @@ export class RoomSyncController {
     }
   }
 
-  /** Host: as a song ends, plays the next song from the shared queue (the
-   * backend hands it over and removes it). Once per song. */
+  /** Host: as a song ends, plays the next song from the shared queue. */
   public advanceQueue(queueLength: number, video: HTMLVideoElement | null, invoke: PluginContext['invoke']) {
-    if (!this.inRoom || !this.isHost || queueLength === 0 || !video || isAdPlaying()) return;
+    if (!video || isAdPlaying()) return;
     const remaining = video.duration - video.currentTime;
     if (!Number.isFinite(remaining) || (remaining > QUEUE_ADVANCE_SECS && !video.ended)) return;
+    this.playNextFromQueue(queueLength, invoke, video, false);
+  }
+
+  /** Host: "next" while the shared queue has songs plays the queue's first
+   * song (the backend hands it over and removes it). Returns whether it
+   * took over. Another "next" from the same song while that's under way
+   * (a double click, crossfade plus the end-of-song advance) is swallowed,
+   * so one skip never eats two songs. If the queue turned out empty, a
+   * skip still skips (`skipIfEmpty`), through YTM's own next. */
+  public playNextFromQueue(
+    queueLength: number,
+    invoke: PluginContext['invoke'],
+    video: HTMLVideoElement | null = PlayerBridge.getVideo(),
+    skipIfEmpty = true,
+    now = Date.now()
+  ): boolean {
+    if (!this.inRoom || !this.isHost || queueLength === 0) return false;
     const { videoId } = loadedPlayback(video);
-    if (!videoId || this.queueAdvancedFrom === videoId) return;
-    this.queueAdvancedFrom = videoId;
+    const pending = this.queueAdvance;
+    if (pending && pending.from === videoId && now - pending.atMs < NAVIGATION_GRACE_MS) return true;
+    this.queueAdvance = { from: videoId, atMs: now };
+    const fallback = () => {
+      if (skipIfEmpty) PlayerBridge.nextInYtm();
+    };
     invoke('sync_queue_take_next')
       .then((item) => {
         const next = item as QueueItemPayload | null;
-        if (!next || !VIDEO_ID_RE.test(next.video_id)) return;
+        if (!next || !VIDEO_ID_RE.test(next.video_id)) {
+          fallback();
+          return;
+        }
         PlayerBridge.pause(); // don't let the old song end into YTM's autoplay
         navigateToVideo(next.video_id);
         this.notify(t().syncFromQueue(next.title, next.added_by));
       })
-      .catch((e) => console.error('[YTMD Room Sync] queue advance failed:', e));
+      .catch((e) => {
+        console.error('[YTMD Room Sync] playing from the shared queue failed:', e);
+        fallback();
+      });
+    return true;
   }
 
   /** `force` skips the throttle: track and play/pause changes go out
@@ -782,9 +809,20 @@ export const SyncRoomPlugin: YTMDPlugin = {
         }
       }
 
-      // A guest's own clicks on next/previous/play-pause go to the host
-      // instead. Only real clicks: our own PlayerBridge clicks are untrusted.
-      if (!e.isTrusted || !controller.isGuest()) return;
+      if (!e.isTrusted) return; // our own PlayerBridge clicks
+      // The host's own next button plays from the shared queue when it has
+      // songs; YTM's handler would take its local up-next instead.
+      if (
+        controller.isRoomHost() &&
+        target.closest('ytmusic-player-bar .next-button') &&
+        controller.playNextFromQueue(lastRoom?.queue?.length ?? 0, ctx.invoke)
+      ) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        return;
+      }
+      // A guest's own clicks on next/previous/play-pause go to the host.
+      if (!controller.isGuest()) return;
       const hit = CONTROL_BUTTONS.find(([selector]) => target.closest(selector));
       if (!hit) return;
       const video = ctx.getVideoElement();
@@ -798,6 +836,9 @@ export const SyncRoomPlugin: YTMDPlugin = {
     // YTM re-renders the player page on some navigations; put the queue
     // panel back and keep it in step with the selected tab.
     const panelPoll = setInterval(syncQueuePanel, QUEUE_PANEL_POLL_MS);
+    // Every other "next" on the host (media keys, tray, a guest's skip, a
+    // vote, crossfade, skip-silence) goes through PlayerBridge.next().
+    setRoomNextOverride(() => controller.playNextFromQueue(lastRoom?.queue?.length ?? 0, ctx.invoke));
 
     // The page can (re)load while already in a room: app start after a
     // crash, or a fallback full-page track switch. Pick the room back up
@@ -819,6 +860,7 @@ export const SyncRoomPlugin: YTMDPlugin = {
       unlistenPromises.forEach((p) => p.then((unlisten) => unlisten()));
       window.removeEventListener('click', onClick, true);
       clearInterval(panelPoll);
+      setRoomNextOverride(null);
       controller.setRoomState(false, false);
       controllerRef = null;
       invokeRef = null;

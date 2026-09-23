@@ -14,3 +14,20 @@ export function setSyncGuest(isGuest: boolean): void {
 export function isSyncGuest(): boolean {
   return guest;
 }
+
+/**
+ * The host of a room with songs in the shared queue: "next" means the
+ * queue's next song, not YTM's own up-next. Set by the sync-room plugin;
+ * `PlayerBridge.next()` asks it first, so the player-bar button, media
+ * keys, tray, a guest's skip, a vote, crossfade and skip-silence all agree.
+ * Returns whether it took the skip over.
+ */
+let roomNext: (() => boolean) | null = null;
+
+export function setRoomNextOverride(override: (() => boolean) | null): void {
+  roomNext = override;
+}
+
+export function takeRoomNext(): boolean {
+  return roomNext?.() ?? false;
+}

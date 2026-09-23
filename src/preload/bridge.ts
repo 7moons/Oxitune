@@ -1,4 +1,5 @@
 import { setPlayerVolumePercent } from './playerVolume';
+import { takeRoomNext } from './syncRole';
 
 export class PlayerBridge {
   static getVideo(): HTMLVideoElement | null {
@@ -39,7 +40,15 @@ export class PlayerBridge {
     }
   }
 
+  /** Next song: the room's shared queue when this page hosts one that has
+   * songs (see `takeRoomNext`), YTM's own up-next otherwise. */
   static next(): void {
+    if (takeRoomNext()) return;
+    this.nextInYtm();
+  }
+
+  /** YTM's own next button, whatever a room says. */
+  static nextInYtm(): void {
     const nextBtn = document.querySelector<HTMLElement>(
       'ytmusic-player-bar .next-button, #player-bar-background .next-button, .next-button'
     );

@@ -12,7 +12,8 @@ import {
   SyncPlaybackPayload,
   TransitEstimator
 } from '../plugins/sync-room';
-import { isSyncGuest } from '../preload/syncRole';
+import { isSyncGuest, setRoomNextOverride } from '../preload/syncRole';
+import { PlayerBridge } from '../preload/bridge';
 import { canControl, canKick, roleOf, SYNC_REACTIONS, votesNeeded } from '../preload/syncRoles';
 import { describeProbes } from '../ui/syncProbe';
 import { queueAddFromMenuData } from '../plugins/sync-room/queuePanel';
@@ -387,6 +388,77 @@ describe('RoomSyncController (guest)', () => {
     guestSide.setRoomState(true, false);
     guestSide.advanceQueue(1, fakeVideo({ currentTime: 199.5, duration: 200 }), invoke);
     expect(calls).toHaveLength(1); // only the host advances
+  });
+
+  // Regression: skipping on the host (its next button, media keys, a
+  // guest's skip, a vote) played YTM's own up-next, not the shared queue.
+  describe('"next" on the host uses the shared queue', () => {
+    let nativeNextClicks = 0;
+    const withNextButton = () => {
+      nativeNextClicks = 0;
+      g.document = {
+        getElementById: () => null,
+        querySelector: (sel: string) => (sel.includes('.next-button') ? { click: () => nativeNextClicks++ } : null),
+        documentElement: { lang: 'en' }
+      };
+    };
+    const hostWith = (queueLength: () => number, taken: unknown) => {
+      const c = new RoomSyncController(() => {});
+      c.setRoomState(true, true);
+      const calls: string[] = [];
+      const invoke = async (cmd: string) => {
+        calls.push(cmd);
+        return taken;
+      };
+      setRoomNextOverride(() => c.playNextFromQueue(queueLength(), invoke));
+      return { c, calls };
+    };
+    const queued = { id: 'q0', video_id: 'bbbbbbbbbbb', title: 'Queued', artist: '', added_by: 'Ola', added_by_id: 'x' };
+    afterEach(() => setRoomNextOverride(null));
+
+    test('any skip takes the queue’s first song, not YTM’s', async () => {
+      withNextButton();
+      const { calls } = hostWith(() => 2, queued);
+      PlayerBridge.next();
+      PlayerBridge.next(); // a double click must not eat two songs
+      await new Promise((r) => setTimeout(r, 0));
+      expect(calls).toEqual(['sync_queue_take_next']);
+      expect(nativeNextClicks).toBe(0);
+      expect(location.href).toContain('bbbbbbbbbbb');
+    });
+
+    test('a guest’s skip or a won vote, carried out on the host, does the same', async () => {
+      withNextButton();
+      const { c, calls } = hostWith(() => 1, queued);
+      c.applyRemoteControl({ from: 'Ola', action: { kind: 'next' }, source: { kind: 'vote' } });
+      await new Promise((r) => setTimeout(r, 0));
+      expect(calls).toEqual(['sync_queue_take_next']);
+      expect(nativeNextClicks).toBe(0);
+    });
+
+    test('with an empty queue, YTM’s own next plays', () => {
+      withNextButton();
+      const { calls } = hostWith(() => 0, null);
+      PlayerBridge.next();
+      expect(calls).toEqual([]);
+      expect(nativeNextClicks).toBe(1);
+    });
+
+    test('a queue emptied meanwhile still skips', async () => {
+      withNextButton();
+      const { calls } = hostWith(() => 1, null);
+      PlayerBridge.next();
+      await new Promise((r) => setTimeout(r, 0));
+      expect(calls).toEqual(['sync_queue_take_next']);
+      expect(nativeNextClicks).toBe(1);
+    });
+
+    test('a guest page is never taken over', () => {
+      withNextButton();
+      const c = new RoomSyncController(() => {});
+      c.setRoomState(true, false);
+      expect(c.playNextFromQueue(3, async () => null)).toBe(false);
+    });
   });
 });
 
