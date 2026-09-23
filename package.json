@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "bun run build:preload && vite",
-    "build:preload": "bun build src/preload/index.ts --outfile src-tauri/inject/preload.js --target browser --minify",
+    "build:preload": "bun build src/preload/index.ts --outfile src-tauri/inject/preload.js --target browser --minify --format iife",
     "build": "tsc && vite build && bun run build:preload",
     "preview": "vite preview",
     "tauri": "tauri",
