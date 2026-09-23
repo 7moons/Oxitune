@@ -11,15 +11,32 @@ export function parseTimeStrToSecs(timeStr: string): number {
   return 0;
 }
 
+/** The subset of YouTube's player API (`#movie_player`) read here. */
+type MoviePlayerElement = HTMLElement & {
+  getAdState?: () => number;
+  isAdPlaying?: () => boolean;
+  getDuration?: () => number;
+  getCurrentTime?: () => number;
+};
+
+/** A fallback tick is only needed when `timeupdate` hasn't produced one
+ * for longer than its normal ~250ms cadence. */
+export const FALLBACK_TICK_AFTER_MS = 400;
+export function shouldFallbackTick(nowMs: number, lastTickMs: number): boolean {
+  return nowMs - lastTickMs >= FALLBACK_TICK_AFTER_MS;
+}
+
 export class PlayerObserver {
   private currentTrack: TrackInfo | null = null;
   private onTrackChangeCallbacks: ((track: TrackInfo) => void)[] = [];
   private onPlaybackChangeCallbacks: ((isPlaying: boolean) => void)[] = [];
   private onTickCallbacks: ((time: number) => void)[] = [];
   private tickInterval: number | null = null;
-  private pauseDebounceTimeout: any = null;
+  private pauseDebounceTimeout: ReturnType<typeof setTimeout> | null = null;
   private mutationObserver: MutationObserver | null = null;
   private attachedVideo: HTMLVideoElement | null = null;
+  private observedTarget: Element | null = null;
+  private lastTickMs = 0;
 
   // Named instance methods (not per-call anonymous closures) so
   // detachVideoListeners can remove the exact same listener reference that
@@ -28,9 +45,13 @@ export class PlayerObserver {
   private readonly handleVideoPause = () => this.handlePlaybackChange(false);
   private readonly handleVideoTimeUpdate = () => {
     if (!this.attachedVideo) return;
-    const current = this.attachedVideo.currentTime;
-    this.onTickCallbacks.forEach((cb) => cb(current));
+    this.emitTick(this.attachedVideo.currentTime);
   };
+
+  private emitTick(current: number): void {
+    this.lastTickMs = Date.now();
+    this.onTickCallbacks.forEach((cb) => cb(current));
+  }
 
   constructor() {
     this.initObservers();
@@ -93,22 +114,34 @@ export class PlayerObserver {
       });
     };
 
-    const observer = new MutationObserver(throttledCheck);
-    const target = document.querySelector('ytmusic-player-bar') || document.body;
-    if (target) {
-      observer.observe(target, { childList: true, subtree: true, characterData: true });
-    }
-    this.mutationObserver = observer;
+    this.mutationObserver = new MutationObserver(throttledCheck);
+    this.syncMutationTarget();
 
-    // 4. Regular polling fallback to guarantee accuracy
+    // 4. Polling fallback. Ticks normally come from the video's own
+    // `timeupdate` (~4Hz); this only fills in when that has gone quiet, so
+    // plugins aren't ticked twice as often as needed.
     this.tickInterval = window.setInterval(() => {
       this.syncVideoListeners();
+      this.syncMutationTarget();
       this.checkTrackUpdate();
       const video = document.querySelector('video');
-      if (video && !video.paused) {
-        this.onTickCallbacks.forEach((cb) => cb(video.currentTime));
+      if (video && !video.paused && shouldFallbackTick(Date.now(), this.lastTickMs)) {
+        this.emitTick(video.currentTime);
       }
     }, 250);
+  }
+
+  /** At DOMContentLoaded the player bar usually doesn't exist yet, so the
+   * observer starts on <body> — where it fires on every DOM change in the
+   * whole app (scrolling lists, hovering). Narrow it to the player bar as
+   * soon as that appears. */
+  private syncMutationTarget(): void {
+    if (!this.mutationObserver) return;
+    const target = document.querySelector('ytmusic-player-bar') || document.body;
+    if (!target || target === this.observedTarget) return;
+    this.mutationObserver.disconnect();
+    this.mutationObserver.observe(target, { childList: true, subtree: true, characterData: true });
+    this.observedTarget = target;
   }
 
   private attachVideoListeners(video: HTMLVideoElement): void {
@@ -138,7 +171,7 @@ export class PlayerObserver {
 
   private extractTrackInfo(): TrackInfo | null {
     const video = document.querySelector('video');
-    const moviePlayer = document.getElementById('movie_player') as any;
+    const moviePlayer = document.getElementById('movie_player') as MoviePlayerElement | null;
     
     // Ignore ads completely
     const isAd = Boolean(
@@ -347,6 +380,7 @@ export class PlayerObserver {
     if (this.mutationObserver !== null) {
       this.mutationObserver.disconnect();
       this.mutationObserver = null;
+      this.observedTarget = null;
     }
     if (this.attachedVideo !== null) {
       this.detachVideoListeners(this.attachedVideo);

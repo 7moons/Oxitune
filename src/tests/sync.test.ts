@@ -1,43 +1,96 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync, readdirSync, statSync } from 'fs';
+import { join } from 'path';
+import { computeSyncAction, LocalPlayback, SyncPlaybackPayload } from '../plugins/sync-room';
 
-describe('P2P Room Sync Suite', () => {
-  test('validates room code format (YTMD-XXXX)', () => {
-    const isValidRoomCode = (code: string) => /^YTMD-[A-Z0-9]{4,8}$/i.test(code.trim());
+const payload = (over: Partial<SyncPlaybackPayload> = {}): SyncPlaybackPayload => ({
+  video_id: 'dQw4w9WgXcQ',
+  title: 'T',
+  artist: 'A',
+  current_time_secs: 50,
+  is_playing: true,
+  timestamp_ms: 10_000,
+  ...over
+});
 
-    expect(isValidRoomCode('YTMD-7842')).toBe(true);
-    expect(isValidRoomCode('YTMD-ABC123')).toBe(true);
-    expect(isValidRoomCode('ytmd-xyz9')).toBe(true);
-    expect(isValidRoomCode('INVALID-CODE')).toBe(false);
-    expect(isValidRoomCode('YTMD-')).toBe(false);
+const local = (over: Partial<LocalPlayback> = {}): LocalPlayback => ({
+  videoId: 'dQw4w9WgXcQ',
+  paused: false,
+  currentTime: 50,
+  ...over
+});
+
+describe('computeSyncAction', () => {
+  test('different track: navigate only, no play/seek on the old video', () => {
+    const a = computeSyncAction(payload(), local({ videoId: 'aaaaaaaaaaa' }), 10_000);
+    expect(a).toEqual({ navigateTo: 'dQw4w9WgXcQ', setPlaying: null, seekTo: null });
   });
 
-  test('calculates clock drift and triggers compensation accurately', () => {
-    const calculateDrift = (current: number, hostTime: number) => Math.abs(current - hostTime);
-    const shouldSeek = (drift: number) => drift > 1.5;
-
-    expect(shouldSeek(calculateDrift(10.0, 10.4))).toBe(false); // 0.4s drift -> acceptable
-    expect(shouldSeek(calculateDrift(10.0, 11.2))).toBe(false); // 1.2s drift -> acceptable
-    expect(shouldSeek(calculateDrift(10.0, 12.0))).toBe(true);  // 2.0s drift -> resync required
-    expect(shouldSeek(calculateDrift(45.0, 30.0))).toBe(true);  // 15s desync -> resync required
+  test('rejects malformed video ids', () => {
+    const a = computeSyncAction(payload({ video_id: 'javascript:x' }), local({ videoId: null }), 10_000);
+    expect(a.navigateTo).toBeNull();
   });
 
-  test('computes target playback time with network latency offset', () => {
-    const computeTargetTime = (
-      hostCurrentTime: number,
-      sentTimestampMs: number,
-      receiveTimestampMs: number,
-      isPlaying: boolean
-    ) => {
-      if (!isPlaying) return hostCurrentTime;
-      const elapsedSeconds = Math.max(0, (receiveTimestampMs - sentTimestampMs) / 1000);
-      return hostCurrentTime + elapsedSeconds;
-    };
+  test('in sync: nothing to do', () => {
+    expect(computeSyncAction(payload(), local({ currentTime: 50.3 }), 10_250)).toEqual({
+      navigateTo: null,
+      setPlaying: null,
+      seekTo: null
+    });
+  });
 
-    const hostTime = 50.0;
-    const sent = 1000;
-    const received = 1250; // 250ms transit
+  test('host paused, guest playing: pause', () => {
+    expect(computeSyncAction(payload({ is_playing: false }), local(), 10_000).setPlaying).toBe(false);
+  });
 
-    expect(computeTargetTime(hostTime, sent, received, true)).toBeCloseTo(50.25, 2);
-    expect(computeTargetTime(hostTime, sent, received, false)).toBe(50.0); // paused
+  test('host playing, guest paused: play', () => {
+    expect(computeSyncAction(payload(), local({ paused: true }), 10_000).setPlaying).toBe(true);
+  });
+
+  test('drift beyond tolerance seeks to host position plus transit', () => {
+    const a = computeSyncAction(payload(), local({ currentTime: 40 }), 10_250);
+    expect(a.seekTo).toBeCloseTo(50.25, 3);
+  });
+
+  test('skewed guest clock cannot push the target more than 1s ahead', () => {
+    // Guest clock 30s ahead of host: naive math would seek to 80s.
+    const a = computeSyncAction(payload(), local({ currentTime: 40 }), 40_000);
+    expect(a.seekTo).toBeCloseTo(51, 3);
+    // And a small skew alone never causes a seek loop.
+    expect(computeSyncAction(payload(), local({ currentTime: 50.5 }), 40_000).seekTo).toBeNull();
+  });
+
+  test('paused host ignores transit time', () => {
+    const a = computeSyncAction(payload({ is_playing: false }), local({ paused: true, currentTime: 10 }), 10_900);
+    expect(a.seekTo).toBe(50);
+  });
+});
+
+// The injected page can't call #[tauri::command]s directly; every command
+// it invokes needs a match arm in lib.rs's `ytmd-invoke` bridge, or the call
+// silently resolves to null after a 4s timeout. `broadcast_sync_state` and
+// `set_inhibit_sleep` were missing, which broke Listen Together and the
+// sleep inhibitor outright.
+describe('injected-page IPC bridge', () => {
+  const root = join(import.meta.dir, '..', '..');
+
+  const walk = (dir: string): string[] =>
+    readdirSync(dir).flatMap((name) => {
+      const p = join(dir, name);
+      return statSync(p).isDirectory() ? walk(p) : p.endsWith('.ts') ? [p] : [];
+    });
+
+  test('every command invoked from src/preload + src/plugins has a bridge arm', () => {
+    const invoked = new Set<string>();
+    for (const file of [...walk(join(root, 'src/preload')), ...walk(join(root, 'src/plugins'))]) {
+      for (const m of readFileSync(file, 'utf8').matchAll(/(?:invoke|invokeBackend)\(\s*'([a-z_]+)'/g)) {
+        invoked.add(m[1]);
+      }
+    }
+    const libRs = readFileSync(join(root, 'src-tauri/src/lib.rs'), 'utf8');
+    const handled = new Set([...libRs.matchAll(/^\s+"([a-z_]+)" =>/gm)].map((m) => m[1]));
+
+    expect(invoked.size).toBeGreaterThan(5);
+    expect([...invoked].filter((cmd) => !handled.has(cmd))).toEqual([]);
   });
 });

@@ -1,3 +1,4 @@
+import { shouldFallbackTick, FALLBACK_TICK_AFTER_MS } from '../preload/observer';
 import { describe, expect, test } from 'bun:test';
 
 function parseLrc(lrcText: string): Array<{ timeSecs: number; text: string }> {
@@ -60,5 +61,15 @@ describe('LRC Parser & Time Formatting', () => {
     expect(formatDuration(65)).toBe('1:05');
     expect(formatDuration(234)).toBe('3:54');
     expect(formatDuration(3600)).toBe('60:00');
+  });
+});
+
+describe('shouldFallbackTick', () => {
+  test('no fallback tick while timeupdate is flowing (~250ms apart)', () => {
+    expect(shouldFallbackTick(10_250, 10_000)).toBe(false);
+  });
+  test('fallback tick once timeupdate has gone quiet', () => {
+    expect(shouldFallbackTick(10_000 + FALLBACK_TICK_AFTER_MS, 10_000)).toBe(true);
+    expect(shouldFallbackTick(5_000, 0)).toBe(true);
   });
 });

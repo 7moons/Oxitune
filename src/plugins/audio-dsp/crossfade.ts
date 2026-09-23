@@ -36,6 +36,16 @@ export class CrossfadeController {
 
     const remaining = track.durationSecs - currentTimeSecs;
 
+    // User seeked back out of the fade window: undo the fade-out and the
+    // scheduled advance, or the rest of the song plays silent and then
+    // gets cut off.
+    if (this.fadeOutTriggered && remaining > this.crossfadeSeconds + 1) {
+      this.fadeOutTriggered = false;
+      this.clearPendingAdvance();
+      AudioEngine.getInstance().resetFade();
+      return;
+    }
+
     // Trigger fade-out when remaining time matches crossfade seconds
     if (remaining <= this.crossfadeSeconds && !this.fadeOutTriggered && remaining > 0) {
       this.fadeOutTriggered = true;

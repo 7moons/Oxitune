@@ -1,5 +1,5 @@
 import { YTMDPlugin, PluginContext, TrackInfo } from '../types';
-import { extractPalette } from './color';
+import { extractPalette, renderAmbientWash } from './color';
 import { createEl } from '../../utils/dom';
 
 let setIntensity: ((val: number) => void) | null = null;
@@ -40,32 +40,23 @@ export const AmbientLightingPlugin: YTMDPlugin = {
         overflow: hidden;
         opacity: ${isEnabled ? intensity : 0};
         transition: opacity 0.8s ease;
-        will-change: opacity;
       }
-      /* Full-bleed blurred cover — the same #ambient-cover technique the
-         companion windows use (src/ui/styles.css), so nav bar/player bar/
-         sidebar going translucent (theme_engine's Ambient CSS) actually
-         reveals something rich instead of a faint two-corner gradient. */
+      /* Full-bleed blurred cover, so nav bar/player bar/sidebar going
+         translucent (theme_engine's Ambient CSS) reveals something rich.
+         The src is a small bitmap blurred once per track in JS
+         (renderAmbientWash) and stretched here — deliberately no CSS
+         filter and no animation: a live blur(64px) on a full-window layer
+         plus an infinite transform animation made WebKit re-blur the whole
+         window every frame, which stuttered scrolling and playback. */
       #ytmd-ambient-cover {
         position: absolute;
-        inset: -12%;
-        width: 124%;
-        height: 124%;
+        inset: 0;
+        width: 100%;
+        height: 100%;
         object-fit: cover;
         object-position: center;
-        filter: blur(64px) saturate(165%) brightness(0.55);
         opacity: 0;
         transition: opacity 1.1s ease;
-      }
-      body.ytmd-is-playing #ytmd-ambient-cover {
-        animation: ytmd-ambient-breathe 16s ease-in-out infinite alternate;
-      }
-      @keyframes ytmd-ambient-breathe {
-        from { transform: scale(1) rotate(0deg); }
-        to { transform: scale(1.07) rotate(0.6deg); }
-      }
-      @media (prefers-reduced-motion: reduce) {
-        body.ytmd-is-playing #ytmd-ambient-cover { animation: none; }
       }
       #ytmd-ambient-veil {
         position: absolute;
@@ -102,7 +93,6 @@ export const AmbientLightingPlugin: YTMDPlugin = {
       unlistenPromises.forEach((p) => p.then((unlisten) => unlisten()));
       setIntensity = null;
       lastCoverUrl = undefined;
-      document.body.classList.remove('ytmd-is-playing');
       document.getElementById('ytmd-ambient-styles')?.remove();
       document.getElementById('ytmd-ambient-backdrop')?.remove();
     };
@@ -113,7 +103,6 @@ export const AmbientLightingPlugin: YTMDPlugin = {
   },
 
   async onTrackChange(track: TrackInfo) {
-    document.body.classList.toggle('ytmd-is-playing', !!track.isPlaying);
 
     const coverUrl = track.coverUrl || null;
     if (coverUrl === lastCoverUrl) return;
@@ -121,8 +110,11 @@ export const AmbientLightingPlugin: YTMDPlugin = {
 
     const cover = document.getElementById('ytmd-ambient-cover') as HTMLImageElement | null;
     if (cover) {
-      cover.style.opacity = coverUrl ? '1' : '0';
-      if (coverUrl) cover.src = coverUrl;
+      const wash = coverUrl ? await renderAmbientWash(coverUrl) : null;
+      // A newer track may have arrived while this one was rendering.
+      if (coverUrl !== lastCoverUrl) return;
+      cover.style.opacity = wash ? '1' : '0';
+      if (wash) cover.src = wash;
     }
 
     try {

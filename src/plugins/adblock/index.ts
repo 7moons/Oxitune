@@ -37,8 +37,13 @@ export const shouldRunTickSafetyNet = (nowMs: number, lastRunMs: number, interva
 const SKIP_BUTTON_SELECTOR =
   '.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button, button.ytp-ad-skip-button, .ytp-ad-skip-button-container button, .ytp-ad-skip-button-slot button';
 
-const BANNER_SELECTOR =
-  'ytmusic-mealbar-promo-renderer, ytmusic-upsell-dialog-renderer, ytd-popup-container ytmusic-mealbar-promo-renderer, tp-yt-paper-dialog:has(ytmusic-upsell-dialog-renderer)';
+// Plain tag selectors only: this runs from a MutationObserver on <body>, and
+// a `:has()` in a querySelectorAll there re-scanned the whole document on
+// every burst of DOM churn (scrolling, hovering). Hiding is CSS's job
+// (AD_CHROME_HIDE_STYLE); this only finds banners to click "dismiss" on.
+export const BANNER_SELECTOR = 'ytmusic-mealbar-promo-renderer, ytmusic-upsell-dialog-renderer';
+/** Coalescing window for the <body> MutationObserver's skip/dismiss sweep. */
+const DOM_SWEEP_DELAY_MS = 300;
 
 // `display: none` / `visibility: hidden` pull a <video> out of the render
 // tree, and WebKit (this app's webview engine) suspends decode/paint for a
@@ -326,7 +331,6 @@ const skipAndDismiss = () => {
   document.querySelectorAll<HTMLElement>(SKIP_BUTTON_SELECTOR).forEach(clickOnce);
 
   document.querySelectorAll<HTMLElement>(BANNER_SELECTOR).forEach((el) => {
-    el.style.display = 'none';
     const dismissBtn = el.querySelector<HTMLElement>(
       '#dismiss-button, button[aria-label*="Dismiss"], #secondary-button'
     );
@@ -367,17 +371,17 @@ export const AdblockPlugin: YTMDPlugin = {
     style.textContent = AD_SHOWING_STYLE;
     document.head.appendChild(style);
 
-    // Catches skip-button/banner insertion, throttled to one check per
-    // animation frame — same pattern PlayerObserver already uses for track
-    // updates — so a burst of unrelated DOM churn doesn't fan out into work.
-    let rafScheduled = false;
+    // Catches skip-button/banner insertion. Coalesced to one sweep per
+    // DOM_SWEEP_DELAY_MS rather than per animation frame: YTM mutates the
+    // DOM on nearly every frame while scrolling, and a skip button a few
+    // hundred ms late is invisible (the ad is muted and hidden anyway).
+    let sweepTimer: ReturnType<typeof setTimeout> | null = null;
     const domObserver = new MutationObserver(() => {
-      if (rafScheduled) return;
-      rafScheduled = true;
-      requestAnimationFrame(() => {
-        rafScheduled = false;
+      if (sweepTimer !== null) return;
+      sweepTimer = setTimeout(() => {
+        sweepTimer = null;
         skipAndDismiss();
-      });
+      }, DOM_SWEEP_DELAY_MS);
     });
     domObserver.observe(document.body, { childList: true, subtree: true });
 
@@ -390,6 +394,7 @@ export const AdblockPlugin: YTMDPlugin = {
       playerClassObserver?.disconnect();
       playerClassObserver = null;
       domObserver.disconnect();
+      if (sweepTimer !== null) clearTimeout(sweepTimer);
       document.getElementById('ytmd-adblock-styles')?.remove();
       const video = ctx.getVideoElement();
       if (video && muteState.adWasShowing) video.muted = muteState.preAdMuted;

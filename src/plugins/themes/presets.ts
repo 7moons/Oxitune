@@ -81,16 +81,24 @@ export const AMBIENT_THEME_CSS = `
   /* The chrome users look at constantly — nav bar, player bar, sidebar —
      goes translucent glass instead of a flat opaque box, so the ambient
      wash actually shows through it instead of stopping at its edges. */
-  ytmusic-nav-bar, ytmusic-player-bar, ytmusic-player-page {
+  ytmusic-nav-bar, ytmusic-player-bar {
     background: color-mix(in srgb, #0c0a10 62%, transparent) !important;
-    backdrop-filter: blur(26px) saturate(160%) !important;
-    -webkit-backdrop-filter: blur(26px) saturate(160%) !important;
+    backdrop-filter: blur(20px) saturate(160%) !important;
+    -webkit-backdrop-filter: blur(20px) saturate(160%) !important;
+    border-color: rgba(255, 255, 255, 0.08) !important;
+  }
+  /* Large surfaces get a denser tint instead of a live backdrop blur.
+     WebKit recomputes a backdrop-filter every frame the content under it
+     repaints; over the full-height sidebar and the full-window player
+     page (lyrics scrolling, progress, queue) that was a steady per-frame
+     GPU cost. What's behind them is the already-blurred ambient wash, so
+     a tint reads nearly the same. */
+  ytmusic-player-page {
+    background: color-mix(in srgb, #0c0a10 84%, transparent) !important;
     border-color: rgba(255, 255, 255, 0.08) !important;
   }
   ytmusic-guide-renderer {
-    background: color-mix(in srgb, #0a0910 55%, transparent) !important;
-    backdrop-filter: blur(26px) saturate(160%) !important;
-    -webkit-backdrop-filter: blur(26px) saturate(160%) !important;
+    background: color-mix(in srgb, #0a0910 62%, transparent) !important;
     border-right: 1px solid rgba(255, 255, 255, 0.08) !important;
   }
   tp-yt-paper-slider #primaryProgress.tp-yt-paper-slider {

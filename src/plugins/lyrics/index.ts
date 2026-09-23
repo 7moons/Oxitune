@@ -40,10 +40,12 @@ export const LyricsPlugin: YTMDPlugin = {
          label — NOT blind tab position (nth-of-type), since a layout where
          "Tekst"/"Lyrics" isn't the 2nd tab would otherwise force
          pointer-events:auto on some unrelated tab. */
-      .ytmd-lyrics-tab-unlocked[disabled],
-      .ytmd-lyrics-tab-unlocked[aria-disabled="true"] {
+      .ytmd-lyrics-tab-unlocked {
         pointer-events: auto !important;
         cursor: pointer !important;
+      }
+      .ytmd-lyrics-tab-unlocked[disabled],
+      .ytmd-lyrics-tab-unlocked[aria-disabled="true"] {
         opacity: 1 !important;
         color: #d4d4d8 !important;
       }
@@ -317,8 +319,32 @@ function isElementVisible(el: HTMLElement): boolean {
   return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
 }
 
+type LyricsTabElement = HTMLElement & {
+  disabled?: boolean;
+  endpoint?: unknown;
+  data?: { endpoint?: unknown };
+};
+
+/** True once the tab is already usable, so the 600ms poll doesn't keep
+ * rewriting attributes on a Polymer element that's already in the state we
+ * want (each write can re-trigger YTM's own property effects). */
+export function isLyricsTabUnlocked(tab: {
+  disabled?: boolean;
+  hasAttribute(name: string): boolean;
+  getAttribute(name: string): string | null;
+  classList: { contains(token: string): boolean };
+}): boolean {
+  return (
+    tab.disabled !== true &&
+    !tab.hasAttribute('disabled') &&
+    tab.getAttribute('aria-disabled') !== 'true' &&
+    !tab.classList.contains('disabled') &&
+    tab.classList.contains('ytmd-lyrics-tab-unlocked')
+  );
+}
+
 function unlockLyricsTabHeader(): void {
-  const tabs = document.querySelectorAll<HTMLElement>(
+  const tabs = document.querySelectorAll<LyricsTabElement>(
     '#tabsContent > .tab-header, ytmusic-player-page tp-yt-paper-tab, ytmusic-tab-header-renderer'
   );
   tabs.forEach((tab) => {
@@ -329,24 +355,25 @@ function unlockLyricsTabHeader(): void {
       text.includes('paroles') ||
       text.includes('letras')
     ) {
-      (tab as HTMLElement & { disabled?: boolean }).disabled = false;
+      if (isLyricsTabUnlocked(tab)) return;
+      tab.disabled = false;
       tab.removeAttribute('disabled');
       tab.removeAttribute('aria-disabled');
       tab.classList.remove('disabled');
+      // pointer-events/cursor come from the .ytmd-lyrics-tab-unlocked rule
+      // in this plugin's stylesheet, not inline style writes.
       tab.classList.add('ytmd-lyrics-tab-unlocked');
-      tab.style.pointerEvents = 'auto';
-      tab.style.cursor = 'pointer';
 
       // Supply a dummy endpoint so Polymer's toCommand() never crashes when selecting the tab on songs without native lyrics
       const dummyEndpoint = {
         toCommand: () => ({}),
         browseEndpoint: { browseId: 'FEmusic_lyrics' }
       };
-      if (!(tab as any).endpoint) {
-        (tab as any).endpoint = dummyEndpoint;
+      if (!tab.endpoint) {
+        tab.endpoint = dummyEndpoint;
       }
-      if ((tab as any).data && !(tab as any).data.endpoint) {
-        (tab as any).data.endpoint = dummyEndpoint;
+      if (tab.data && !tab.data.endpoint) {
+        tab.data.endpoint = dummyEndpoint;
       }
     }
   });

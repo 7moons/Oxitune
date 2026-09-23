@@ -1,4 +1,4 @@
-import { extractPalette } from '../plugins/ambient/color';
+import { extractPalette, renderAmbientWash } from '../plugins/ambient/color';
 
 interface TrackPayload {
   title: string;
@@ -14,16 +14,16 @@ interface TrackPayload {
 let lastCoverUrl: string | null | undefined;
 
 async function applyTrack(track: TrackPayload | null | undefined): Promise<void> {
-  document.body.classList.toggle('is-playing', !!track?.is_playing);
-
   const coverUrl = track?.cover_url || null;
   if (coverUrl === lastCoverUrl) return;
   lastCoverUrl = coverUrl;
 
   const cover = document.getElementById('ambient-cover') as HTMLImageElement | null;
   if (cover) {
-    cover.style.opacity = coverUrl ? '1' : '0';
-    if (coverUrl) cover.src = coverUrl;
+    const wash = coverUrl ? await renderAmbientWash(coverUrl, 0.5) : null;
+    if (coverUrl !== lastCoverUrl) return;
+    cover.style.opacity = wash ? '1' : '0';
+    if (wash) cover.src = wash;
   }
 
   const palette = await extractPalette(coverUrl || '');

@@ -9,7 +9,8 @@ import {
   deleteNestedKey,
   pruneAdFields,
   isAdResponseUrl,
-  AD_RESPONSE_ENDPOINTS
+  AD_RESPONSE_ENDPOINTS,
+  BANNER_SELECTOR
 } from '../plugins/adblock';
 import { PluginRegistry } from '../plugins/registry';
 import { PluginContext } from '../plugins/types';
@@ -253,5 +254,11 @@ describe('AdblockPlugin registry lifecycle', () => {
 
     await registry.disable('adblock');
     expect(registry.isEnabled('adblock')).toBe(false);
+  });
+});
+
+describe('banner sweep selector', () => {
+  test('stays cheap: no :has(), which re-scans the document on every DOM mutation burst', () => {
+    expect(BANNER_SELECTOR).not.toContain(':has(');
   });
 });

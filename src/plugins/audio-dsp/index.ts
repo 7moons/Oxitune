@@ -7,6 +7,21 @@ let crossfadeRef: CrossfadeController | null = null;
 let skipSilenceRef: SkipSilenceController | null = null;
 let cleanup: (() => void) | null = null;
 
+/** Features that only work with YTM's audio routed through the Web Audio
+ * graph: EQ/preamp/normalization process it, crossfade fades it, and skip
+ * silence measures it. Speed and pitch are plain <video> properties. */
+export function needsAudioGraph(config: Record<string, unknown>): boolean {
+  const gains = config.equalizer_gains;
+  return Boolean(
+    config.equalizer_enabled ||
+      config.loudness_normalization ||
+      config.skip_silence_enabled ||
+      (typeof config.crossfade_seconds === 'number' && config.crossfade_seconds > 0) ||
+      (typeof config.preamp_gain === 'number' && config.preamp_gain !== 0) ||
+      (Array.isArray(gains) && gains.some((g) => g !== 0))
+  );
+}
+
 export const AudioDspPlugin: YTMDPlugin = {
   id: 'audio_dsp',
   name: 'Audio DSP & 10-Band Equalizer',
@@ -14,7 +29,6 @@ export const AudioDspPlugin: YTMDPlugin = {
   defaultEnabled: true,
 
   onInit(ctx: PluginContext) {
-    const video = ctx.getVideoElement();
     const engine = AudioEngine.getInstance();
     const crossfade = new CrossfadeController();
     const skipSilence = new SkipSilenceController();
@@ -23,27 +37,30 @@ export const AudioDspPlugin: YTMDPlugin = {
     skipSilenceRef = skipSilence;
 
     const config = ctx.config;
-    const isDspActive = Boolean(
-      config.equalizer_enabled ||
-      config.loudness_normalization ||
-      (config.equalizer_gains && Array.isArray(config.equalizer_gains) && (config.equalizer_gains as number[]).some(g => g !== 0))
-    );
 
+    // Builds the Web Audio graph on first need. Routing YTM's audio through
+    // Web Audio has a cost, so it's skipped until a feature that needs it
+    // is on — but that includes turning one on live from Settings, which
+    // used to do nothing until the next app restart.
     let checkVideo: number | null = null;
-    if (isDspActive) {
-      if (video) {
-        engine.init(video);
-      } else {
-        checkVideo = window.setInterval(() => {
-          const v = ctx.getVideoElement();
-          if (v) {
-            if (checkVideo !== null) clearInterval(checkVideo);
-            checkVideo = null;
-            engine.init(v);
-          }
-        }, 500);
+    const ensureEngine = () => {
+      if (checkVideo !== null) return;
+      const v = ctx.getVideoElement();
+      if (v) {
+        if (!engine.isInitializedFor(v)) engine.init(v);
+        return;
       }
-    }
+      checkVideo = window.setInterval(() => {
+        const found = ctx.getVideoElement();
+        if (found) {
+          if (checkVideo !== null) clearInterval(checkVideo);
+          checkVideo = null;
+          engine.init(found);
+        }
+      }, 500);
+    };
+
+    if (needsAudioGraph(config)) ensureEngine();
 
     // Apply configuration
     if (config.equalizer_gains && Array.isArray(config.equalizer_gains)) {
@@ -83,24 +100,31 @@ export const AudioDspPlugin: YTMDPlugin = {
 
       unlistenPromises.push(
         listen<{ bandIndex: number; gain: number }>('set-eq-band', (e) => {
+          ensureEngine();
           engine.setBandGain(e.payload.bandIndex, e.payload.gain);
         }),
         listen<{ gains: number[]; preset?: string }>('set-eq-all', (e) => {
+          ensureEngine();
           engine.setAllGains(e.payload.gains);
         }),
         listen<string>('set-eq-preset', (e) => {
+          ensureEngine();
           engine.applyPreset(e.payload);
         }),
         listen<number>('set-preamp', (e) => {
+          ensureEngine();
           engine.setPreamp(e.payload);
         }),
         listen<boolean>('set-loudness-normalization', (e) => {
+          if (e.payload) ensureEngine();
           engine.setLoudnessNormalization(e.payload);
         }),
         listen<number>('set-crossfade-seconds', (e) => {
+          if (e.payload > 0) ensureEngine();
           crossfade.setCrossfadeSeconds(e.payload);
         }),
         listen<boolean>('set-skip-silence', (e) => {
+          if (e.payload) ensureEngine();
           skipSilence.setEnabled(e.payload);
         }),
         listen<number>('set-playback-rate', (e) => {
@@ -127,6 +151,7 @@ export const AudioDspPlugin: YTMDPlugin = {
   },
 
   onTrackChange(track: TrackInfo) {
+    AudioEngine.getInstance().applyRateAndPitch();
     if (crossfadeRef) crossfadeRef.onTrackChange(track);
     if (skipSilenceRef) skipSilenceRef.onTrackChange();
   },

@@ -1,4 +1,5 @@
 import { EQ_FREQUENCIES, EQ_PRESETS, clampGain } from './presets';
+import { PlayerBridge } from '../../preload/bridge';
 
 export class AudioEngine {
   private static instance: AudioEngine | null = null;
@@ -17,6 +18,19 @@ export class AudioEngine {
   // the buffer's size is fixed to analyserNode.fftSize for its lifetime, so
   // there's nothing to gain from a fresh allocation each time.
   private powerBuffer: Float32Array<ArrayBuffer> | null = null;
+  // Remembered so speed/pitch work without the Web Audio graph (they're
+  // plain <video> properties) and can be re-applied after YTM resets them
+  // on a track change.
+  private playbackRate = 1;
+  private preservesPitch = true;
+  // Remembered so settings changed before the graph exists (DSP was off at
+  // startup) are applied the moment it's built.
+  private gains: number[] = EQ_FREQUENCIES.map(() => 0);
+  private preampDb = 0;
+
+  public isInitializedFor(video: HTMLVideoElement): boolean {
+    return this.isInitialized && this.hookedVideo === video;
+  }
 
   public static getInstance(): AudioEngine {
     if (!AudioEngine.instance) {
@@ -84,6 +98,9 @@ export class AudioEngine {
 
       // Connect graph
       this.rebuildGraph();
+      this.setAllGains(this.gains);
+      this.setPreamp(this.preampDb);
+      this.applyRateAndPitch();
 
       // Ensure AudioContext resumes upon playback
       const resume = () => this.resumeContext();
@@ -150,21 +167,28 @@ export class AudioEngine {
   }
 
   public setBandGain(bandIndex: number, gainDb: number): void {
-    if (bandIndex < 0 || bandIndex >= this.filters.length || !this.audioCtx) return;
+    if (bandIndex < 0 || bandIndex >= this.gains.length) return;
     const clamped = clampGain(gainDb);
+    this.gains[bandIndex] = clamped;
+    if (!this.audioCtx || bandIndex >= this.filters.length) return;
     this.filters[bandIndex].gain.setValueAtTime(clamped, this.audioCtx.currentTime);
   }
 
   public setAllGains(gains: number[]): void {
-    if (!this.audioCtx) return;
     gains.forEach((g, idx) => {
+      if (idx < this.gains.length) this.gains[idx] = clampGain(g);
+    });
+    const ctx = this.audioCtx;
+    if (!ctx) return;
+    this.gains.forEach((g, idx) => {
       if (idx < this.filters.length) {
-        this.filters[idx].gain.setValueAtTime(clampGain(g), this.audioCtx!.currentTime);
+        this.filters[idx].gain.setValueAtTime(g, ctx.currentTime);
       }
     });
   }
 
   public setPreamp(gainDb: number): void {
+    this.preampDb = clampGain(gainDb);
     if (!this.preampNode || !this.audioCtx) return;
     const linearGain = Math.pow(10, clampGain(gainDb) / 20);
     this.preampNode.gain.setValueAtTime(linearGain, this.audioCtx.currentTime);
@@ -216,9 +240,10 @@ export class AudioEngine {
     }
   }
 
-  // Silence Detection (RMS audio power in dB)
-  public getAudioPowerDb(): number {
-    if (!this.analyserNode) return -100;
+  // Silence Detection (RMS audio power in dB). `null` when there's no
+  // analyser to measure with — callers must not read that as "silent".
+  public getAudioPowerDb(): number | null {
+    if (!this.analyserNode) return null;
     if (!this.powerBuffer || this.powerBuffer.length !== this.analyserNode.fftSize) {
       this.powerBuffer = new Float32Array(this.analyserNode.fftSize);
     }
@@ -243,21 +268,28 @@ export class AudioEngine {
 
   // Speed & Pitch
   public setPlaybackRate(rate: number): void {
-    const clamped = Math.max(0.5, Math.min(2.0, rate));
-    if (this.hookedVideo) {
-      this.hookedVideo.playbackRate = clamped;
-    }
+    this.playbackRate = Math.max(0.5, Math.min(2.0, rate));
+    this.applyRateAndPitch();
   }
 
   public setPreservesPitch(preserve: boolean): void {
-    if (this.hookedVideo) {
-      this.hookedVideo.preservesPitch = preserve;
-      const vendorPrefixed = this.hookedVideo as HTMLVideoElement & {
-        mozPreservesPitch?: boolean;
+    this.preservesPitch = preserve;
+    this.applyRateAndPitch();
+  }
+
+  /** Writes the remembered speed/pitch to the live <video>. Only touches
+   * properties that differ, so calling it every track change is free when
+   * the user never changed them. */
+  public applyRateAndPitch(): void {
+    const video = this.hookedVideo ?? PlayerBridge.getVideo();
+    if (!video) return;
+    if (video.playbackRate !== this.playbackRate) video.playbackRate = this.playbackRate;
+    if (video.preservesPitch !== this.preservesPitch) {
+      video.preservesPitch = this.preservesPitch;
+      const vendorPrefixed = video as HTMLVideoElement & {
         webkitPreservesPitch?: boolean;
       };
-      vendorPrefixed.mozPreservesPitch = preserve;
-      vendorPrefixed.webkitPreservesPitch = preserve;
+      vendorPrefixed.webkitPreservesPitch = this.preservesPitch;
     }
   }
 }

@@ -13,8 +13,14 @@ describe('Visuals & Themes Suite', () => {
   });
 
   test('the Ambient theme makes nav bar, player bar and sidebar translucent glass, not opaque boxes', () => {
-    expect(AMBIENT_THEME_CSS).toMatch(/ytmusic-nav-bar,\s*ytmusic-player-bar,\s*ytmusic-player-page\s*{[^}]*backdrop-filter:\s*blur/);
-    expect(AMBIENT_THEME_CSS).toMatch(/ytmusic-guide-renderer\s*{[^}]*backdrop-filter:\s*blur/);
+    expect(AMBIENT_THEME_CSS).toMatch(/ytmusic-nav-bar,\s*ytmusic-player-bar\s*{[^}]*backdrop-filter:\s*blur/);
+    expect(AMBIENT_THEME_CSS).toMatch(/ytmusic-guide-renderer\s*{[^}]*color-mix\([^}]*transparent/);
+    expect(AMBIENT_THEME_CSS).toMatch(/ytmusic-player-page\s*{[^}]*color-mix\([^}]*transparent/);
+  });
+
+  test('no live backdrop blur on the large surfaces (per-frame GPU cost in WebKit)', () => {
+    expect(AMBIENT_THEME_CSS).not.toMatch(/ytmusic-guide-renderer\s*{[^}]*backdrop-filter/);
+    expect(AMBIENT_THEME_CSS).not.toMatch(/ytmusic-player-page\s*{[^}]*backdrop-filter/);
   });
 
   test('the Base theme is fully static — no per-track custom property, no backdrop blur', () => {

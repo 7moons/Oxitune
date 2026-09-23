@@ -80,6 +80,16 @@ struct NotifyArgs {
 }
 
 #[derive(Deserialize)]
+struct BroadcastSyncArgs {
+    playback: sync_room::SyncPlaybackState,
+}
+
+#[derive(Deserialize)]
+struct InhibitSleepArgs {
+    inhibit: bool,
+}
+
+#[derive(Deserialize)]
 struct LyricsArgs {
     artist: String,
     title: String,
@@ -261,6 +271,26 @@ pub fn run() {
                                         }
                                     }
                                 }
+                            }
+                            "broadcast_sync_state" => {
+                                if let Some(args_val) = req.args {
+                                    if let Ok(p) = serde_json::from_value::<BroadcastSyncArgs>(args_val) {
+                                        sync_room::broadcast_playback(&state.sync_room, p.playback);
+                                    }
+                                }
+                                result = serde_json::json!({ "success": true });
+                            }
+                            "get_sync_room_state" => {
+                                result = serde_json::to_value(state.sync_room.get_room_state())
+                                    .unwrap_or(serde_json::Value::Null);
+                            }
+                            "set_inhibit_sleep" => {
+                                if let Some(args_val) = req.args {
+                                    if let Ok(p) = serde_json::from_value::<InhibitSleepArgs>(args_val) {
+                                        state.power_manager.set_inhibit_sleep(p.inhibit);
+                                    }
+                                }
+                                result = serde_json::json!({ "success": true });
                             }
                             "download_track" => {
                                 if let Some(args_val) = req.args {

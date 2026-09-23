@@ -25,6 +25,9 @@ export class SkipSilenceController {
     if (!this.enabled || !track || !video || video.paused || video.ended) return;
 
     const powerDb = AudioEngine.getInstance().getAudioPowerDb();
+    // No analyser (Web Audio graph not built): unknown, not silent. Treating
+    // it as silence used to fast-forward every intro and skip every outro.
+    if (powerDb === null) return;
 
     // 1. Skip intro silence (in first 15 seconds)
     if (!this.checkedIntro && currentTimeSecs < 15) {

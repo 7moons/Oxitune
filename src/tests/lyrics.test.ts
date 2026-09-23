@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { parseLrc, isCurrentSongKey } from '../plugins/lyrics';
+import { parseLrc, isCurrentSongKey, isLyricsTabUnlocked } from '../plugins/lyrics';
 
 describe('parseLrc', () => {
   test('parses standard [mm:ss.xx] timestamps in order', () => {
@@ -36,5 +36,28 @@ describe('Lyrics: stale fetch guard', () => {
     // fetch_lyrics was requested for Song A, but the user changed tracks to
     // Song B before it resolved — must not paint Song A's lyrics over Song B.
     expect(isCurrentSongKey('Song A - Artist A', 'Song B - Artist B')).toBe(false);
+  });
+});
+
+describe('isLyricsTabUnlocked', () => {
+  const tab = (attrs: Record<string, string>, classes: string[], disabled?: boolean) => ({
+    disabled,
+    hasAttribute: (n: string) => n in attrs,
+    getAttribute: (n: string) => attrs[n] ?? null,
+    classList: { contains: (c: string) => classes.includes(c) }
+  });
+
+  test('already unlocked tab is left alone by the poll', () => {
+    expect(isLyricsTabUnlocked(tab({}, ['ytmd-lyrics-tab-unlocked'], false))).toBe(true);
+  });
+
+  test('never-touched tab needs unlocking', () => {
+    expect(isLyricsTabUnlocked(tab({}, []))).toBe(false);
+  });
+
+  test('YTM re-disabling an unlocked tab triggers a re-unlock', () => {
+    expect(isLyricsTabUnlocked(tab({ disabled: '' }, ['ytmd-lyrics-tab-unlocked']))).toBe(false);
+    expect(isLyricsTabUnlocked(tab({ 'aria-disabled': 'true' }, ['ytmd-lyrics-tab-unlocked']))).toBe(false);
+    expect(isLyricsTabUnlocked(tab({}, ['ytmd-lyrics-tab-unlocked'], true))).toBe(false);
   });
 });

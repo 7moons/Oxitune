@@ -28,7 +28,7 @@ use tauri::{AppHandle, Emitter};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::tcp::OwnedReadHalf;
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tokio::time::Instant;
 
 const DISCOVERY_UDP_PORT: u16 = 47863;
@@ -176,6 +176,11 @@ struct HostSession {
     /// the faster UDP beacon path. `None` if the P2P swarm failed to start
     /// (e.g. no usable transport) — LAN hosting still works without it.
     p2p_task: Option<tauri::async_runtime::JoinHandle<()>>,
+    /// Asks the P2P host loop to publish a final `Leave` on the room's
+    /// broadcast topic before exiting, so internet guests learn the room
+    /// closed instead of silently waiting forever (the MQTT transport has
+    /// no connection-level EOF between host and guest like TCP does).
+    p2p_shutdown: Option<oneshot::Sender<()>>,
     /// The TCP port this instance is listening on. Real guests never need
     /// this directly (they learn it from the UDP beacon); it exists so
     /// `SyncRoomManager::host_port` can hand it to tests that connect over
@@ -194,6 +199,10 @@ struct GuestSession {
     /// the whole libp2p swarm itself, so aborting it already tears down the
     /// connection — no separate handle needs keeping alive.
     _write_half: Option<tokio::net::tcp::OwnedWriteHalf>,
+    /// P2P only: asks the guest loop to publish `Leave` to the host and
+    /// exit on its own (instead of being aborted mid-flight), so the host
+    /// drops this member from the room right away.
+    shutdown: Option<oneshot::Sender<()>>,
 }
 
 pub struct SyncRoomManager {
@@ -287,9 +296,14 @@ impl SyncRoomManager {
     /// host session, if one exists, so `leave_room` can abort it alongside
     /// the LAN accept/beacon tasks. A no-op if this instance isn't hosting
     /// (e.g. `create_room` failed before this ran) or already left.
-    pub(crate) fn attach_p2p_host_task(&self, task: tauri::async_runtime::JoinHandle<()>) {
+    pub(crate) fn attach_p2p_host_task(
+        &self,
+        task: tauri::async_runtime::JoinHandle<()>,
+        shutdown: oneshot::Sender<()>,
+    ) {
         if let Some(host) = self.host.lock().as_mut() {
             host.p2p_task = Some(task);
+            host.p2p_shutdown = Some(shutdown);
         }
     }
 
@@ -297,10 +311,15 @@ impl SyncRoomManager {
     /// libp2p, mirroring what `connect_to_host` does for a TCP guest
     /// session. `reader_task` owns the swarm and must be aborted (by
     /// `leave_room`) to actually disconnect.
-    pub(crate) fn set_p2p_guest_session(&self, reader_task: tauri::async_runtime::JoinHandle<()>) {
+    pub(crate) fn set_p2p_guest_session(
+        &self,
+        reader_task: tauri::async_runtime::JoinHandle<()>,
+        shutdown: oneshot::Sender<()>,
+    ) {
         *self.guest.lock() = Some(GuestSession {
             reader_task,
             _write_half: None,
+            shutdown: Some(shutdown),
         });
     }
 
@@ -330,7 +349,6 @@ impl SyncRoomManager {
     }
 
     /// Clears guest-side state after the connection to the host drops.
-    #[allow(dead_code)]
     pub(crate) fn clear_guest(&self) {
         *self.state.lock() = None;
         *self.guest.lock() = None;
@@ -416,6 +434,7 @@ pub async fn create_room(
         accept_task,
         beacon_task,
         p2p_task: None,
+        p2p_shutdown: None,
         port: tcp_port,
     });
 
@@ -424,11 +443,15 @@ pub async fn create_room(
     // while a guest on a different network can still find this room. Best
     // effort: if the P2P swarm can't start (e.g. no usable transport on
     // this platform), LAN hosting still works fine without it.
-    match crate::p2p_sync::host_provide(manager.clone(), sink, room_code).await {
-        Ok(task) => manager.attach_p2p_host_task(task),
+    match crate::p2p_sync::host_provide(manager.clone(), sink.clone(), room_code).await {
+        Ok((task, shutdown)) => manager.attach_p2p_host_task(task, shutdown),
         Err(e) => log::warn!("Listen Together: internet (P2P) hosting unavailable: {e}"),
     }
 
+    // Every window (the injected YTM page in particular, whose sync plugin
+    // gates host broadcasting on it) learns about the new room right away,
+    // not only once the first guest joins.
+    sink.room_updated(&room);
     Ok(room)
 }
 
@@ -631,6 +654,11 @@ async fn connect_to_host(
     let local_room = initial_wire.into_local_view(false, user_id.clone());
     *manager.state.lock() = Some(local_room.clone());
 
+    // The guest's injected YTM page only applies remote playback while it
+    // knows it's in a room; the initial state arrives as this handshake
+    // reply, not as a later push, so without this it never found out.
+    sink.room_updated(&local_room);
+
     let m = manager.clone();
     let s = sink.clone();
     let uid = user_id;
@@ -641,6 +669,7 @@ async fn connect_to_host(
     *manager.guest.lock() = Some(GuestSession {
         reader_task,
         _write_half: Some(write_half),
+        shutdown: None,
     });
 
     Ok(local_room)
@@ -743,8 +772,15 @@ pub fn leave_room(manager: &Arc<SyncRoomManager>) {
     if let Some(host) = manager.host.lock().take() {
         host.accept_task.abort();
         host.beacon_task.abort();
-        if let Some(p2p_task) = host.p2p_task {
-            p2p_task.abort();
+        match (host.p2p_shutdown, host.p2p_task) {
+            // The loop publishes its farewell and exits on its own.
+            (Some(shutdown), Some(task)) => {
+                if shutdown.send(()).is_err() {
+                    task.abort();
+                }
+            }
+            (_, Some(task)) => task.abort(),
+            _ => {}
         }
         // Dropping every registered peer's sender closes their mpsc
         // channel; each peer_task's/P2P host loop's per-peer forwarder sees
@@ -754,7 +790,14 @@ pub fn leave_room(manager: &Arc<SyncRoomManager>) {
         manager.peers.lock().clear();
     }
     if let Some(guest) = manager.guest.lock().take() {
-        guest.reader_task.abort();
+        match guest.shutdown {
+            Some(shutdown) => {
+                if shutdown.send(()).is_err() {
+                    guest.reader_task.abort();
+                }
+            }
+            None => guest.reader_task.abort(),
+        }
     }
     *manager.state.lock() = None;
 }
@@ -963,6 +1006,79 @@ mod tests {
 
         leave_room(&host_manager);
         assert!(host_manager.get_room_state().is_none());
+    }
+
+    #[derive(Default)]
+    struct RecordingSink {
+        room_updates: Mutex<Vec<RoomState>>,
+        playback_updates: Mutex<Vec<SyncPlaybackState>>,
+    }
+    impl SyncEventSink for RecordingSink {
+        fn room_updated(&self, room: &RoomState) {
+            self.room_updates.lock().push(room.clone());
+        }
+        fn playback_updated(&self, state: &SyncPlaybackState) {
+            self.playback_updates.lock().push(state.clone());
+        }
+        fn room_left(&self) {}
+    }
+
+    /// Regression: the injected YTM page gates sync on `sync-room-updated`.
+    /// Neither the host (on create) nor the guest (on join) used to emit
+    /// it, so a 1:1 room never synced anything.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_create_and_join_notify_frontend_of_room_state() {
+        let host_manager = Arc::new(SyncRoomManager::new());
+        let guest_manager = Arc::new(SyncRoomManager::new());
+        let host_sink = Arc::new(RecordingSink::default());
+        let guest_sink = Arc::new(RecordingSink::default());
+
+        let host_room = create_room(&host_manager, host_sink.clone(), "Host".to_string())
+            .await
+            .expect("create_room should succeed");
+        {
+            let updates = host_sink.room_updates.lock();
+            assert!(
+                updates.iter().any(|r| r.room_code == host_room.room_code && r.is_host),
+                "host frontend must hear about the room it just created"
+            );
+        }
+
+        let port = host_manager.host_port().expect("host should be listening");
+        let addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port);
+        connect_to_host(&guest_manager, guest_sink.clone(), addr, "Guest".to_string())
+            .await
+            .expect("guest should be able to join");
+        {
+            let updates = guest_sink.room_updates.lock();
+            assert_eq!(updates.len(), 1, "guest frontend must hear about the room it joined");
+            assert!(!updates[0].is_host);
+            assert_eq!(updates[0].room_code, host_room.room_code);
+        }
+
+        let host_saw_guest = wait_until(
+            || host_manager.get_room_state().map(|r| r.members.len()).unwrap_or(0) == 2,
+            Duration::from_secs(2),
+        )
+        .await;
+        assert!(host_saw_guest);
+
+        broadcast_playback(
+            &host_manager,
+            SyncPlaybackState {
+                video_id: "dQw4w9WgXcQ".to_string(),
+                title: "T".to_string(),
+                artist: "A".to_string(),
+                current_time_secs: 1.0,
+                is_playing: true,
+                timestamp_ms: now_ms(),
+            },
+        );
+        let delivered = wait_until(|| !guest_sink.playback_updates.lock().is_empty(), Duration::from_secs(2)).await;
+        assert!(delivered, "guest frontend must receive host playback");
+
+        leave_room(&guest_manager);
+        leave_room(&host_manager);
     }
 
     #[tokio::test]

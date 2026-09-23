@@ -110,31 +110,19 @@ body {
   pointer-events: none;
 }
 
+/* src is a small bitmap pre-blurred once per track (renderAmbientWash in
+   src/plugins/ambient/color.ts), stretched full-window. No CSS filter or
+   animation: a live blur(64px) layer with an infinite transform animation
+   re-blurred the whole window every frame for as long as music played. */
 #ambient-cover {
   position: absolute;
-  inset: -12%;
-  width: 124%;
-  height: 124%;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   object-fit: cover;
   object-position: center;
-  filter: blur(64px) saturate(165%) brightness(0.5);
   opacity: 0;
   transition: opacity 1.1s ease;
-  transform-origin: center;
-  will-change: transform, opacity;
-}
-
-body.is-playing #ambient-cover {
-  animation: ambient-breathe 16s ease-in-out infinite alternate;
-}
-
-@keyframes ambient-breathe {
-  from {
-    transform: scale(1) rotate(0deg);
-  }
-  to {
-    transform: scale(1.07) rotate(0.6deg);
-  }
 }
 
 #ambient-veil {
@@ -157,11 +145,6 @@ body.is-playing #ambient-cover {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
-@media (prefers-reduced-motion: reduce) {
-  body.is-playing #ambient-cover {
-    animation: none;
-  }
-}
 
 /* App Header / Custom Window Titlebar */
 .app-header {

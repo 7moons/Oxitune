@@ -1,3 +1,6 @@
+import { SkipSilenceController } from '../plugins/audio-dsp/skip-silence';
+import { AudioEngine } from '../plugins/audio-dsp/engine';
+import { needsAudioGraph } from '../plugins/audio-dsp';
 import { describe, expect, test, spyOn } from 'bun:test';
 import { CrossfadeController } from '../plugins/audio-dsp/crossfade';
 import { TrackInfo } from '../plugins/types';
@@ -122,5 +125,57 @@ describe('Advanced DSP: Crossfade, Skip Silence & Speed/Pitch', () => {
     expect(clampSpeed(0.25)).toBe(0.5);
     expect(clampSpeed(4.0)).toBe(2.0);
     expect(clampSpeed(1.25)).toBe(1.25);
+  });
+});
+
+describe('skip silence without a Web Audio graph', () => {
+  // Regression: getAudioPowerDb() returned -100 dB with no analyser, so
+  // with skip-silence on and EQ off every intro got fast-forwarded.
+  test('never seeks when the power level is unknown', () => {
+    const ctl = new SkipSilenceController();
+    ctl.setEnabled(true);
+    const video = { paused: false, ended: false, currentTime: 2 } as HTMLVideoElement;
+    const track = { title: 't', artist: 'a', durationSecs: 200, currentTimeSecs: 2, isPlaying: true };
+    for (let i = 0; i < 10; i++) ctl.onTick(2, track, video);
+    expect(video.currentTime).toBe(2);
+    expect(AudioEngine.getInstance().getAudioPowerDb()).toBeNull();
+  });
+});
+
+describe('needsAudioGraph', () => {
+  test('stays off for a default config', () => {
+    expect(needsAudioGraph({})).toBe(false);
+    expect(needsAudioGraph({ equalizer_gains: [0, 0, 0], crossfade_seconds: 0, playback_speed: 1.5 })).toBe(false);
+  });
+
+  test('turns on for every feature that processes or measures audio', () => {
+    expect(needsAudioGraph({ equalizer_enabled: true })).toBe(true);
+    expect(needsAudioGraph({ loudness_normalization: true })).toBe(true);
+    expect(needsAudioGraph({ skip_silence_enabled: true })).toBe(true);
+    expect(needsAudioGraph({ crossfade_seconds: 4 })).toBe(true);
+    expect(needsAudioGraph({ preamp_gain: -3 })).toBe(true);
+    expect(needsAudioGraph({ equalizer_gains: [0, 2, 0] })).toBe(true);
+  });
+});
+
+describe('crossfade after seeking back', () => {
+  test('seeking out of the fade window cancels the fade so it can fade again later', () => {
+    const cf = new CrossfadeController();
+    cf.setCrossfadeSeconds(5);
+    const track = { title: 't', artist: 'a', videoId: 'dQw4w9WgXcQ', durationSecs: 200, currentTimeSecs: 0, isPlaying: true };
+    cf.onTrackChange(track);
+    const engine = AudioEngine.getInstance();
+    const fadeOut = spyOn(engine, 'fadeOut');
+    const resetFade = spyOn(engine, 'resetFade');
+
+    cf.onTick(197, track); // inside window -> fade out
+    cf.onTick(100, track); // user seeks back -> fade undone
+    cf.onTick(197, track); // reaches the end again -> fades again
+
+    expect(fadeOut).toHaveBeenCalledTimes(2);
+    expect(resetFade).toHaveBeenCalledTimes(1);
+    cf.destroy();
+    fadeOut.mockRestore();
+    resetFade.mockRestore();
   });
 });

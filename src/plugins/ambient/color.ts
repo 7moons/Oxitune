@@ -94,3 +94,89 @@ export async function extractPalette(imageUrl: string): Promise<ColorPalette> {
     img.src = imageUrl;
   });
 }
+
+/** Side of the square bitmap the ambient wash is rendered at. Stretched to
+ * full-window by the browser's bilinear scaling, which is itself a blur, so
+ * a small pre-blurred source reads the same as a CSS `blur(64px)` layer. */
+export const WASH_SIZE = 48;
+const WASH_BLUR_RADIUS = 3;
+const WASH_BLUR_PASSES = 3;
+const WASH_SATURATE = 1.65;
+const DEFAULT_WASH_BRIGHTNESS = 0.55;
+
+/** One horizontal + vertical box-blur pass over RGBA pixels, in place.
+ * Three passes approximate a gaussian. Pure, so it's unit-tested. */
+export function boxBlurRGBA(data: Uint8ClampedArray, w: number, h: number, r: number): void {
+  const tmp = new Float32Array(data.length);
+  const pass = (src: ArrayLike<number>, dst: { [i: number]: number }, horizontal: boolean) => {
+    const lines = horizontal ? h : w;
+    const len = horizontal ? w : h;
+    for (let line = 0; line < lines; line++) {
+      for (let c = 0; c < 4; c++) {
+        for (let i = 0; i < len; i++) {
+          let sum = 0;
+          let n = 0;
+          for (let k = Math.max(0, i - r); k <= Math.min(len - 1, i + r); k++) {
+            const idx = horizontal ? (line * w + k) * 4 + c : (k * w + line) * 4 + c;
+            sum += src[idx];
+            n++;
+          }
+          const out = horizontal ? (line * w + i) * 4 + c : (i * w + line) * 4 + c;
+          dst[out] = sum / n;
+        }
+      }
+    }
+  };
+  pass(data, tmp, true);
+  pass(tmp, data, false);
+}
+
+/** Same look the old CSS `saturate(165%) brightness(0.55)` filter gave. */
+export function gradeRGBA(data: Uint8ClampedArray, saturate: number, brightness: number): void {
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    data[i] = (lum + (r - lum) * saturate) * brightness;
+    data[i + 1] = (lum + (g - lum) * saturate) * brightness;
+    data[i + 2] = (lum + (b - lum) * saturate) * brightness;
+  }
+}
+
+/** Renders `imageUrl` once into a small blurred, graded bitmap (data URL).
+ * Replaces a live CSS `filter: blur(64px)` on a full-window layer, which
+ * WebKit recomposites on every frame anything on the page repaints — the
+ * main source of scroll/playback stutter with ambient lighting on. */
+export async function renderAmbientWash(
+  imageUrl: string,
+  brightness = DEFAULT_WASH_BRIGHTNESS
+): Promise<string | null> {
+  if (!imageUrl) return null;
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = WASH_SIZE;
+        canvas.height = WASH_SIZE;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return resolve(null);
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, 0, 0, WASH_SIZE, WASH_SIZE);
+        const imageData = ctx.getImageData(0, 0, WASH_SIZE, WASH_SIZE);
+        for (let i = 0; i < WASH_BLUR_PASSES; i++) {
+          boxBlurRGBA(imageData.data, WASH_SIZE, WASH_SIZE, WASH_BLUR_RADIUS);
+        }
+        gradeRGBA(imageData.data, WASH_SATURATE, brightness);
+        ctx.putImageData(imageData, 0, 0);
+        resolve(canvas.toDataURL('image/png'));
+      } catch {
+        resolve(null);
+      }
+    };
+    img.onerror = () => resolve(null);
+    img.src = imageUrl;
+  });
+}

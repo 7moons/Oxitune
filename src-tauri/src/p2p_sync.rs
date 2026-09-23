@@ -19,7 +19,7 @@ use crate::sync_room::{
 use rumqttc::{AsyncClient, Event, EventLoop, MqttOptions, Packet, QoS, Transport};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tokio::time::Instant;
 
 /// TLS (8883), not plaintext MQTT (1883): the payload is room codes,
@@ -36,6 +36,33 @@ pub const PUBLIC_BROKERS: &[(&str, u16)] = &[
 
 const JOIN_TIMEOUT: Duration = Duration::from_secs(8);
 const JOIN_RETRY_INTERVAL: Duration = Duration::from_millis(1500);
+/// How long a leaving peer keeps driving its MQTT event loop so the final
+/// `Leave` publish actually reaches the broker before the task exits.
+const LEAVE_FLUSH_TIMEOUT: Duration = Duration::from_millis(1500);
+/// `user_id` a host puts in the `Leave` it publishes on the broadcast topic
+/// when it closes the room. Guests never get this id (theirs come from
+/// `generate_user_id`, always `user-…`), so it can't collide.
+pub(crate) const HOST_CLOSED_USER_ID: &str = "__host__";
+
+/// Publishes `payload` and keeps polling `eventloop` until the broker
+/// acknowledges it (or `LEAVE_FLUSH_TIMEOUT` passes). `publish` alone only
+/// queues the packet for the event loop; without polling it after, a task
+/// that exits right away never actually sends it.
+async fn publish_and_flush(client: &AsyncClient, eventloop: &mut EventLoop, topic: &str, payload: Vec<u8>) {
+    if client.try_publish(topic, QoS::AtLeastOnce, false, payload).is_err() {
+        return;
+    }
+    let _ = tokio::time::timeout(LEAVE_FLUSH_TIMEOUT, async {
+        loop {
+            match eventloop.poll().await {
+                Ok(Event::Incoming(Packet::PubAck(_))) | Err(_) => break,
+                Ok(_) => {}
+            }
+        }
+    })
+    .await;
+    let _ = client.try_disconnect();
+}
 
 pub(crate) fn room_topic_host(room_code: &str) -> String {
     format!("ytmd/v1/rooms/{}/host", room_code.trim().to_uppercase())
@@ -89,7 +116,7 @@ pub(crate) async fn host_provide(
     manager: Arc<SyncRoomManager>,
     sink: Arc<dyn SyncEventSink>,
     room_code: String,
-) -> Result<tauri::async_runtime::JoinHandle<()>, String> {
+) -> Result<(tauri::async_runtime::JoinHandle<()>, oneshot::Sender<()>), String> {
     let (client, eventloop, broker_name) = connect_to_best_broker("ytmd-h").await?;
     log::info!("Listen Together: Internet host connected via broker {}", broker_name);
 
@@ -102,9 +129,11 @@ pub(crate) async fn host_provide(
     let (tx, rx) = mpsc::unbounded_channel::<WireMessage>();
     manager.register_peer("internet_broadcast".to_string(), tx);
 
-    Ok(tauri::async_runtime::spawn(run_host_loop(
-        client, eventloop, manager, sink, room_code, rx,
-    )))
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let task = tauri::async_runtime::spawn(run_host_loop(
+        client, eventloop, manager, sink, room_code, rx, shutdown_rx,
+    ));
+    Ok((task, shutdown_tx))
 }
 
 async fn run_host_loop(
@@ -114,12 +143,20 @@ async fn run_host_loop(
     sink: Arc<dyn SyncEventSink>,
     room_code: String,
     mut outbox_rx: mpsc::UnboundedReceiver<WireMessage>,
+    mut shutdown_rx: oneshot::Receiver<()>,
 ) {
     let host_topic = room_topic_host(&room_code);
     let broadcast_topic = room_topic_broadcast(&room_code);
 
     loop {
         tokio::select! {
+            _ = &mut shutdown_rx => {
+                let closed = WireMessage::Leave { user_id: HOST_CLOSED_USER_ID.to_string() };
+                if let Ok(payload) = serde_json::to_vec(&closed) {
+                    publish_and_flush(&client, &mut eventloop, &broadcast_topic, payload).await;
+                }
+                return;
+            }
             Some(msg) = outbox_rx.recv() => {
                 if let Ok(payload) = serde_json::to_vec(&msg) {
                     let _ = client.publish(&broadcast_topic, QoS::AtLeastOnce, false, payload).await;
@@ -248,16 +285,19 @@ pub(crate) async fn join_room(
                         serde_json::from_slice::<WireMessage>(&publish.payload)
                     {
                         let local_room = manager.apply_remote_room_update(room, &user_id);
+                        // See `connect_to_host`: the injected page must learn it joined.
+                        sink.room_updated(&local_room);
                         let guest_client = client.clone();
                         let m = manager.clone();
                         let s = sink.clone();
                         let uid = user_id.clone();
                         let rcode = clean_code.clone();
 
+                        let (shutdown_tx, shutdown_rx) = oneshot::channel();
                         let reader_task = tauri::async_runtime::spawn(async move {
-                            run_guest_loop(guest_client, eventloop, m, s, uid, rcode).await;
+                            run_guest_loop(guest_client, eventloop, m, s, uid, rcode, shutdown_rx).await;
                         });
-                        manager.set_p2p_guest_session(reader_task);
+                        manager.set_p2p_guest_session(reader_task, shutdown_tx);
                         return Ok(local_room);
                     }
                 }
@@ -273,18 +313,30 @@ pub(crate) async fn join_room(
 }
 
 async fn run_guest_loop(
-    _client: AsyncClient,
+    client: AsyncClient,
     mut eventloop: EventLoop,
     manager: Arc<SyncRoomManager>,
     sink: Arc<dyn SyncEventSink>,
     my_user_id: String,
     room_code: String,
+    mut shutdown_rx: oneshot::Receiver<()>,
 ) {
     let guest_topic = room_topic_guest(&room_code, &my_user_id);
     let broadcast_topic = room_topic_broadcast(&room_code);
 
     loop {
-        match eventloop.poll().await {
+        let event = tokio::select! {
+            // `leave_room` already cleared local state; only tell the host.
+            _ = &mut shutdown_rx => {
+                let leave = WireMessage::Leave { user_id: my_user_id.clone() };
+                if let Ok(payload) = serde_json::to_vec(&leave) {
+                    publish_and_flush(&client, &mut eventloop, &room_topic_host(&room_code), payload).await;
+                }
+                return;
+            }
+            event = eventloop.poll() => event,
+        };
+        match event {
             Ok(Event::Incoming(Packet::Publish(publish))) => {
                 if publish.topic == guest_topic || publish.topic == broadcast_topic {
                     if let Ok(msg) = serde_json::from_slice::<WireMessage>(&publish.payload) {
@@ -296,6 +348,11 @@ async fn run_guest_loop(
                             WireMessage::Playback { state } => {
                                 manager.apply_remote_playback(state.clone());
                                 sink.playback_updated(&state);
+                            }
+                            WireMessage::Leave { user_id } if user_id == HOST_CLOSED_USER_ID => {
+                                manager.clear_guest();
+                                sink.room_left();
+                                return;
                             }
                             _ => {}
                         }
@@ -409,7 +466,7 @@ mod tests {
 
         // Start host
         let host_task = host_provide(host_manager.clone(), noop_sink(), room_code.clone()).await;
-        if let Ok(h_task) = host_task {
+        if let Ok((h_task, h_shutdown)) = host_task {
             // Join as guest
             tokio::time::sleep(Duration::from_millis(500)).await;
             let join_res = join_room(&guest_manager, noop_sink(), room_code.clone(), "Guest".to_string()).await;
@@ -440,6 +497,12 @@ mod tests {
                         assert_eq!(ps.title, "Test Track");
                     }
                 }
+
+                // Host closing the room must reach the internet guest too.
+                let _ = h_shutdown.send(());
+                tokio::time::sleep(Duration::from_millis(1500)).await;
+                assert!(guest_manager.get_room_state().is_none(), "guest still thinks it's in a closed room");
+                return;
             }
             h_task.abort();
         }
