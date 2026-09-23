@@ -132,7 +132,8 @@ function playTrack(track: LocalTrack, fromList: LocalTrack[]) {
   if (title) title.textContent = track.title;
   if (subtitle) subtitle.textContent = [track.artist || tr('local.unknownArtist'), track.album].filter(Boolean).join(' • ');
 
-  audio.src = window.__TAURI__?.core ? `asset://localhost/${encodeURIComponent(track.file_path)}` : track.file_path;
+  // asset://localhost/... on Linux/macOS, http://asset.localhost/... on Windows.
+  audio.src = window.__TAURI__?.core ? window.__TAURI__.core.convertFileSrc(track.file_path) : track.file_path;
   audio.play().catch((e) => console.error('[YTMD Local] Playback failed:', e));
   updatePlayingRow();
 }

@@ -36,3 +36,24 @@ jobs:
       - name: cargo clippy
         working-directory: src-tauri
         run: cargo clippy --all-targets -- -D warnings
+
+  # Windows-only code (sleep inhibition, screen-lock polling, Discord named
+  # pipe, SMTC media controls) is behind #[cfg(windows)] and never compiled
+  # by the Linux job, so a Windows break would otherwise only surface when a
+  # release build fails.
+  backend-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: cargo clippy
+        working-directory: src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+      - name: cargo test
+        working-directory: src-tauri
+        run: cargo test

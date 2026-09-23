@@ -572,7 +572,10 @@ mod tests {
         let started = Instant::now();
         let res = join_room_via(&manager, noop_sink(), "YTMD-NOPE".into(), "G".into(), brokers, timeouts).await;
         assert_eq!(res.err(), Some(not_found_err()));
-        assert!(started.elapsed() < Duration::from_secs(2));
+        // Guards that the injected per-broker timeouts are honored rather
+        // than the ~15s production budget. Not a tight bound: first-use TLS
+        // setup (loading native root certs) alone took seconds on CI runners.
+        assert!(started.elapsed() < Duration::from_secs(8), "took {:?}", started.elapsed());
         assert!(manager.get_room_state().is_none());
         task.abort();
     }

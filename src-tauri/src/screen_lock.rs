@@ -18,6 +18,11 @@
 //! debug level and the others keep working. One lock often fires several
 //! of these at once, so repeats within `DUPLICATE_LOCK_WINDOW` count once.
 //! Unlocking never auto-resumes playback.
+//!
+//! Windows: there's no signal to subscribe to without owning a message
+//! loop, so a background thread polls the session's lock state
+//! (`WTSQuerySessionInformationW` / `WTSSessionInfoEx`) every
+//! `WINDOWS_POLL_INTERVAL` and reports the unlocked -> locked edge.
 
 use std::time::{Duration, Instant};
 use tauri::AppHandle;
@@ -35,9 +40,19 @@ pub fn should_pause_on_lock(pause_on_lock: bool, last_lock: Option<Instant>, now
     pause_on_lock && !is_duplicate_lock(last_lock, now)
 }
 
-/// Starts listening for screen locks in the background. No-op off Linux.
+/// Called with the name of the source that saw a lock.
+#[cfg(any(target_os = "linux", windows))]
+pub(crate) type LockCallback = std::sync::Arc<dyn Fn(&'static str) + Send + Sync>;
+
+/// Only the unlocked -> locked edge is a lock event; staying locked (or
+/// the first poll finding the session already locked) is not.
+pub fn is_lock_edge(was_locked: Option<bool>, locked: bool) -> bool {
+    locked && was_locked == Some(false)
+}
+
+/// Starts listening for screen locks in the background (Linux, Windows).
 pub fn start(app: AppHandle) {
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", windows))]
     {
         use crate::AppState;
         use parking_lot::Mutex;
@@ -45,7 +60,7 @@ pub fn start(app: AppHandle) {
         use tauri::{Emitter, Manager};
 
         let last_lock: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
-        let on_lock: imp::LockCallback = Arc::new(move |source: &'static str| {
+        let on_lock: LockCallback = Arc::new(move |source: &'static str| {
             let now = Instant::now();
             let mut last = last_lock.lock();
             let pause_on_lock = app
@@ -64,23 +79,85 @@ pub fn start(app: AppHandle) {
                 let _ = app.emit("player-command", "pause");
             }
         });
+        #[cfg(target_os = "linux")]
         tauri::async_runtime::spawn(imp::listen(on_lock));
+        #[cfg(windows)]
+        windows_imp::spawn_poller(on_lock);
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", windows)))]
     {
         let _ = app;
+    }
+}
+
+#[cfg(windows)]
+const WINDOWS_POLL_INTERVAL: Duration = Duration::from_secs(2);
+
+#[cfg(windows)]
+mod windows_imp {
+    use super::{is_lock_edge, LockCallback, WINDOWS_POLL_INTERVAL};
+    use windows::core::PWSTR;
+    use windows::Win32::System::RemoteDesktop::{
+        WTSFreeMemory, WTSQuerySessionInformationW, WTSSessionInfoEx, WTSINFOEXW, WTS_CURRENT_SERVER_HANDLE,
+        WTS_CURRENT_SESSION, WTS_SESSIONSTATE_LOCK,
+    };
+
+    /// `None` when the state can't be read (the poller then just skips).
+    fn session_locked() -> Option<bool> {
+        let mut buffer = PWSTR::null();
+        let mut bytes = 0u32;
+        // SAFETY: out-pointers are valid locals; the buffer WTS allocates is
+        // read only while it's alive and freed with WTSFreeMemory below.
+        unsafe {
+            WTSQuerySessionInformationW(
+                Some(WTS_CURRENT_SERVER_HANDLE),
+                WTS_CURRENT_SESSION,
+                WTSSessionInfoEx,
+                &mut buffer,
+                &mut bytes,
+            )
+            .ok()?;
+            if buffer.is_null() {
+                return None;
+            }
+            let info = &*(buffer.0 as *const WTSINFOEXW);
+            let locked = if info.Level == 1 {
+                Some(info.Data.WTSInfoExLevel1.SessionFlags as u32 == WTS_SESSIONSTATE_LOCK)
+            } else {
+                None
+            };
+            WTSFreeMemory(buffer.0 as *mut _);
+            locked
+        }
+    }
+
+    pub(super) fn spawn_poller(on_lock: LockCallback) {
+        let spawned = std::thread::Builder::new().name("ytmd-screen-lock".into()).spawn(move || {
+            let mut was_locked = None;
+            loop {
+                if let Some(locked) = session_locked() {
+                    if is_lock_edge(was_locked, locked) {
+                        on_lock("WTSSessionInfoEx");
+                    }
+                    was_locked = Some(locked);
+                }
+                std::thread::sleep(WINDOWS_POLL_INTERVAL);
+            }
+        });
+        if let Err(e) = spawned {
+            log::warn!("screen lock watcher unavailable: {e}");
+        }
     }
 }
 
 #[cfg(target_os = "linux")]
 pub(crate) mod imp {
     use futures_util::StreamExt;
-    use std::sync::Arc;
     use zbus::message::Type;
     use zbus::zvariant::OwnedObjectPath;
     use zbus::{Connection, MatchRule, MessageStream};
 
-    pub type LockCallback = Arc<dyn Fn(&'static str) + Send + Sync>;
+    pub(crate) use super::LockCallback;
 
     const SCREENSAVER_INTERFACES: &[&str] = &["org.freedesktop.ScreenSaver", "org.gnome.ScreenSaver"];
 
@@ -197,6 +274,15 @@ pub(crate) mod imp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_lock_edge_only_on_transition_into_locked() {
+        assert!(is_lock_edge(Some(false), true));
+        assert!(!is_lock_edge(Some(true), true), "staying locked is not a new lock");
+        assert!(!is_lock_edge(None, true), "already locked at startup is not a new lock");
+        assert!(!is_lock_edge(Some(true), false));
+        assert!(!is_lock_edge(Some(false), false));
+    }
 
     #[test]
     fn first_lock_pauses_when_enabled() {

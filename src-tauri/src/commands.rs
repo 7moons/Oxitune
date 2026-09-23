@@ -436,6 +436,13 @@ pub fn scan_local_music(
     let config = state.config_manager.load();
     let library_root = std::path::PathBuf::from(&config.local_music_dir);
 
+    // The local-library window plays files through the `asset:` protocol,
+    // whose scope starts empty (tauri.conf.json); open it to exactly the
+    // configured library, never the whole filesystem.
+    if let Err(e) = app_handle.asset_protocol_scope().allow_directory(&library_root, true) {
+        log::warn!("[YTMD] couldn't allow asset access to the music library: {e}");
+    }
+
     let target_dir = match directory {
         Some(requested) => {
             let requested_path = std::path::PathBuf::from(&requested);

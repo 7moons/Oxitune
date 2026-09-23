@@ -2,6 +2,14 @@
  * Shared setup every companion window runs on load: translated labels,
  * window-control buttons, range-slider fill, and the kit's tooltips.
  */
+// Roboto ships with the app: Windows doesn't have it installed, and YTM's
+// look depends on it. latin + latin-ext covers English and Polish.
+import '@fontsource/roboto/latin-400.css';
+import '@fontsource/roboto/latin-ext-400.css';
+import '@fontsource/roboto/latin-500.css';
+import '@fontsource/roboto/latin-ext-500.css';
+import '@fontsource/roboto/latin-700.css';
+import '@fontsource/roboto/latin-ext-700.css';
 import { ensureKitStyles } from '../preload/ui/kit';
 import { applyI18n } from './i18n';
 import { initRanges } from './range';
