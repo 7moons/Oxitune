@@ -39,6 +39,11 @@ YTMD provides native operating system integration, minimal memory overhead (<100
 - Generate shareable room codes (`YTMD-XXXX`) with automatic host discovery on local or VPN/Tailscale networks, and over the internet through public MQTT brokers (all tried at once).
 - Roles: the host makes people moderators, DJs (control playback) or listeners (listen only) and picks the role newcomers get.
 - The host and moderators can remove people; a removed install can't rejoin that session until the host lets it back in.
+- Optional join approval: newcomers wait until the host lets them in.
+- Shared queue: DJs paste YouTube Music links; the songs play in order after the current one. Everyone can react with emoji and vote to skip (a majority skips).
+- The host can hand the session to someone else; if the host leaves or vanishes, the next person in line takes over under the same code and everyone reconnects on their own.
+- End-to-end encrypted with a key derived from the room code: the public brokers and the local network only see opaque bytes.
+- "Check connection" tells whether the current network can reach the sync servers.
 - Everyone in a session needs a YTMD release newer than 0.1.1 (sync protocol 2); older guests are turned away.
 
 ### Mobile Web Remote Control

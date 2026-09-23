@@ -17,6 +17,14 @@ export function canControl(role: MemberRole): boolean {
   return role !== 'listener';
 }
 
+/** The reactions a room accepts (`REACTIONS` in sync_room/features.rs). */
+export const SYNC_REACTIONS = ['🔥', '❤️', '😂', '👏', '😮', '💃'] as const;
+
+/** Votes that skip a song: more than half the room (`votes_needed`). */
+export function votesNeeded(members: number): number {
+  return Math.floor(members / 2) + 1;
+}
+
 /** Host removes anyone else; a moderator removes DJs and listeners. */
 export function canKick(actor: MemberRole, target: MemberRole): boolean {
   return RANK[actor] >= RANK.moderator && RANK[actor] > RANK[target];

@@ -39,6 +39,10 @@ lofty = "0.25.1"
 tauri-plugin-updater = "2.0.0"
 tauri-plugin-single-instance = "2.0.0"
 rustls = { version = "0.23", features = ["ring"] }
+# Listen Together end-to-end encryption (src/sync_crypto.rs). Both were
+# already in the tree via rustls and tauri.
+ring = "0.17"
+base64 = "0.22"
 
 # Screen-lock detection (src/screen_lock.rs). zbus is already in the tree via
 # notify-rust with its default async-io backend; keeping that backend (rather

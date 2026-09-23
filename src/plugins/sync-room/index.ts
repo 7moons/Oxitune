@@ -1,10 +1,10 @@
 import { YTMDPlugin, PluginContext, TrackInfo } from '../types';
 import { PlayerBridge } from '../../preload/bridge';
 import { setSyncStatus } from '../../preload/ui/navMenu';
-import { showToast } from '../../preload/ui/kit';
+import { showReaction, showToast } from '../../preload/ui/kit';
 import { t } from '../../preload/ui/i18n';
 import { setSyncGuest } from '../../preload/syncRole';
-import { canControl, MemberRole, roleOf } from '../../preload/syncRoles';
+import { canControl, MemberRole, roleOf, votesNeeded } from '../../preload/syncRoles';
 
 export interface SyncPlaybackPayload {
   video_id: string;
@@ -32,12 +32,26 @@ export function ownRole(room: Pick<RoomStatePayload, 'members' | 'current_user_i
 
 type LeaveReason = 'left' | 'closed' | 'kicked' | 'lost';
 
+export interface QueueItemPayload {
+  id: string;
+  video_id: string;
+  title: string;
+  artist: string;
+  added_by: string;
+  added_by_id: string;
+}
+
 export interface RoomStatePayload {
   room_code: string;
   is_host: boolean;
   current_user_id: string;
   members: RoomMemberPayload[];
   playback_state: SyncPlaybackPayload | null;
+  queue?: QueueItemPayload[];
+  /** Member ids voting to skip the current song. */
+  skip_votes?: string[];
+  /** The host is gone and we're getting back in (or taking over). */
+  reconnecting?: boolean;
 }
 
 /** A guest's request for the whole room, carried out by the host's page
@@ -48,9 +62,18 @@ export type SyncControl =
   | { kind: 'set_playing'; playing: boolean }
   | { kind: 'play_video'; video_id: string };
 
-interface SyncControlRequest {
+/** Why the host's page is asked to act (mirrors `ControlSource`). */
+type ControlSource = { kind: 'member' } | { kind: 'vote' } | { kind: 'queue'; title: string };
+
+export interface SyncControlRequest {
   from: string;
   action: SyncControl;
+  source?: ControlSource;
+}
+
+interface ReactionPayload {
+  from: string;
+  emoji: string;
 }
 
 /** Who arrived/left between two room snapshots, excluding ourselves. */
@@ -134,6 +157,9 @@ const HOST_FINISHING_SECS = 5;
  * reordered or redelivered (MQTT QoS 1) and is dropped; a bigger step back
  * is the host's clock being reset, and is accepted. */
 const REORDER_WINDOW_MS = 10_000;
+/** Host: this close to a song's end, the shared queue's next song starts,
+ * before YTM's own autoplay picks something. */
+const QUEUE_ADVANCE_SECS = 1.2;
 
 function clampBeforeEnd(target: number, duration: number): number {
   return Number.isFinite(duration) && duration > END_GUARD_SECS ? Math.min(target, duration - END_GUARD_SECS) : target;
@@ -278,6 +304,9 @@ export class RoomSyncController {
   private inRoom = false;
   /** Guest: whether our role may skip/pause/pick (not a listener). */
   private canControl = true;
+
+  /** Host: the song we last moved on from to the shared queue. */
+  private queueAdvancedFrom: string | null = null;
 
   /** `notify` shows a message to the user (a toast outside of tests). */
   constructor(private readonly notify: (message: string) => void = showToast) {}
@@ -468,7 +497,17 @@ export class RoomSyncController {
 
   public requestControl(action: SyncControl, invoke: PluginContext['invoke']) {
     if (!this.canControl) {
-      this.notify(t().syncListenerOnly);
+      // A listener's "next" is a vote; the rest isn't theirs to do.
+      if (action.kind !== 'next') {
+        this.notify(t().syncListenerOnly);
+        return;
+      }
+      invoke('vote_sync_skip')
+        .then(() => this.notify(t().syncVotedSkip))
+        .catch((e) => {
+          console.error('[YTMD Room Sync] vote failed:', e);
+          this.notify(t().actionFailed);
+        });
       return;
     }
     invoke('send_sync_control', { action }).catch((e) => {
@@ -481,30 +520,52 @@ export class RoomSyncController {
    * that follow bring every guest along. */
   public applyRemoteControl(request: SyncControlRequest) {
     if (!this.inRoom || !this.isHost) return;
-    const { from, action } = request;
+    const { from, action, source } = request;
+    const said =
+      source?.kind === 'vote' ? t().syncVoteSkipped : source?.kind === 'queue' ? t().syncFromQueue(source.title, from) : null;
     switch (action.kind) {
       case 'next':
         PlayerBridge.next();
-        showToast(t().syncGuestNext(from));
+        this.notify(said ?? t().syncGuestNext(from));
         break;
       case 'previous':
         PlayerBridge.previous();
-        showToast(t().syncGuestPrevious(from));
+        this.notify(said ?? t().syncGuestPrevious(from));
         break;
       case 'set_playing': {
         const video = PlayerBridge.getVideo();
         if (!video || video.paused !== action.playing) return;
         if (action.playing) PlayerBridge.play();
         else PlayerBridge.pause();
-        showToast(action.playing ? t().syncGuestResumed(from) : t().syncGuestPaused(from));
+        this.notify(said ?? (action.playing ? t().syncGuestResumed(from) : t().syncGuestPaused(from)));
         break;
       }
       case 'play_video':
         if (!VIDEO_ID_RE.test(action.video_id) || action.video_id === currentVideoId()) return;
         navigateToVideo(action.video_id);
-        showToast(t().syncGuestPicked(from));
+        this.notify(said ?? t().syncGuestPicked(from));
         break;
     }
+  }
+
+  /** Host: as a song ends, plays the next song from the shared queue (the
+   * backend hands it over and removes it). Once per song. */
+  public advanceQueue(queueLength: number, video: HTMLVideoElement | null, invoke: PluginContext['invoke']) {
+    if (!this.inRoom || !this.isHost || queueLength === 0 || !video || isAdPlaying()) return;
+    const remaining = video.duration - video.currentTime;
+    if (!Number.isFinite(remaining) || (remaining > QUEUE_ADVANCE_SECS && !video.ended)) return;
+    const { videoId } = loadedPlayback(video);
+    if (!videoId || this.queueAdvancedFrom === videoId) return;
+    this.queueAdvancedFrom = videoId;
+    invoke('sync_queue_take_next')
+      .then((item) => {
+        const next = item as QueueItemPayload | null;
+        if (!next || !VIDEO_ID_RE.test(next.video_id)) return;
+        PlayerBridge.pause(); // don't let the old song end into YTM's autoplay
+        navigateToVideo(next.video_id);
+        this.notify(t().syncFromQueue(next.title, next.added_by));
+      })
+      .catch((e) => console.error('[YTMD Room Sync] queue advance failed:', e));
   }
 
   /** `force` skips the throttle: track and play/pause changes go out
@@ -580,8 +641,27 @@ function applyRoomUi(room: RoomStatePayload | null, announce: boolean, leaveReas
     if (!room.is_host) showToast(t().syncConnected);
     return;
   }
+  if (room.reconnecting) {
+    if (!prev.reconnecting) showToast(t().syncReconnecting);
+    return;
+  }
+  // A handoff: everyone reconnects, so a join/leave list would be noise.
+  const hostId = (r: RoomStatePayload) => r.members.find((m) => m.is_host)?.id;
+  if (hostId(prev) !== hostId(room)) {
+    const host = room.members.find((m) => m.is_host);
+    if (room.is_host) showToast(t().syncYouHost);
+    else if (host) showToast(t().syncNewHost(host.nickname));
+    return;
+  }
+  if (prev.reconnecting) return;
   const { joined, left } = diffMembers(prev.members, room.members, room.current_user_id);
   const messages = [...joined.map(t().syncJoined), ...left.map(t().syncLeft)];
+  const votes = room.skip_votes ?? [];
+  const newVoters = votes.filter((id) => id !== room.current_user_id && !(prev.skip_votes ?? []).includes(id));
+  for (const id of newVoters) {
+    const name = room.members.find((m) => m.id === id)?.nickname;
+    if (name) messages.push(t().syncVoteProgress(name, votes.length, votesNeeded(room.members.length)));
+  }
   const role = ownRole(room);
   if (role !== ownRole(prev)) {
     messages.push(
@@ -618,6 +698,9 @@ export const SyncRoomPlugin: YTMDPlugin = {
         }),
         window.__TAURI__.event.listen<SyncControlRequest>('sync-control-remote', (e) => {
           controller.applyRemoteControl(e.payload);
+        }),
+        window.__TAURI__.event.listen<ReactionPayload>('sync-reaction', (e) => {
+          showReaction(e.payload.emoji, e.payload.from);
         })
       );
     }
@@ -682,6 +765,7 @@ export const SyncRoomPlugin: YTMDPlugin = {
     const video = ctx.getVideoElement();
     controllerRef?.broadcastLocalState(ctx.track, video, ctx.invoke);
     controllerRef?.noteLocalTick(video);
+    controllerRef?.advanceQueue(lastRoom?.queue?.length ?? 0, video, ctx.invoke);
   },
 
   onDestroy() {

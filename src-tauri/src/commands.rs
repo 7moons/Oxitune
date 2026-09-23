@@ -519,6 +519,11 @@ pub async fn join_sync_room(
     crate::sync_room::join_room(&state.sync_room, sink, room_code, nickname).await
 }
 
+fn sync_sink(app_handle: AppHandle) -> Arc<dyn crate::sync_room::SyncEventSink> {
+    Arc::new(app_handle)
+}
+
+/// Leaves the room. A host with guests hands it to the next in line.
 #[tauri::command]
 pub fn leave_sync_room(
     app_handle: AppHandle,
@@ -532,6 +537,30 @@ pub fn leave_sync_room(
     Ok(())
 }
 
+/// Host: ends the room for everyone.
+#[tauri::command]
+pub fn end_sync_room(
+    app_handle: AppHandle,
+    state: State<'_, Arc<AppState>>,
+) -> Result<(), String> {
+    crate::sync_room::end_room(&state.sync_room);
+    let _ = app_handle.emit(
+        "sync-room-left",
+        crate::sync_room::RoomLeftPayload { reason: crate::sync_room::LeaveReason::Left },
+    );
+    Ok(())
+}
+
+/// Host: gives the room to `member_id` and stays in it as a guest.
+#[tauri::command]
+pub fn transfer_sync_host(
+    app_handle: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    member_id: String,
+) -> Result<(), String> {
+    crate::sync_room::transfer_host(&state.sync_room, sync_sink(app_handle), &member_id)
+}
+
 /// Host or moderator: removes a member and bans their install from the room.
 #[tauri::command]
 pub fn kick_sync_member(
@@ -539,8 +568,7 @@ pub fn kick_sync_member(
     state: State<'_, Arc<AppState>>,
     member_id: String,
 ) -> Result<(), String> {
-    let sink: Arc<dyn crate::sync_room::SyncEventSink> = Arc::new(app_handle);
-    crate::sync_room::kick_member(&state.sync_room, &sink, &member_id)
+    crate::sync_room::kick_member(&state.sync_room, &sync_sink(app_handle), &member_id)
 }
 
 #[tauri::command]
@@ -550,8 +578,7 @@ pub fn set_sync_member_role(
     member_id: String,
     role: crate::sync_room::MemberRole,
 ) -> Result<(), String> {
-    let sink: Arc<dyn crate::sync_room::SyncEventSink> = Arc::new(app_handle);
-    state.sync_room.set_member_role(&member_id, role, &sink)
+    state.sync_room.set_member_role(&member_id, role, &sync_sink(app_handle))
 }
 
 #[tauri::command]
@@ -560,18 +587,115 @@ pub fn set_sync_default_role(
     state: State<'_, Arc<AppState>>,
     role: crate::sync_room::MemberRole,
 ) -> Result<(), String> {
-    let sink: Arc<dyn crate::sync_room::SyncEventSink> = Arc::new(app_handle);
-    state.sync_room.set_default_role(role, &sink)
+    state.sync_room.set_default_role(role, &sync_sink(app_handle))
+}
+
+#[tauri::command]
+pub fn set_sync_require_approval(
+    app_handle: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    enabled: bool,
+) -> Result<(), String> {
+    state.sync_room.set_require_approval(enabled, &sync_sink(app_handle))
+}
+
+/// Host: lets a waiting guest in (`approve`) or turns them away.
+#[tauri::command]
+pub fn decide_sync_join(
+    app_handle: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    user_id: String,
+    approve: bool,
+) -> Result<(), String> {
+    state.sync_room.decide_pending(&user_id, approve, &sync_sink(app_handle))
 }
 
 #[tauri::command]
 pub fn unban_sync_member(
     app_handle: AppHandle,
     state: State<'_, Arc<AppState>>,
-    client_id: String,
+    client_hash: String,
 ) -> Result<(), String> {
-    let sink: Arc<dyn crate::sync_room::SyncEventSink> = Arc::new(app_handle);
-    state.sync_room.unban(&client_id, &sink)
+    state.sync_room.unban(&client_hash, &sync_sink(app_handle))
+}
+
+#[tauri::command]
+pub fn vote_sync_skip(app_handle: AppHandle, state: State<'_, Arc<AppState>>) -> Result<(), String> {
+    crate::sync_room::vote_skip(&state.sync_room, &sync_sink(app_handle))
+}
+
+#[tauri::command]
+pub fn send_sync_reaction(
+    app_handle: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    emoji: String,
+) -> Result<(), String> {
+    crate::sync_room::send_reaction(&state.sync_room, &sync_sink(app_handle), &emoji)
+}
+
+#[derive(serde::Deserialize)]
+struct OEmbed {
+    title: String,
+    #[serde(default)]
+    author_name: String,
+}
+
+/// Title and artist of a YouTube video from its public oEmbed endpoint, so
+/// the shared queue shows names instead of ids. Best effort: `None` when
+/// offline or the video is private.
+async fn fetch_video_title(video_id: &str) -> Option<(String, String)> {
+    let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(5)).build().ok()?;
+    let info: OEmbed = client
+        .get("https://www.youtube.com/oembed")
+        .query(&[("url", format!("https://www.youtube.com/watch?v={video_id}").as_str()), ("format", "json")])
+        .send()
+        .await
+        .ok()?
+        .error_for_status()
+        .ok()?
+        .json()
+        .await
+        .ok()?;
+    // YTM's auto-generated artist channels are "<Artist> - Topic".
+    let artist = info.author_name.trim_end_matches(" - Topic").to_string();
+    Some((info.title, artist))
+}
+
+/// Adds a song to the room's shared queue from a pasted YouTube (Music)
+/// link or id.
+#[tauri::command]
+pub async fn sync_queue_add(
+    app_handle: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    input: String,
+) -> Result<(), String> {
+    let video_id = crate::sync_room::parse_video_id(&input).ok_or("sync.error.badLink")?;
+    let (title, artist) = fetch_video_title(&video_id).await.unwrap_or_default();
+    crate::sync_room::queue_add(&state.sync_room, &sync_sink(app_handle), &video_id, &title, &artist)
+}
+
+#[tauri::command]
+pub fn sync_queue_remove(
+    app_handle: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    item_id: String,
+) -> Result<(), String> {
+    crate::sync_room::queue_remove(&state.sync_room, &sync_sink(app_handle), &item_id)
+}
+
+#[tauri::command]
+pub fn sync_queue_play(
+    app_handle: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    item_id: String,
+) -> Result<(), String> {
+    crate::sync_room::queue_play(&state.sync_room, &sync_sink(app_handle), &item_id)
+}
+
+/// The sync window's connection test: can this network reach each broker?
+#[tauri::command]
+pub async fn test_sync_connection() -> Vec<crate::p2p_sync::BrokerProbe> {
+    crate::p2p_sync::probe_brokers().await
 }
 
 #[tauri::command]
@@ -583,10 +707,11 @@ pub fn get_sync_room_state(
 
 #[tauri::command]
 pub fn broadcast_sync_state(
+    app_handle: AppHandle,
     state: State<'_, Arc<AppState>>,
     playback: crate::sync_room::SyncPlaybackState,
 ) -> Result<(), String> {
-    crate::sync_room::broadcast_playback(&state.sync_room, playback);
+    crate::sync_room::broadcast_playback(&state.sync_room, &sync_sink(app_handle), playback);
     Ok(())
 }
 

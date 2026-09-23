@@ -249,8 +249,39 @@ export const KIT_CSS = `
     transition: opacity 0.12s ease, visibility 0s;
   }
 
+  #ytmd-reaction-host {
+    position: fixed;
+    right: 24px;
+    bottom: calc(var(--ytmd-player-bar-height) + 16px);
+    z-index: 2202;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 8px;
+    pointer-events: none;
+  }
+  .ytmd-reaction {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 36px;
+    padding: 0 14px 0 8px;
+    border-radius: 18px;
+    background: var(--ytmd-surface);
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+    font: 500 14px/20px var(--ytmd-font);
+    color: var(--ytmd-text);
+    animation: ytmd-reaction 3s ease-out forwards;
+  }
+  .ytmd-reaction-emoji { font-size: 22px; line-height: 1; }
+  @keyframes ytmd-reaction {
+    0% { opacity: 0; transform: translateY(12px) scale(0.9); }
+    10%, 75% { opacity: 1; transform: none; }
+    100% { opacity: 0; transform: translateY(-24px); }
+  }
+
   @media (prefers-reduced-motion: reduce) {
-    .ytmd-menu, .ytmd-toast, .ytmd-toast.ytmd-leaving, .ytmd-scrim { transition: none; animation: none; }
+    .ytmd-menu, .ytmd-toast, .ytmd-toast.ytmd-leaving, .ytmd-scrim, .ytmd-reaction { transition: none; animation: none; }
     #ytmd-volume-indicator { transition: none; }
   }
 `;
@@ -437,6 +468,27 @@ export function showToast(message: string, opts: ToastOptions = {}): void {
   toastTimer = null;
   const duration = opts.durationMs ?? 4000;
   if (duration > 0) toastTimer = setTimeout(dismissToast, duration);
+}
+
+const MAX_REACTIONS_SHOWN = 5;
+const REACTION_SHOWN_MS = 3000;
+
+/** A listening-session reaction: a small bubble above the player bar's
+ * right end that floats up and fades, so a burst of them doesn't queue up
+ * behind toasts. */
+export function showReaction(emoji: string, from: string): void {
+  ensureKitStyles();
+  let host = document.getElementById('ytmd-reaction-host');
+  if (!host) {
+    host = createEl('div', { id: 'ytmd-reaction-host' });
+    host.setAttribute('aria-live', 'polite');
+    document.body.appendChild(host);
+  }
+  const bubble = createEl('div', { className: 'ytmd-reaction' });
+  bubble.append(createEl('span', { className: 'ytmd-reaction-emoji', text: emoji }), createEl('span', { text: from }));
+  host.appendChild(bubble);
+  while (host.children.length > MAX_REACTIONS_SHOWN) host.firstElementChild?.remove();
+  setTimeout(() => bubble.remove(), REACTION_SHOWN_MS);
 }
 
 export function dismissToast(): void {

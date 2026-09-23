@@ -10,6 +10,7 @@ pub mod power_manager;
 pub mod remote_server;
 pub mod screen_lock;
 pub mod shortcuts;
+pub mod sync_crypto;
 pub mod sync_room;
 pub mod tray;
 pub mod updater;
@@ -250,6 +251,16 @@ pub fn run() {
             commands::set_sync_member_role,
             commands::set_sync_default_role,
             commands::unban_sync_member,
+            commands::end_sync_room,
+            commands::transfer_sync_host,
+            commands::set_sync_require_approval,
+            commands::decide_sync_join,
+            commands::vote_sync_skip,
+            commands::send_sync_reaction,
+            commands::sync_queue_add,
+            commands::sync_queue_remove,
+            commands::sync_queue_play,
+            commands::test_sync_connection,
             commands::broadcast_sync_state,
             commands::get_remote_info,
             commands::set_inhibit_sleep,

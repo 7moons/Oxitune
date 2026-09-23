@@ -82,6 +82,11 @@ struct SyncControlArgs {
 }
 
 #[derive(Deserialize)]
+struct ReactionArgs {
+    emoji: String,
+}
+
+#[derive(Deserialize)]
 struct InhibitSleepArgs {
     inhibit: bool,
 }
@@ -168,7 +173,8 @@ bridge_commands! {
     }
     "broadcast_sync_state" => |h, state, args| {
         let p: BroadcastSyncArgs = parse_args("broadcast_sync_state", args)?;
-        sync_room::broadcast_playback(&state.sync_room, p.playback);
+        let sink: Arc<dyn sync_room::SyncEventSink> = Arc::new(h.clone());
+        sync_room::broadcast_playback(&state.sync_room, &sink, p.playback);
         Ok(Value::Null)
     }
     "send_sync_control" => |h, state, args| {
@@ -178,6 +184,23 @@ bridge_commands! {
     }
     "get_sync_room_state" => |h, state, args| {
         to_data(state.sync_room.get_room_state())
+    }
+    // A listener's next button (and anyone's, if they choose) votes instead.
+    "vote_sync_skip" => |h, state, args| {
+        let sink: Arc<dyn sync_room::SyncEventSink> = Arc::new(h.clone());
+        sync_room::vote_skip(&state.sync_room, &sink)?;
+        Ok(Value::Null)
+    }
+    "send_sync_reaction" => |h, state, args| {
+        let p: ReactionArgs = parse_args("send_sync_reaction", args)?;
+        let sink: Arc<dyn sync_room::SyncEventSink> = Arc::new(h.clone());
+        sync_room::send_reaction(&state.sync_room, &sink, &p.emoji)?;
+        Ok(Value::Null)
+    }
+    // Host page, as its song ends: the next song from the shared queue.
+    "sync_queue_take_next" => |h, state, args| {
+        let sink: Arc<dyn sync_room::SyncEventSink> = Arc::new(h.clone());
+        to_data(sync_room::queue_take_next(&state.sync_room, &sink))
     }
     "set_inhibit_sleep" => |h, state, args| {
         let p: InhibitSleepArgs = parse_args("set_inhibit_sleep", args)?;
@@ -262,6 +285,9 @@ mod tests {
             "toggle_sync_window",
             "update_track_info",
             "get_sync_room_state",
+            "vote_sync_skip",
+            "send_sync_reaction",
+            "sync_queue_take_next",
             "save_config",
         ] {
             assert!(set.contains(cmd), "`{cmd}` missing from BRIDGE_COMMANDS");

@@ -64,13 +64,20 @@
           </div>
           <div id="guest-error" class="form-error is-hidden" role="alert"></div>
         </div>
+
+        <div class="connection-test">
+          <div class="form-actions">
+            <button id="test-connection-btn" class="btn btn-tonal"><span id="test-connection-label" data-i18n="sync.test">Check connection</span></button>
+          </div>
+          <div id="test-results" class="test-results is-hidden" aria-live="polite"></div>
+        </div>
       </div>
 
       <!-- In a room -->
       <div id="active-room-view" class="page-inner is-hidden">
         <div>
           <h1 class="page-title" data-i18n="sync.active.title">Listening together</h1>
-          <div class="status-line"><span class="status-dot"></span><span id="sync-status-label" data-i18n="sync.active.status">In sync</span></div>
+          <div class="status-line"><span id="sync-status-dot" class="status-dot"></span><span id="sync-status-label" data-i18n="sync.active.status">In sync</span></div>
         </div>
 
         <div class="room-code-card">
@@ -79,6 +86,32 @@
             <span class="room-code" id="room-code-display">YTMD-</span>
           </div>
           <button id="copy-code-btn" class="icon-btn" data-i18n-label="sync.copy" aria-label="Copy code"><svg class="icon" viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg></button>
+        </div>
+
+        <div class="react-row">
+          <div id="reaction-chips" class="chip-row" role="group" data-i18n-label="sync.react.group"></div>
+          <button id="vote-skip-btn" class="btn btn-tonal"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg><span id="vote-skip-label" data-i18n="sync.vote">Vote to skip</span></button>
+        </div>
+
+        <div id="pending-section" class="is-hidden">
+          <div class="list-heading">
+            <span data-i18n="sync.pending.title">Waiting to join</span>
+          </div>
+          <div class="member-list" id="pending-list"></div>
+        </div>
+
+        <div>
+          <div class="list-heading">
+            <span data-i18n="sync.queue.title">Shared queue</span>
+            <span id="queue-count" class="hint"></span>
+          </div>
+          <div id="queue-add-row" class="queue-add">
+            <input type="text" id="queue-input" class="input" data-i18n-placeholder="sync.queue.placeholder" placeholder="Paste a YouTube Music song link" autocomplete="off" spellcheck="false" />
+            <button id="queue-add-btn" class="btn btn-filled"><span id="queue-add-label" data-i18n="sync.queue.add">Add</span></button>
+          </div>
+          <p id="queue-listener-hint" class="hint is-hidden" data-i18n="sync.queue.listenerHint">Listeners can’t add songs, but they can vote to skip.</p>
+          <p id="queue-empty" class="hint" data-i18n="sync.queue.empty">Songs added here play in order after the current one.</p>
+          <div class="member-list" id="queue-list"></div>
         </div>
 
         <div>
@@ -100,6 +133,13 @@
               <option value="listener" data-i18n="sync.role.listener">Listener</option>
             </select>
           </div>
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="sync.approval">Ask before letting people in</span>
+              <span class="setting-desc" data-i18n="sync.approval.desc">New people wait until you let them in.</span>
+            </div>
+            <label class="toggle"><input type="checkbox" id="require-approval" data-i18n-label="sync.approval" /><span class="toggle-track"></span></label>
+          </div>
         </div>
 
         <div id="banned-section" class="is-hidden">
@@ -109,8 +149,12 @@
           <div class="member-list" id="banned-list"></div>
         </div>
 
-        <div class="form-actions">
-          <button id="leave-room-btn" class="btn btn-tonal btn-danger" data-i18n="sync.leave">Leave session</button>
+        <div>
+          <div class="form-actions">
+            <button id="leave-room-btn" class="btn btn-tonal btn-danger" data-i18n="sync.leave">Leave session</button>
+            <button id="end-room-btn" class="btn btn-tonal btn-danger is-hidden" data-i18n="sync.end">End for everyone</button>
+          </div>
+          <p id="leave-host-hint" class="hint is-hidden" data-i18n="sync.leave.hostHint">If you leave, the next person in line hosts the session.</p>
         </div>
         <div id="leave-room-error" class="form-error is-hidden" role="alert"></div>
       </div>

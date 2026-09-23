@@ -1,9 +1,10 @@
 import { openDialog, showToast } from '../preload/ui/kit';
 import { t } from '../preload/ui/i18n';
-import { canKick, MemberRole, roleOf } from '../preload/syncRoles';
+import { canControl, canKick, MemberRole, roleOf, SYNC_REACTIONS, votesNeeded } from '../preload/syncRoles';
 import { initAmbientBackdrop } from './ambient';
 import { getInitials } from './format';
 import { COMPANION_LOCALES, I18nKey, tr } from './i18n';
+import { BrokerProbe, describeProbes } from './syncProbe';
 import { initWindowChrome } from './window';
 
 interface RoomMember {
@@ -15,8 +16,22 @@ interface RoomMember {
 }
 
 interface BannedMember {
-  client_id: string;
+  client_hash: string;
   nickname: string;
+}
+
+interface PendingMember {
+  user_id: string;
+  nickname: string;
+}
+
+interface QueueItem {
+  id: string;
+  video_id: string;
+  title: string;
+  artist: string;
+  added_by: string;
+  added_by_id: string;
 }
 
 interface RoomState {
@@ -25,15 +40,45 @@ interface RoomState {
   current_user_id: string;
   members: RoomMember[];
   default_role?: MemberRole;
+  require_approval?: boolean;
+  queue?: QueueItem[];
+  skip_votes?: string[];
   banned?: BannedMember[];
+  pending?: PendingMember[];
+  reconnecting?: boolean;
 }
 
 type LeaveReason = 'left' | 'closed' | 'kicked' | 'lost';
 
 const NAME_STORAGE_KEY = 'ytmd-sync-name';
 const ASSIGNABLE_ROLES: MemberRole[] = ['moderator', 'dj', 'listener'];
-const REMOVE_ICON =
-  'M14 8c0-2.21-1.79-4-4-4S6 5.79 6 8s1.79 4 4 4 4-1.79 4-4zm3 2v2h6v-2h-6zM2 18v2h16v-2c0-2.66-5.33-4-8-4s-8 1.34-8 4z';
+const ICON = {
+  remove: 'M14 8c0-2.21-1.79-4-4-4S6 5.79 6 8s1.79 4 4 4 4-1.79 4-4zm3 2v2h6v-2h-6zM2 18v2h16v-2c0-2.66-5.33-4-8-4s-8 1.34-8 4z',
+  crown: 'M5 16 3 5l5.5 5L12 4l3.5 6L21 5l-2 11H5zm14 3c0 .6-.4 1-1 1H6c-.6 0-1-.4-1-1v-1h14v1z',
+  play: 'M8 5v14l11-7z',
+  close: 'M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z'
+};
+
+function svgIcon(path: string): SVGSVGElement {
+  const ns = 'http://www.w3.org/2000/svg';
+  const icon = document.createElementNS(ns, 'svg');
+  icon.setAttribute('class', 'icon');
+  icon.setAttribute('viewBox', '0 0 24 24');
+  const p = document.createElementNS(ns, 'path');
+  p.setAttribute('d', path);
+  icon.appendChild(p);
+  return icon;
+}
+
+function iconButton(iconPath: string, label: string, onClick: () => void): HTMLButtonElement {
+  const btn = document.createElement('button');
+  btn.className = 'icon-btn sm';
+  btn.setAttribute('aria-label', label);
+  btn.dataset.ytmdTooltip = label;
+  btn.appendChild(svgIcon(iconPath));
+  btn.addEventListener('click', onClick);
+  return btn;
+}
 
 let activeRoom: RoomState | null = null;
 
@@ -135,24 +180,110 @@ function memberRow(m: RoomMember, room: RoomState, myRole: MemberRole): HTMLElem
     item.appendChild(label);
   }
 
+  if (room.is_host && role !== 'host') {
+    item.appendChild(iconButton(ICON.crown, tr('sync.transfer', { name: m.nickname }), () => confirmTransfer(m)));
+  }
   if (!isMe && canKick(myRole, role)) {
-    const kick = document.createElement('button');
-    kick.className = 'icon-btn sm';
-    const label = tr('sync.kick', { name: m.nickname });
-    kick.setAttribute('aria-label', label);
-    kick.dataset.ytmdTooltip = label;
-    const ns = 'http://www.w3.org/2000/svg';
-    const icon = document.createElementNS(ns, 'svg');
-    icon.setAttribute('class', 'icon');
-    icon.setAttribute('viewBox', '0 0 24 24');
-    const path = document.createElementNS(ns, 'path');
-    path.setAttribute('d', REMOVE_ICON);
-    icon.appendChild(path);
-    kick.appendChild(icon);
-    kick.addEventListener('click', () => confirmKick(m));
-    item.appendChild(kick);
+    item.appendChild(iconButton(ICON.remove, tr('sync.kick', { name: m.nickname }), () => confirmKick(m)));
   }
   return item;
+}
+
+function confirmTransfer(member: RoomMember) {
+  openDialog({
+    id: 'ytmd-transfer-dialog',
+    title: tr('sync.transfer.confirmTitle', { name: member.nickname }),
+    body: [document.createTextNode(tr('sync.transfer.confirmBody'))],
+    actions: [
+      { label: tr('sync.kick.cancel') },
+      {
+        label: tr('sync.transfer.confirm'),
+        filled: true,
+        onClick: (close) => {
+          close();
+          void invokeSync('transfer_sync_host', { memberId: member.id });
+        }
+      }
+    ]
+  });
+}
+
+function pendingRow(p: PendingMember): HTMLElement {
+  const item = document.createElement('div');
+  item.className = 'member-item';
+  const avatar = document.createElement('span');
+  avatar.className = 'member-avatar is-muted';
+  avatar.textContent = getInitials(p.nickname);
+  const name = document.createElement('span');
+  name.className = 'member-name';
+  name.textContent = p.nickname;
+  const decide = (approve: boolean) => () => {
+    approveBtn.disabled = denyBtn.disabled = true;
+    void invokeSync('decide_sync_join', { userId: p.user_id, approve });
+  };
+  const denyBtn = document.createElement('button');
+  denyBtn.className = 'btn btn-tonal';
+  denyBtn.textContent = tr('sync.pending.deny');
+  denyBtn.addEventListener('click', decide(false));
+  const approveBtn = document.createElement('button');
+  approveBtn.className = 'btn btn-filled';
+  approveBtn.textContent = tr('sync.pending.approve');
+  approveBtn.addEventListener('click', decide(true));
+  item.append(avatar, name, denyBtn, approveBtn);
+  return item;
+}
+
+function queueRow(q: QueueItem, room: RoomState, myRole: MemberRole): HTMLElement {
+  const item = document.createElement('div');
+  item.className = 'member-item queue-item';
+  const thumb = document.createElement('img');
+  thumb.className = 'queue-thumb';
+  thumb.alt = '';
+  thumb.loading = 'lazy';
+  thumb.src = `https://i.ytimg.com/vi/${q.video_id}/default.jpg`;
+  const text = document.createElement('div');
+  text.className = 'queue-text';
+  const title = document.createElement('span');
+  title.className = 'queue-title';
+  title.textContent = q.title;
+  const sub = document.createElement('span');
+  sub.className = 'hint queue-sub';
+  const from = tr('sync.queue.from', { name: q.added_by });
+  sub.textContent = q.artist ? `${q.artist} · ${from}` : from;
+  text.append(title, sub);
+  item.append(thumb, text);
+  if (canControl(myRole)) {
+    item.appendChild(
+      iconButton(ICON.play, tr('sync.queue.play', { title: q.title }), () => {
+        void invokeSync('sync_queue_play', { itemId: q.id });
+      })
+    );
+  }
+  const mine = q.added_by_id === room.current_user_id;
+  if (mine || myRole === 'host' || myRole === 'moderator') {
+    item.appendChild(
+      iconButton(ICON.close, tr('sync.queue.remove', { title: q.title }), () => {
+        void invokeSync('sync_queue_remove', { itemId: q.id });
+      })
+    );
+  }
+  return item;
+}
+
+/** The emoji chips never change; built once. */
+function renderReactionChips() {
+  const row = $('reaction-chips');
+  if (!row || row.childElementCount > 0) return;
+  for (const emoji of SYNC_REACTIONS) {
+    const chip = document.createElement('button');
+    chip.className = 'chip reaction-chip';
+    chip.textContent = emoji;
+    const label = tr('sync.react', { emoji });
+    chip.setAttribute('aria-label', label);
+    chip.dataset.ytmdTooltip = label;
+    chip.addEventListener('click', () => void invokeSync('send_sync_reaction', { emoji }));
+    row.appendChild(chip);
+  }
 }
 
 function bannedRow(b: BannedMember): HTMLElement {
@@ -169,7 +300,7 @@ function bannedRow(b: BannedMember): HTMLElement {
   unban.textContent = tr('sync.unban');
   unban.addEventListener('click', () => {
     unban.disabled = true;
-    void invokeSync('unban_sync_member', { clientId: b.client_id }).then((ok) => {
+    void invokeSync('unban_sync_member', { clientHash: b.client_hash }).then((ok) => {
       if (ok) showToast(tr('sync.unban.done', { name: b.nickname }));
       else unban.disabled = false;
     });
@@ -205,17 +336,52 @@ function renderRoomView(room: RoomState | null) {
   const count = $('member-count');
   if (count) count.textContent = t().syncListeners(room.members.length);
 
+  const status = $('sync-status-label');
+  if (status) status.textContent = tr(room.reconnecting ? 'sync.active.reconnecting' : 'sync.active.status');
+  $('sync-status-dot')?.classList.toggle('is-waiting', !!room.reconnecting);
+
   const me = room.members.find((m) => m.id === room.current_user_id);
   const myRole = me ? roleOf(me) : room.is_host ? 'host' : 'listener';
   $('members-list')?.replaceChildren(...room.members.map((m) => memberRow(m, room, myRole)));
 
+  renderReactionChips();
+  const votes = room.skip_votes ?? [];
+  const need = votesNeeded(room.members.length);
+  const voted = votes.includes(room.current_user_id);
+  const voteLabel = $('vote-skip-label');
+  if (voteLabel) {
+    voteLabel.textContent =
+      votes.length === 0
+        ? tr('sync.vote')
+        : tr(voted ? 'sync.vote.voted' : 'sync.vote.count', { have: votes.length, need });
+  }
+  const voteBtn = $<HTMLButtonElement>('vote-skip-btn');
+  if (voteBtn) voteBtn.disabled = voted || !!room.reconnecting;
+
+  const queue = room.queue ?? [];
+  show($('queue-add-row'), canControl(myRole));
+  show($('queue-listener-hint'), !canControl(myRole));
+  show($('queue-empty'), queue.length === 0);
+  const queueCount = $('queue-count');
+  if (queueCount) queueCount.textContent = queue.length ? tr('sync.queue.count', { count: queue.length }) : '';
+  $('queue-list')?.replaceChildren(...queue.map((q) => queueRow(q, room, myRole)));
+
+  const pending = room.is_host ? (room.pending ?? []) : [];
+  show($('pending-section'), pending.length > 0);
+  $('pending-list')?.replaceChildren(...pending.map(pendingRow));
+
   show($('host-settings'), room.is_host);
   const defaultRole = $<HTMLSelectElement>('default-role');
   if (defaultRole && document.activeElement !== defaultRole) defaultRole.value = room.default_role ?? 'dj';
+  const approval = $<HTMLInputElement>('require-approval');
+  if (approval) approval.checked = !!room.require_approval;
 
   const banned = room.is_host ? (room.banned ?? []) : [];
   show($('banned-section'), banned.length > 0);
   $('banned-list')?.replaceChildren(...banned.map(bannedRow));
+
+  show($('end-room-btn'), room.is_host);
+  show($('leave-host-hint'), room.is_host && room.members.length > 1);
 }
 
 function showFormError(id: string, message: string) {
@@ -350,6 +516,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const joinBtn = $<HTMLButtonElement>('join-room-btn');
   const joinLabel = $('join-room-btn-label');
   let joinInFlight = false;
+  /** The host must let us in; the phase hint below must not replace that. */
+  let joinPending = false;
   const handleJoin = async () => {
     if (joinInFlight) return;
     const code = joinCode?.value.trim().toUpperCase() ?? '';
@@ -362,9 +530,12 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!window.__TAURI__?.core) return;
 
     joinInFlight = true;
+    joinPending = false;
     setButtonLoading(joinBtn, joinLabel, tr('sync.joining'), tr('sync.join'), [joinCode, guestNick]);
     setStatusHint('guest-status-hint', tr('sync.hint.lan'));
-    const phaseTimer = setTimeout(() => setStatusHint('guest-status-hint', tr('sync.hint.internet')), LAN_PHASE_ESTIMATE_MS);
+    const phaseTimer = setTimeout(() => {
+      if (!joinPending) setStatusHint('guest-status-hint', tr('sync.hint.internet'));
+    }, LAN_PHASE_ESTIMATE_MS);
     try {
       const room = (await window.__TAURI__.core.invoke('join_sync_room', {
         roomCode: code,
@@ -423,6 +594,95 @@ document.addEventListener('DOMContentLoaded', () => {
     void invokeSync('set_sync_default_role', { role: defaultRole.value }).then((ok) => {
       if (!ok) defaultRole.value = previous;
     });
+  });
+
+  $<HTMLInputElement>('require-approval')?.addEventListener('change', (e) => {
+    const toggle = e.currentTarget as HTMLInputElement;
+    void invokeSync('set_sync_require_approval', { enabled: toggle.checked }).then((ok) => {
+      if (!ok) toggle.checked = !toggle.checked;
+    });
+  });
+
+  $('vote-skip-btn')?.addEventListener('click', () => {
+    void invokeSync('vote_sync_skip', {}).then((ok) => {
+      if (ok) showToast(tr('sync.vote.done'));
+    });
+  });
+
+  const endBtn = $<HTMLButtonElement>('end-room-btn');
+  endBtn?.addEventListener('click', async () => {
+    endBtn.disabled = true;
+    if (await invokeSync('end_sync_room', {})) {
+      activeRoom = null;
+      renderRoomView(null);
+    }
+    endBtn.disabled = false;
+  });
+
+  // Shared queue: paste a link, the backend looks the title up.
+  const queueInput = $<HTMLInputElement>('queue-input');
+  const queueBtn = $<HTMLButtonElement>('queue-add-btn');
+  const queueLabel = $('queue-add-label');
+  let queueInFlight = false;
+  const handleQueueAdd = async () => {
+    const input = queueInput?.value.trim() ?? '';
+    if (queueInFlight || !input) return;
+    queueInFlight = true;
+    setButtonLoading(queueBtn, queueLabel, tr('sync.queue.adding'), tr('sync.queue.add'), [queueInput]);
+    const ok = await invokeSync('sync_queue_add', { input });
+    queueInFlight = false;
+    setButtonLoading(queueBtn, queueLabel, null, tr('sync.queue.add'), [queueInput]);
+    if (ok && queueInput) {
+      queueInput.value = '';
+      showToast(tr('sync.queue.added'));
+    }
+    queueInput?.focus();
+  };
+  queueBtn?.addEventListener('click', handleQueueAdd);
+  queueInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') void handleQueueAdd();
+  });
+
+  // Connection test: which brokers this network reaches, and what that means.
+  const testBtn = $<HTMLButtonElement>('test-connection-btn');
+  const testLabel = $('test-connection-label');
+  testBtn?.addEventListener('click', async () => {
+    if (!window.__TAURI__?.core) return;
+    const results = $('test-results');
+    setButtonLoading(testBtn, testLabel, tr('sync.test.running'), tr('sync.test'), []);
+    try {
+      const probes = (await window.__TAURI__.core.invoke('test_sync_connection')) as BrokerProbe[];
+      const { verdict, lines } = describeProbes(probes);
+      const verdictEl = document.createElement('p');
+      verdictEl.className = 'test-verdict';
+      verdictEl.textContent = tr(verdict);
+      const list = document.createElement('ul');
+      list.className = 'test-lines';
+      probes.forEach((p, i) => {
+        const li = document.createElement('li');
+        li.className = p.reachable ? 'is-ok' : 'is-fail';
+        li.textContent = lines[i];
+        list.appendChild(li);
+      });
+      const note = document.createElement('p');
+      note.className = 'hint';
+      note.textContent = tr('sync.test.lanNote');
+      results?.replaceChildren(verdictEl, list, note);
+      show(results, true);
+    } catch (e) {
+      showToast(errorMessage(e));
+    } finally {
+      setButtonLoading(testBtn, testLabel, null, tr('sync.test'), []);
+    }
+  });
+
+  window.__TAURI__?.event.listen('sync-join-pending', () => {
+    if (!joinInFlight) return;
+    joinPending = true;
+    setStatusHint('guest-status-hint', tr('sync.hint.pending'));
+  });
+  window.__TAURI__?.event.listen<{ from: string; emoji: string }>('sync-reaction', (e) => {
+    showToast(`${e.payload.emoji} ${e.payload.from}`, { id: 'sync-reaction', durationMs: 2000 });
   });
 
   window.__TAURI__?.event.listen<RoomState>('sync-room-updated', (e) => {

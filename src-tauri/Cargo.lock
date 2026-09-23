@@ -6449,6 +6449,7 @@ dependencies = [
 name = "ytmd"
 version = "0.1.1"
 dependencies = [
+ "base64 0.22.1",
  "ctor 0.4.3",
  "dirs 5.0.1",
  "env_logger",
@@ -6462,6 +6463,7 @@ dependencies = [
  "qrcode",
  "rand",
  "reqwest 0.12.28",
+ "ring",
  "rumqttc",
  "rustls",
  "serde",

@@ -13,7 +13,9 @@ import {
   TransitEstimator
 } from '../plugins/sync-room';
 import { isSyncGuest } from '../preload/syncRole';
-import { canControl, canKick, roleOf } from '../preload/syncRoles';
+import { canControl, canKick, roleOf, SYNC_REACTIONS, votesNeeded } from '../preload/syncRoles';
+import { describeProbes } from '../ui/syncProbe';
+import { setCompanionLocale } from '../ui/i18n';
 
 const payload = (over: Partial<SyncPlaybackPayload> = {}): SyncPlaybackPayload => ({
   video_id: 'dQw4w9WgXcQ',
@@ -337,21 +339,81 @@ describe('RoomSyncController (guest)', () => {
     const toasts: string[] = [];
     const c = new RoomSyncController((m) => toasts.push(m));
     c.setRoomState(true, false, false);
-    let invoked = 0;
-    const invoke = async () => {
-      invoked++;
+    const calls: string[] = [];
+    const invoke = async (cmd: string) => {
+      calls.push(cmd);
       return null;
     };
-    c.requestControl({ kind: 'next' }, invoke);
-    expect(invoked).toBe(0);
+    c.requestControl({ kind: 'previous' }, invoke);
+    expect(calls).toEqual([]);
     expect(toasts).toHaveLength(1);
+
+    // A listener's "next" is a vote to skip, not a skip.
+    c.requestControl({ kind: 'next' }, invoke);
+    await Promise.resolve();
+    expect(calls).toEqual(['vote_sync_skip']);
 
     c.handleRemotePlayback(payload({ timestamp_ms: 1_000 }), fakeVideo(), 1_000);
     expect(c.handleLocalTrackChange('bbbbbbbbbbb', 2_000)).toBeNull(); // the host sync pulls it back instead
 
     c.setRoomState(true, false, true); // promoted to DJ
     c.requestControl({ kind: 'next' }, invoke);
-    expect(invoked).toBe(1);
+    expect(calls).toEqual(['vote_sync_skip', 'send_sync_control']);
+  });
+
+  test('a host plays the shared queue as a song ends, once per song', async () => {
+    g.document = { ...(g.document as object), documentElement: { lang: 'en' } };
+    const toasts: string[] = [];
+    const c = new RoomSyncController((m) => toasts.push(m));
+    c.setRoomState(true, true);
+    const calls: string[] = [];
+    const invoke = async (cmd: string) => {
+      calls.push(cmd);
+      return { id: 'q0', video_id: 'bbbbbbbbbbb', title: 'Next One', artist: '', added_by: 'Ola', added_by_id: 'x' };
+    };
+    c.advanceQueue(1, fakeVideo({ currentTime: 100, duration: 200 }), invoke);
+    expect(calls).toEqual([]); // mid-song
+    c.advanceQueue(0, fakeVideo({ currentTime: 199.5, duration: 200 }), invoke);
+    expect(calls).toEqual([]); // empty queue: YTM's autoplay goes on
+    c.advanceQueue(1, fakeVideo({ currentTime: 199.5, duration: 200 }), invoke);
+    c.advanceQueue(1, fakeVideo({ currentTime: 199.7, duration: 200 }), invoke);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(calls).toEqual(['sync_queue_take_next']);
+    expect(location.href).toContain('bbbbbbbbbbb');
+    expect(toasts[0]).toContain('Next One');
+
+    const guestSide = new RoomSyncController(() => {});
+    guestSide.setRoomState(true, false);
+    guestSide.advanceQueue(1, fakeVideo({ currentTime: 199.5, duration: 200 }), invoke);
+    expect(calls).toHaveLength(1); // only the host advances
+  });
+});
+
+describe('Listen Together shared constants mirror the backend', () => {
+  const features = readFileSync(join(import.meta.dir, '..', '..', 'src-tauri', 'src', 'sync_room', 'features.rs'), 'utf8');
+
+  test('the reaction set is the one the host accepts', () => {
+    const rust = features.match(/pub const REACTIONS: &\[&str\] = &\[([^\]]+)\]/)?.[1] ?? '';
+    const emojis = [...rust.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+    expect(emojis).toEqual([...SYNC_REACTIONS]);
+  });
+
+  test('a skip needs more than half the room', () => {
+    expect(features).toContain('members / 2 + 1');
+    expect([1, 2, 3, 4, 5].map(votesNeeded)).toEqual([1, 2, 2, 3, 3]);
+  });
+});
+
+describe('connection test verdict', () => {
+  const probe = (broker: string, reachable: boolean) => ({ broker, reachable, millis: 120 });
+
+  test('all, some, or no brokers reachable', () => {
+    setCompanionLocale('en');
+    expect(describeProbes([probe('a', true), probe('b', true)]).verdict).toBe('sync.test.allOk');
+    expect(describeProbes([probe('a', true), probe('b', false)]).verdict).toBe('sync.test.someOk');
+    expect(describeProbes([probe('a', false), probe('b', false)]).verdict).toBe('sync.test.noneOk');
+    expect(describeProbes([]).verdict).toBe('sync.test.noneOk');
+    expect(describeProbes([probe('a', true), probe('b', false)]).lines).toEqual(['a: 120 ms', 'b: no answer']);
   });
 });
 
