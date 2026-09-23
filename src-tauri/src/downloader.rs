@@ -277,18 +277,33 @@ mod tests {
         assert_eq!(sanitize_format(Some("EXE")), "mp3");
     }
 
+    /// A shell command with piped output: `sh -c` on Unix, `cmd /C` on
+    /// Windows (no `sh` there outside Git Bash).
+    fn shell(unix: &str, windows: &str) -> Command {
+        let mut cmd = if cfg!(windows) {
+            let mut c = Command::new("cmd");
+            c.arg("/C").arg(windows);
+            c
+        } else {
+            let mut c = Command::new("sh");
+            c.arg("-c").arg(unix);
+            c
+        };
+        cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+        cmd
+    }
+
     #[tokio::test]
     async fn test_drain_and_wait_does_not_deadlock_on_output_exceeding_pipe_buffer() {
         // Regression test for the yt-dlp deadlock: a child that writes more
         // than the OS pipe buffer (~64KB) to stdout/stderr blocks on write()
         // once the buffer fills, unless something is concurrently reading
         // it. `.wait()` alone (the old code) would hang forever here.
-        let mut cmd = Command::new("sh");
-        cmd.arg("-c")
-            .arg("for i in $(seq 1 20000); do echo \"line $i padded to exceed the pipe buffer quickly\"; done")
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        let child = cmd.spawn().expect("failed to spawn sh");
+        let mut cmd = shell(
+            "for i in $(seq 1 20000); do echo \"line $i padded to exceed the pipe buffer quickly\"; done",
+            "for /L %i in (1,1,20000) do @echo line %i padded to exceed the pipe buffer quickly",
+        );
+        let child = cmd.spawn().expect("failed to spawn a shell");
 
         let result = tokio::time::timeout(std::time::Duration::from_secs(10), drain_and_wait(child)).await;
         assert!(
@@ -301,12 +316,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_drain_and_wait_returns_last_nonempty_stderr_line() {
-        let mut cmd = Command::new("sh");
-        cmd.arg("-c")
-            .arg("echo 'WARNING: noise' >&2; echo 'ERROR: Video unavailable' >&2; echo '' >&2; exit 1")
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        let (status, tail) = drain_and_wait(cmd.spawn().expect("spawn sh")).await.expect("wait");
+        let mut cmd = shell(
+            "echo 'WARNING: noise' >&2; echo 'ERROR: Video unavailable' >&2; echo '' >&2; exit 1",
+            // No spaces around `&`: cmd would echo them as trailing spaces.
+            "(echo WARNING: noise)>&2&(echo ERROR: Video unavailable)>&2&(echo.)>&2&exit /b 1",
+        );
+        let (status, tail) = drain_and_wait(cmd.spawn().expect("spawn a shell")).await.expect("wait");
         assert!(!status.success());
         assert_eq!(tail.as_deref(), Some("ERROR: Video unavailable"));
     }

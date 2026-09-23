@@ -15,6 +15,7 @@ import { createEl } from '../../utils/dom';
 import { createIconButton, ensureKitStyles } from '../../preload/ui/kit';
 import { t } from '../../preload/ui/i18n';
 import { canControl, MemberRole } from '../../preload/syncRoles';
+import { DRAG_ICON, enableReorder, restoreReorderFocus } from '../../preload/ui/reorder';
 import type { QueueItemPayload } from './index';
 
 const PANEL_ID = 'ytmd-sync-queue';
@@ -38,6 +39,8 @@ export interface QueuePanelModel {
 export interface QueuePanelActions {
   play: (itemId: string) => void;
   remove: (itemId: string) => void;
+  /** `itemId` ends up at position `toIndex` of the queue. */
+  move: (itemId: string, toIndex: number) => void;
 }
 
 /** What one of YTM's menu items would add to its queue, read from the
@@ -105,6 +108,12 @@ function panelCss(tabLabel: string): string {
   .ytmd-sq-sub { color: var(--ytmd-text-secondary); }
   /* Like YTM's own queue rows: actions only take room on hover or focus,
      so titles use the full width otherwise (still reachable by Tab). */
+  .ytmd-sq-handle.ytmd-icon-btn { flex: 0 0 24px; width: 24px; cursor: grab; touch-action: none; }
+  .ytmd-sq-handle.ytmd-icon-btn:hover { background: none; }
+  .ytmd-sq-row.is-dragging { opacity: 0.5; }
+  .ytmd-sq-row.is-dragging .ytmd-sq-handle { cursor: grabbing; }
+  .ytmd-sq-row.drop-before { box-shadow: inset 0 2px 0 var(--ytmd-accent-color); }
+  .ytmd-sq-row.drop-after { box-shadow: inset 0 -2px 0 var(--ytmd-accent-color); }
   .ytmd-sq-actions { display: flex; flex: 0 0 auto; max-width: 0; overflow: hidden; }
   .ytmd-sq-row:hover .ytmd-sq-actions, .ytmd-sq-row:focus-within .ytmd-sq-actions { max-width: 80px; }
 `;
@@ -121,7 +130,16 @@ function ensureStyles(tabLabel: string) {
   if (style.textContent !== css) style.textContent = css;
 }
 
-function row(opts: { videoId: string; title: string; sub: string; actions: HTMLElement[] }): HTMLElement {
+const HANDLE_SELECTOR = '.ytmd-sq-handle';
+const QUEUED_ROW_SELECTOR = '.ytmd-sq-queued';
+
+function row(opts: {
+  videoId: string;
+  title: string;
+  sub: string;
+  actions: HTMLElement[];
+  handle?: HTMLElement;
+}): HTMLElement {
   const item = createEl('div', { className: 'ytmd-sq-row' });
   const thumb = createEl('img', { className: 'ytmd-sq-thumb' });
   thumb.alt = '';
@@ -129,6 +147,7 @@ function row(opts: { videoId: string; title: string; sub: string; actions: HTMLE
   thumb.src = `https://i.ytimg.com/vi/${opts.videoId}/default.jpg`;
   const text = createEl('div', { className: 'ytmd-sq-text' });
   text.append(createEl('span', { className: 'ytmd-sq-title', text: opts.title }), createEl('span', { className: 'ytmd-sq-sub', text: opts.sub }));
+  if (opts.handle) item.appendChild(opts.handle);
   item.append(thumb, text);
   if (opts.actions.length) {
     const actions = createEl('div', { className: 'ytmd-sq-actions' });
@@ -166,10 +185,25 @@ function renderPanel(panel: HTMLElement, model: QueuePanelModel, actions: QueueP
     if (moderates || item.added_by_id === model.myId) {
       buttons.push(button(s.syncQueueRemove(item.title), REMOVE_ICON, () => actions.remove(item.id)));
     }
+    let handle: HTMLElement | undefined;
+    if (canControl(model.myRole) && model.queue.length > 1) {
+      handle = createIconButton({ label: s.syncQueueDrag(item.title), iconPath: DRAG_ICON, muted: true });
+      handle.classList.add('ytmd-sq-handle');
+      handle.dataset.itemId = item.id;
+    }
     const from = s.syncQueueFrom(item.added_by);
-    nodes.push(row({ videoId: item.video_id, title: item.title, sub: item.artist ? `${item.artist} · ${from}` : from, actions: buttons }));
+    const queued = row({
+      videoId: item.video_id,
+      title: item.title,
+      sub: item.artist ? `${item.artist} · ${from}` : from,
+      actions: buttons,
+      handle
+    });
+    queued.classList.add('ytmd-sq-queued');
+    nodes.push(queued);
   }
   panel.replaceChildren(...nodes);
+  restoreReorderFocus(panel, HANDLE_SELECTOR);
 }
 
 let current: { model: QueuePanelModel; actions: QueuePanelActions } | null = null;
@@ -185,7 +219,15 @@ export function syncQueuePanel(): void {
   const side = document.querySelector('ytmusic-player-page #side-panel');
   let panel = document.getElementById(PANEL_ID);
   if (side && panel?.parentElement !== side) {
-    panel ??= createEl('div', { id: PANEL_ID });
+    if (!panel) {
+      panel = createEl('div', { id: PANEL_ID });
+      enableReorder({
+        list: panel,
+        rowSelector: QUEUED_ROW_SELECTOR,
+        handleSelector: HANDLE_SELECTOR,
+        onMove: (_from, to, itemId) => current?.actions.move(itemId, to)
+      });
+    }
     panel.setAttribute('role', 'region');
     panel.setAttribute('aria-label', t().syncQueueTitle);
     renderPanel(panel, current.model, current.actions);

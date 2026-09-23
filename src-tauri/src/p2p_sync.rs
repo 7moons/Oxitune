@@ -375,7 +375,8 @@ fn sender_of(msg: &WireMessage) -> Option<&str> {
         | WireMessage::Reaction { user_id, .. }
         | WireMessage::QueueAdd { user_id, .. }
         | WireMessage::QueueRemove { user_id, .. }
-        | WireMessage::QueuePlay { user_id, .. } => Some(user_id),
+        | WireMessage::QueuePlay { user_id, .. }
+        | WireMessage::QueueMove { user_id, .. } => Some(user_id),
         _ => None,
     }
 }

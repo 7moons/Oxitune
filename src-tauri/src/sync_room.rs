@@ -400,6 +400,8 @@ pub(crate) enum WireMessage {
     },
     QueueRemove { user_id: String, item_id: String },
     QueuePlay { user_id: String, item_id: String },
+    /// Guest -> host: put a queued song at position `to_index`.
+    QueueMove { user_id: String, item_id: String, to_index: usize },
     /// Host -> room: the host is leaving and `new_host_id` takes over the
     /// same code. Carries what the new host needs to keep the room as it
     /// was: bans and approvals by `client_hash`, never by secret id.
@@ -1920,6 +1922,19 @@ pub fn queue_play(manager: &Arc<SyncRoomManager>, sink: &Arc<dyn SyncEventSink>,
     )
 }
 
+pub fn queue_move(
+    manager: &Arc<SyncRoomManager>,
+    sink: &Arc<dyn SyncEventSink>,
+    item_id: &str,
+    to_index: usize,
+) -> Result<(), String> {
+    act_or_ask(
+        manager,
+        |me| manager.queue_move(me, item_id, to_index, sink),
+        |user_id| WireMessage::QueueMove { user_id, item_id: item_id.to_string(), to_index },
+    )
+}
+
 /// Host side: the host's page asks for the next queued song as the current
 /// one ends. `None` when the queue is empty (YTM's own autoplay continues).
 pub fn queue_take_next(manager: &Arc<SyncRoomManager>, sink: &Arc<dyn SyncEventSink>) -> Option<QueueItem> {
@@ -2531,6 +2546,26 @@ mod tests {
 
         assert_eq!(manager.queue_take_next(&dyn_sink).map(|i| i.video_id).as_deref(), Some("aaaaaaaaaaa"));
         assert!(manager.queue_take_next(&dyn_sink).is_none());
+    }
+
+    #[test]
+    fn test_dragging_reorders_the_queue_for_djs_only() {
+        let manager = hosting(&[("host", true), ("dj", false), ("quiet", false)]);
+        let sink = noop_sink();
+        manager.set_member_role("quiet", MemberRole::Listener, &sink).unwrap();
+        for (id, title) in [("aaaaaaaaaaa", "A"), ("bbbbbbbbbbb", "B"), ("ccccccccccc", "C")] {
+            manager.queue_add("dj", id, title, "", false, &sink).unwrap();
+        }
+        let titles = || manager.get_room_state().unwrap().queue.iter().map(|i| i.title.clone()).collect::<Vec<_>>();
+        let id_of = |title: &str| manager.get_room_state().unwrap().queue.iter().find(|i| i.title == title).unwrap().id.clone();
+
+        manager.queue_move("dj", &id_of("C"), 0, &sink).unwrap();
+        assert_eq!(titles(), vec!["C", "A", "B"]);
+        manager.queue_move("host", &id_of("C"), 99, &sink).unwrap();
+        assert_eq!(titles(), vec!["A", "B", "C"], "past the end means last");
+        assert!(manager.queue_move("quiet", &id_of("A"), 2, &sink).is_err(), "listeners only listen");
+        assert!(manager.queue_move("dj", "q-nope", 0, &sink).is_err());
+        assert_eq!(titles(), vec!["A", "B", "C"]);
     }
 
     /// YTM's "Play next" lands at the front of the shared queue, "Add to

@@ -666,7 +666,16 @@ function refreshQueuePanel() {
       myId: room.current_user_id,
       myRole: ownRole(room)
     },
-    { play: act('sync_queue_play'), remove: act('sync_queue_remove') }
+    {
+      play: act('sync_queue_play'),
+      remove: act('sync_queue_remove'),
+      move: (itemId, toIndex) => {
+        invoke('sync_queue_move', { itemId, toIndex }).catch((e) => {
+          console.error('[YTMD Room Sync] sync_queue_move failed:', e);
+          showToast(t().actionFailed);
+        });
+      }
+    }
   );
 }
 

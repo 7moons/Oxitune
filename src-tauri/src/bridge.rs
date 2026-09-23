@@ -89,6 +89,14 @@ struct QueueAddArgs {
 }
 
 #[derive(Deserialize)]
+struct QueueMoveArgs {
+    #[serde(rename = "itemId")]
+    item_id: String,
+    #[serde(rename = "toIndex")]
+    to_index: usize,
+}
+
+#[derive(Deserialize)]
 struct QueueItemArgs {
     #[serde(rename = "itemId")]
     item_id: String,
@@ -226,6 +234,11 @@ bridge_commands! {
         sync_room::queue_play(&state.sync_room, &commands::sync_sink(h.clone()), &p.item_id)?;
         Ok(Value::Null)
     }
+    "sync_queue_move" => |h, state, args| {
+        let p: QueueMoveArgs = parse_args("sync_queue_move", args)?;
+        sync_room::queue_move(&state.sync_room, &commands::sync_sink(h.clone()), &p.item_id, p.to_index)?;
+        Ok(Value::Null)
+    }
     // Host page, as its song ends: the next song from the shared queue.
     "sync_queue_take_next" => |h, state, args| {
         let sink: Arc<dyn sync_room::SyncEventSink> = Arc::new(h.clone());
@@ -320,6 +333,7 @@ mod tests {
             "sync_queue_add",
             "sync_queue_remove",
             "sync_queue_play",
+            "sync_queue_move",
             "save_config",
         ] {
             assert!(set.contains(cmd), "`{cmd}` missing from BRIDGE_COMMANDS");

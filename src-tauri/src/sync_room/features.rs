@@ -282,6 +282,26 @@ impl SyncRoomManager {
         })
     }
 
+    /// DJs and up reorder the queue: `item_id` ends up at `to_index` (past
+    /// the end means last).
+    pub(crate) fn queue_move(
+        &self,
+        member_id: &str,
+        item_id: &str,
+        to_index: usize,
+        sink: &Arc<dyn SyncEventSink>,
+    ) -> Result<(), String> {
+        self.update_host_room(sink, |room| {
+            if !room.member(member_id).ok_or(ERR_NO_SUCH_MEMBER)?.role.can_control() {
+                return Err(ERR_NOT_ALLOWED.into());
+            }
+            let from = room.queue.iter().position(|i| i.id == item_id).ok_or("sync.error.noSuchSong")?;
+            let item = room.queue.remove(from);
+            room.queue.insert(to_index.min(room.queue.len()), item);
+            Ok(())
+        })
+    }
+
     /// DJs and up play a queued song right away.
     pub(crate) fn queue_play(&self, member_id: &str, item_id: &str, sink: &Arc<dyn SyncEventSink>) -> Result<(), String> {
         let mut played = None;

@@ -56,8 +56,11 @@
                 <option value="rock" data-i18n="settings.eq.preset.rock">Rock</option>
                 <option value="classical" data-i18n="settings.eq.preset.classical">Classical</option>
                 <option value="pop" data-i18n="settings.eq.preset.pop">Pop</option>
+                <optgroup id="eq-user-presets" class="is-hidden"></optgroup>
                 <option value="custom" data-i18n="settings.eq.preset.custom">Custom</option>
               </select>
+              <button id="eq-save-preset-btn" class="btn btn-tonal" data-i18n="settings.eq.save">Save as preset</button>
+              <button id="eq-delete-preset-btn" class="btn btn-tonal btn-danger is-hidden" data-i18n="settings.eq.delete">Delete preset</button>
               <button id="eq-reset-btn" class="btn btn-tonal" data-i18n="settings.eq.reset">Reset</button>
             </div>
             <div class="eq-preamp">
@@ -243,6 +246,36 @@
               <span class="setting-desc" data-i18n="settings.lock.desc">Minimizing the window doesn't pause playback</span>
             </div>
             <label class="toggle"><input type="checkbox" id="pause_on_lock" /><span class="toggle-track"></span></label>
+          </div>
+
+          <div class="setting-row stack">
+            <div class="setting-row-head">
+              <div class="setting-text">
+                <span class="setting-title" data-i18n="settings.shortcuts.title">Keyboard shortcuts</span>
+                <span class="setting-desc" data-i18n="settings.shortcuts.desc">Work everywhere, even when the window is hidden. Click a shortcut and press the new keys; Esc cancels.</span>
+              </div>
+              <button id="shortcuts-reset-btn" class="btn btn-tonal" data-i18n="settings.shortcuts.reset">Restore defaults</button>
+            </div>
+            <div id="shortcuts-list" class="shortcut-list"></div>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.backup.title">Settings backup</span>
+              <span class="setting-desc" data-i18n="settings.backup.desc">All settings, your equalizer presets and shortcuts in one file</span>
+            </div>
+            <div class="form-actions">
+              <button id="export-settings-btn" class="btn btn-tonal" data-i18n="settings.backup.export">Export</button>
+              <button id="import-settings-btn" class="btn btn-tonal" data-i18n="settings.backup.import">Import</button>
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.logs.title">App logs</span>
+              <span class="setting-desc" data-i18n="settings.logs.desc">Useful when something doesn't work: attach the newest file to your report</span>
+            </div>
+            <button id="open-logs-btn" class="btn btn-tonal" data-i18n="settings.logs.open">Open folder</button>
           </div>
         </section>
 

@@ -1,9 +1,11 @@
 import { EQ_FREQUENCIES, EQ_MAX_DB, EQ_PRESETS } from '../plugins/audio-dsp/presets';
-import { showToast } from '../preload/ui/kit';
+import { openDialog, showToast } from '../preload/ui/kit';
 import { initAmbientBackdrop } from './ambient';
 import { formatDb, formatCrossfade } from './format';
-import { tr } from './i18n';
+import { COMPANION_LOCALES, I18nKey, tr } from './i18n';
 import { syncRange } from './range';
+import { acceleratorFromEvent, formatAccelerator, isMediaKey, SHORTCUT_ACTIONS, ShortcutAction } from './shortcuts';
+import { CustomEqPreset, deletePreset, isCustomPresetId, MAX_PRESET_NAME_CHARS, savePreset } from './eqPresets';
 import { initWindowChrome } from './window';
 
 interface AppConfig {
@@ -35,6 +37,8 @@ interface AppConfig {
   remote_port: number;
   inhibit_sleep: boolean;
   pause_on_lock: boolean;
+  equalizer_custom_presets?: CustomEqPreset[];
+  shortcuts?: Record<string, string>;
   // Every other field of the backend's AppConfig round-trips untouched.
   [key: string]: unknown;
 }
@@ -71,15 +75,20 @@ const SAVE_DEBOUNCE_MS = 500;
 
 let currentConfig: AppConfig | null = null;
 let currentGains: number[] = new Array(10).fill(0);
+let customPresets: CustomEqPreset[] = [];
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T | null;
 
+const isI18nKey = (s: string): s is I18nKey => s in COMPANION_LOCALES.en;
+
+/** Backend errors are either i18n keys (`settings.*`) or OS messages. */
 function errorMessage(e: unknown): string {
-  if (typeof e === 'string') return e;
-  if (e instanceof Error) return e.message;
-  return tr('common.unknownError');
+  const raw = typeof e === 'string' ? e : e instanceof Error ? e.message : null;
+  if (raw === null) return tr('common.unknownError');
+  return isI18nKey(raw) ? tr(raw) : raw;
 }
+
 
 function formatFreq(freq: number): string {
   return freq >= 1000 ? `${freq / 1000}k` : `${freq}`;
@@ -148,6 +157,7 @@ function renderEqSliders() {
       syncRange(slider);
       const preset = $<HTMLSelectElement>('eq_preset');
       if (preset) preset.value = 'custom';
+      updatePresetButtons();
       emitLiveEvent('set-eq-band', { bandIndex: idx, gain: v });
     });
 
@@ -202,6 +212,180 @@ function setIntensity(value: number) {
   if (label) label.textContent = `${Math.round(value * 100)}%`;
 }
 
+// -------------------------------------------------------- custom presets
+
+/** The user's presets go in their own group of the preset list. */
+function renderPresetOptions(selected: string) {
+  const group = $('eq-user-presets') as HTMLOptGroupElement | null;
+  const select = $<HTMLSelectElement>('eq_preset');
+  if (!group || !select) return;
+  group.label = tr('settings.eq.userGroup');
+  group.replaceChildren(
+    ...customPresets.map((p) => {
+      const option = document.createElement('option');
+      option.value = p.id;
+      option.textContent = p.name;
+      return option;
+    })
+  );
+  group.classList.toggle('is-hidden', customPresets.length === 0);
+  select.value = [...select.options].some((o) => o.value === selected) ? selected : 'custom';
+  updatePresetButtons();
+}
+
+function updatePresetButtons() {
+  const selected = $<HTMLSelectElement>('eq_preset')?.value ?? '';
+  $('eq-delete-preset-btn')?.classList.toggle('is-hidden', !isCustomPresetId(selected));
+}
+
+/** Gains and preamp of any preset, built-in or the user's. */
+function presetCurve(id: string): { gains: number[]; preamp: number } | null {
+  const custom = customPresets.find((p) => p.id === id);
+  if (custom) return { gains: custom.gains, preamp: custom.preamp };
+  const builtIn = EQ_PRESETS[id];
+  return builtIn ? { gains: builtIn.gains, preamp: builtIn.preamp ?? 0 } : null;
+}
+
+function currentPreamp(): number {
+  return parseFloat($<HTMLInputElement>('preamp_gain')?.value ?? '0') || 0;
+}
+
+function promptSavePreset() {
+  const selected = customPresets.find((p) => p.id === $<HTMLSelectElement>('eq_preset')?.value);
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'input';
+  input.maxLength = MAX_PRESET_NAME_CHARS;
+  input.placeholder = tr('settings.eq.namePlaceholder');
+  input.setAttribute('aria-label', tr('settings.eq.nameLabel'));
+  input.value = selected?.name ?? '';
+  const save = (close: () => void) => {
+    const result = savePreset(customPresets, input.value, currentGains, currentPreamp());
+    if (!result) {
+      showToast(input.value.trim() ? tr('settings.eq.limit') : tr('settings.eq.nameRequired'));
+      return;
+    }
+    close();
+    customPresets = result.presets;
+    renderPresetOptions(result.id);
+    showToast(tr('settings.eq.saved', { name: input.value.trim() }));
+    scheduleSave();
+  };
+  const dialog = openDialog({
+    id: 'ytmd-save-preset',
+    title: tr('settings.eq.saveTitle'),
+    body: [input],
+    actions: [{ label: tr('settings.eq.cancel') }, { label: tr('settings.eq.saveConfirm'), filled: true, onClick: save }]
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') save(dialog.close);
+  });
+  input.focus();
+  input.select();
+}
+
+function deleteSelectedPreset() {
+  const select = $<HTMLSelectElement>('eq_preset');
+  const preset = customPresets.find((p) => p.id === select?.value);
+  if (!preset) return;
+  customPresets = deletePreset(customPresets, preset.id);
+  // The curve stays as it is, now unnamed.
+  renderPresetOptions('custom');
+  showToast(tr('settings.eq.deleted', { name: preset.name }));
+  scheduleSave();
+}
+
+// ------------------------------------------------------------ shortcuts
+
+let shortcuts: Record<string, string> = {};
+/** The action whose new keys we're waiting for. */
+let recording: ShortcutAction | null = null;
+
+function shortcutLabel(accelerator: string): string {
+  if (!accelerator) return tr('settings.shortcuts.none');
+  if (isMediaKey(accelerator)) {
+    const key = `settings.shortcuts.key.${accelerator}`;
+    return isI18nKey(key) ? tr(key) : accelerator;
+  }
+  return formatAccelerator(accelerator);
+}
+
+function renderShortcuts() {
+  const list = $('shortcuts-list');
+  if (!list) return;
+  list.replaceChildren(
+    ...SHORTCUT_ACTIONS.map((action) => {
+      const row = document.createElement('div');
+      row.className = 'shortcut-row';
+      const name = document.createElement('span');
+      name.className = 'shortcut-name';
+      name.textContent = tr(`settings.shortcuts.action.${action}`);
+      const keys = document.createElement('button');
+      keys.className = 'btn btn-tonal shortcut-keys';
+      keys.classList.toggle('is-recording', recording === action);
+      keys.textContent = recording === action ? tr('settings.shortcuts.recording') : shortcutLabel(shortcuts[action] ?? '');
+      keys.addEventListener('click', () => {
+        recording = recording === action ? null : action;
+        renderShortcuts();
+      });
+      row.append(name, keys);
+      {
+        // Always there (hidden when there's nothing to clear) so the key
+        // pills line up.
+        const clear = document.createElement('button');
+        clear.className = 'icon-btn sm';
+        clear.classList.toggle('is-placeholder', !shortcuts[action]);
+        clear.disabled = !shortcuts[action];
+        const label = tr('settings.shortcuts.clear', { action: tr(`settings.shortcuts.action.${action}`) });
+        clear.setAttribute('aria-label', label);
+        clear.dataset.ytmdTooltip = label;
+        const ns = 'http://www.w3.org/2000/svg';
+        const svg = document.createElementNS(ns, 'svg');
+        svg.setAttribute('class', 'icon');
+        svg.setAttribute('viewBox', '0 0 24 24');
+        const path = document.createElementNS(ns, 'path');
+        path.setAttribute('d', 'M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z');
+        svg.appendChild(path);
+        clear.appendChild(svg);
+        clear.addEventListener('click', () => void storeShortcut(action, ''));
+        row.appendChild(clear);
+      }
+      return row;
+    })
+  );
+}
+
+async function storeShortcut(action: ShortcutAction, accelerator: string) {
+  recording = null;
+  if (!window.__TAURI__?.core) return;
+  try {
+    shortcuts = (await window.__TAURI__.core.invoke('set_shortcut', { action, accelerator })) as Record<string, string>;
+    if (currentConfig) currentConfig.shortcuts = shortcuts;
+  } catch (e) {
+    showToast(errorMessage(e), { durationMs: 6000 });
+  }
+  renderShortcuts();
+}
+
+/** While recording, the next real key combination becomes the shortcut. */
+function onShortcutKeydown(e: KeyboardEvent) {
+  if (!recording) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const noModifiers = !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey;
+  if (e.key === 'Escape' && noModifiers) {
+    recording = null;
+    renderShortcuts();
+    return;
+  }
+  if ((e.key === 'Backspace' || e.key === 'Delete') && noModifiers) {
+    void storeShortcut(recording, '');
+    return;
+  }
+  const accelerator = acceleratorFromEvent(e);
+  if (accelerator) void storeShortcut(recording, accelerator);
+}
+
 // ------------------------------------------------------------ load/save
 
 async function loadSettings() {
@@ -210,42 +394,65 @@ async function loadSettings() {
     return;
   }
   try {
-    const config = (await window.__TAURI__.core.invoke('get_config')) as AppConfig;
-    currentConfig = config;
-
-    for (const [id, fallback] of TOGGLES) {
-      const el = $<HTMLInputElement>(id);
-      if (el) el.checked = typeof config[id] === 'boolean' ? (config[id] as boolean) : fallback;
-    }
-
-    const port = $<HTMLInputElement>('remote_port');
-    if (port) port.value = String(config.remote_port || 9863);
-    const format = $<HTMLSelectElement>('download_format');
-    if (format) format.value = config.download_format || 'mp3';
-    const downloadDir = $<HTMLInputElement>('download_dir');
-    if (downloadDir) downloadDir.value = config.download_dir || '';
-    const localDir = $<HTMLInputElement>('local_music_dir');
-    if (localDir) localDir.value = config.local_music_dir || '';
-    const css = $<HTMLTextAreaElement>('custom_css');
-    if (css) css.value = config.custom_css || '';
-    const wheelStep = $<HTMLInputElement>('wheel_volume_step_points');
-    if (wheelStep) wheelStep.value = String(Math.max(1, Math.min(100, Math.round((config.wheel_volume_step ?? 0.05) * 100))));
-
-    setIntensity(config.ambient_intensity ?? 0.6);
-    setPreamp(config.preamp_gain || 0);
-    setCrossfade(config.crossfade_seconds || 0);
-    setSpeed(config.playback_speed || 1.0);
-
-    const preset = $<HTMLSelectElement>('eq_preset');
-    if (preset) preset.value = config.equalizer_preset || 'flat';
-    currentGains =
-      config.equalizer_gains && config.equalizer_gains.length === 10 ? [...config.equalizer_gains] : new Array(10).fill(0);
-    renderEqSliders();
+    applyConfig((await window.__TAURI__.core.invoke('get_config')) as AppConfig);
   } catch (e) {
     console.error('[YTMD] Failed to load settings:', e);
     showToast(tr('settings.loadFailed', { reason: errorMessage(e) }), { durationMs: 8000 });
     renderEqSliders();
   }
+}
+
+/** Shows `config` in every control. */
+function applyConfig(config: AppConfig) {
+  currentConfig = config;
+
+  for (const [id, fallback] of TOGGLES) {
+    const el = $<HTMLInputElement>(id);
+    if (el) el.checked = typeof config[id] === 'boolean' ? (config[id] as boolean) : fallback;
+  }
+
+  const port = $<HTMLInputElement>('remote_port');
+  if (port) port.value = String(config.remote_port || 9863);
+  const format = $<HTMLSelectElement>('download_format');
+  if (format) format.value = config.download_format || 'mp3';
+  const downloadDir = $<HTMLInputElement>('download_dir');
+  if (downloadDir) downloadDir.value = config.download_dir || '';
+  const localDir = $<HTMLInputElement>('local_music_dir');
+  if (localDir) localDir.value = config.local_music_dir || '';
+  const css = $<HTMLTextAreaElement>('custom_css');
+  if (css) css.value = config.custom_css || '';
+  const wheelStep = $<HTMLInputElement>('wheel_volume_step_points');
+  if (wheelStep) wheelStep.value = String(Math.max(1, Math.min(100, Math.round((config.wheel_volume_step ?? 0.05) * 100))));
+
+  setIntensity(config.ambient_intensity ?? 0.6);
+  setPreamp(config.preamp_gain || 0);
+  setCrossfade(config.crossfade_seconds || 0);
+  setSpeed(config.playback_speed || 1.0);
+
+  customPresets = config.equalizer_custom_presets ?? [];
+  renderPresetOptions(config.equalizer_preset || 'flat');
+  currentGains =
+    config.equalizer_gains && config.equalizer_gains.length === 10 ? [...config.equalizer_gains] : new Array(10).fill(0);
+  renderEqSliders();
+
+  shortcuts = config.shortcuts ?? {};
+  renderShortcuts();
+}
+
+/** After an import: every live effect the settings drive, pushed to the
+ * player at once, as if each control had been changed by hand. */
+function pushLiveState(config: AppConfig) {
+  emitLiveEvent('set-eq-all', { gains: config.equalizer_gains, preset: config.equalizer_preset });
+  emitLiveEvent('set-preamp', config.preamp_gain);
+  emitLiveEvent('set-crossfade-seconds', config.crossfade_seconds);
+  emitLiveEvent('set-playback-rate', config.playback_speed);
+  emitLiveEvent('set-preserves-pitch', config.preserve_pitch);
+  emitLiveEvent('set-ambient-enabled', config.ambient_lighting_enabled);
+  emitLiveEvent('set-ambient-intensity', config.ambient_intensity);
+  emitLiveEvent('set-loudness-normalization', config.loudness_normalization);
+  emitLiveEvent('set-skip-silence', config.skip_silence_enabled);
+  emitLiveEvent('set-custom-css', config.custom_css);
+  emitLiveEvent('config-updated', config);
 }
 
 function collectConfig(config: AppConfig): AppConfig {
@@ -271,6 +478,8 @@ function collectConfig(config: AppConfig): AppConfig {
     ? Math.round(wheelStepPoints) / 100
     : config.wheel_volume_step ?? 0.05;
   next.equalizer_gains = [...currentGains];
+  next.equalizer_custom_presets = customPresets;
+  next.shortcuts = shortcuts;
   return next;
 }
 
@@ -424,18 +633,68 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const presetSelect = $<HTMLSelectElement>('eq_preset');
   presetSelect?.addEventListener('change', () => {
-    const preset = EQ_PRESETS[presetSelect.value];
-    if (presetSelect.value === 'custom' || !preset) return;
-    updateSlidersFromGains(preset.gains);
-    emitLiveEvent('set-eq-all', { gains: preset.gains, preset: presetSelect.value });
-    if (preset.preamp !== undefined) {
-      setPreamp(preset.preamp);
-      emitLiveEvent('set-preamp', preset.preamp);
+    updatePresetButtons();
+    const curve = presetCurve(presetSelect.value);
+    if (!curve) return;
+    updateSlidersFromGains(curve.gains);
+    emitLiveEvent('set-eq-all', { gains: curve.gains, preset: presetSelect.value });
+    setPreamp(curve.preamp);
+    emitLiveEvent('set-preamp', curve.preamp);
+  });
+  $('eq-save-preset-btn')?.addEventListener('click', promptSavePreset);
+  $('eq-delete-preset-btn')?.addEventListener('click', deleteSelectedPreset);
+
+  // Shortcuts: record on keydown anywhere while a shortcut button waits.
+  window.addEventListener('keydown', onShortcutKeydown, true);
+  $('shortcuts-reset-btn')?.addEventListener('click', async () => {
+    recording = null;
+    if (!window.__TAURI__?.core) return;
+    try {
+      shortcuts = (await window.__TAURI__.core.invoke('reset_shortcuts')) as Record<string, string>;
+      if (currentConfig) currentConfig.shortcuts = shortcuts;
+    } catch (e) {
+      showToast(errorMessage(e));
+    }
+    renderShortcuts();
+  });
+
+  $('export-settings-btn')?.addEventListener('click', async () => {
+    if (!window.__TAURI__?.core) return;
+    // Pending edits first, so the file has what's on screen.
+    if (saveTimer !== null) {
+      clearTimeout(saveTimer);
+      saveTimer = null;
+      await saveSettings();
+    }
+    try {
+      if (await window.__TAURI__.core.invoke('export_settings')) showToast(tr('settings.backup.exported'));
+    } catch (e) {
+      showToast(errorMessage(e), { durationMs: 8000 });
+    }
+  });
+  $('import-settings-btn')?.addEventListener('click', async () => {
+    if (!window.__TAURI__?.core) return;
+    try {
+      const config = (await window.__TAURI__.core.invoke('import_settings')) as AppConfig | null;
+      if (!config) return;
+      applyConfig(config);
+      pushLiveState(config);
+      showToast(tr('settings.backup.imported'));
+    } catch (e) {
+      showToast(errorMessage(e), { durationMs: 8000 });
+    }
+  });
+  $('open-logs-btn')?.addEventListener('click', async () => {
+    try {
+      await window.__TAURI__?.core.invoke('open_logs_folder');
+    } catch (e) {
+      showToast(errorMessage(e));
     }
   });
 
   $('eq-reset-btn')?.addEventListener('click', () => {
     if (presetSelect) presetSelect.value = 'flat';
+    updatePresetButtons();
     updateSlidersFromGains(EQ_PRESETS.flat.gains);
     emitLiveEvent('set-eq-all', { gains: EQ_PRESETS.flat.gains, preset: 'flat' });
     setPreamp(0);

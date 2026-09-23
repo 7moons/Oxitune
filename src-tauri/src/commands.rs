@@ -16,6 +16,124 @@ pub fn save_config(state: State<'_, Arc<AppState>>, config: AppConfig) -> Result
     state.config_manager.save(&config)
 }
 
+/// Sets the global shortcut for one player action (empty clears it) and
+/// saves it. Returns every action's shortcut; errors are i18n keys
+/// (`settings.shortcuts.*`), e.g. when another app already owns the keys.
+#[tauri::command]
+pub fn set_shortcut(
+    app_handle: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    action: String,
+    accelerator: String,
+) -> Result<std::collections::BTreeMap<String, String>, String> {
+    let mut config = state.config_manager.load();
+    let shortcuts = crate::shortcuts::set_shortcut(&app_handle, &config.shortcuts, &action, &accelerator)?;
+    config.shortcuts = shortcuts.clone();
+    state.config_manager.save(&config)?;
+    Ok(shortcuts)
+}
+
+#[tauri::command]
+pub fn reset_shortcuts(
+    app_handle: AppHandle,
+    state: State<'_, Arc<AppState>>,
+) -> Result<std::collections::BTreeMap<String, String>, String> {
+    let mut config = state.config_manager.load();
+    config.shortcuts = crate::shortcuts::default_shortcuts();
+    crate::shortcuts::apply(&app_handle, &config.shortcuts);
+    state.config_manager.save(&config)?;
+    Ok(config.shortcuts)
+}
+
+#[tauri::command]
+pub fn open_logs_folder(app_handle: AppHandle, state: State<'_, Arc<AppState>>) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    std::fs::create_dir_all(&state.logs_dir).map_err(|e| e.to_string())?;
+    app_handle
+        .opener()
+        .open_path(state.logs_dir.to_string_lossy(), None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
+/// What a settings backup file holds. `kind` tells a YTMD backup from any
+/// other JSON someone picks by mistake.
+#[derive(Serialize, serde::Deserialize)]
+struct SettingsBackup {
+    kind: String,
+    version: u32,
+    config: AppConfig,
+}
+
+const BACKUP_KIND: &str = "ytmd-settings";
+
+pub fn settings_backup_json(config: &AppConfig) -> Result<String, String> {
+    serde_json::to_string_pretty(&SettingsBackup {
+        kind: BACKUP_KIND.to_string(),
+        version: 1,
+        config: config.clone(),
+    })
+    .map_err(|e| e.to_string())
+}
+
+/// The settings in a backup file, sanitized like any saved config. Errors
+/// are i18n keys.
+pub fn parse_settings_backup(json: &str) -> Result<AppConfig, String> {
+    let backup: SettingsBackup = serde_json::from_str(json).map_err(|_| "settings.backup.invalid".to_string())?;
+    if backup.kind != BACKUP_KIND {
+        return Err("settings.backup.invalid".to_string());
+    }
+    Ok(backup.config.sanitized())
+}
+
+/// Saves all settings (equalizer, custom presets, shortcuts, ...) to a file
+/// the user picks. `Ok(false)` when they cancel.
+#[tauri::command]
+pub async fn export_settings(app_handle: AppHandle, state: State<'_, Arc<AppState>>) -> Result<bool, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let json = settings_backup_json(&state.config_manager.load())?;
+    let handle = app_handle.clone();
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        handle
+            .dialog()
+            .file()
+            .add_filter("YTMD", &["json"])
+            .set_file_name("ytmd-settings.json")
+            .blocking_save_file()
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    let Some(path) = picked.and_then(|p| p.into_path().ok()) else {
+        return Ok(false);
+    };
+    std::fs::write(&path, json).map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
+/// Replaces all settings with a backup file the user picks and applies
+/// what can be applied right away (shortcuts). Returns the new settings for
+/// the Settings window to show and push live; `None` when they cancel.
+#[tauri::command]
+pub async fn import_settings(
+    app_handle: AppHandle,
+    state: State<'_, Arc<AppState>>,
+) -> Result<Option<AppConfig>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let handle = app_handle.clone();
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        handle.dialog().file().add_filter("YTMD", &["json"]).blocking_pick_file()
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    let Some(path) = picked.and_then(|p| p.into_path().ok()) else {
+        return Ok(None);
+    };
+    let json = std::fs::read_to_string(&path).map_err(|_| "settings.backup.invalid".to_string())?;
+    let config = parse_settings_backup(&json)?;
+    state.config_manager.save(&config)?;
+    crate::shortcuts::apply(&app_handle, &config.shortcuts);
+    Ok(Some(config))
+}
+
 #[tauri::command]
 pub fn update_track_info(
     app_handle: AppHandle,
@@ -685,6 +803,16 @@ pub fn sync_queue_remove(
 }
 
 #[tauri::command]
+pub fn sync_queue_move(
+    app_handle: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    item_id: String,
+    to_index: usize,
+) -> Result<(), String> {
+    crate::sync_room::queue_move(&state.sync_room, &sync_sink(app_handle), &item_id, to_index)
+}
+
+#[tauri::command]
 pub fn sync_queue_play(
     app_handle: AppHandle,
     state: State<'_, Arc<AppState>>,
@@ -831,5 +959,38 @@ mod tests {
         assert!(best.is_some());
         let item = best.unwrap();
         assert_eq!(item["trackName"], "Take A Slice");
+    }
+
+    #[test]
+    fn test_settings_backup_roundtrip_keeps_presets_and_shortcuts() {
+        let mut config = AppConfig {
+            crossfade_seconds: 6.0,
+            equalizer_custom_presets: vec![crate::config::CustomEqPreset {
+                id: "user-bass".into(),
+                name: "Bas".into(),
+                gains: vec![5.0; 10],
+                preamp: -2.0,
+            }],
+            ..AppConfig::default()
+        };
+        config.shortcuts.insert("like".into(), "Control+Alt+KeyL".into());
+        let restored = parse_settings_backup(&settings_backup_json(&config).unwrap()).unwrap();
+        assert_eq!(restored.crossfade_seconds, 6.0);
+        assert_eq!(restored.equalizer_custom_presets, config.equalizer_custom_presets);
+        assert_eq!(restored.shortcuts["like"], "Control+Alt+KeyL");
+    }
+
+    #[test]
+    fn test_settings_backup_rejects_other_files_and_sanitizes() {
+        assert_eq!(parse_settings_backup("{}").err().as_deref(), Some("settings.backup.invalid"));
+        assert_eq!(parse_settings_backup("not json").err().as_deref(), Some("settings.backup.invalid"));
+        let foreign = settings_backup_json(&AppConfig::default()).unwrap().replace("ytmd-settings", "something-else");
+        assert_eq!(parse_settings_backup(&foreign).err().as_deref(), Some("settings.backup.invalid"));
+
+        // A hand-edited backup can't smuggle in out-of-range values.
+        let hostile = settings_backup_json(&AppConfig { remote_port: 22, preamp_gain: 900.0, ..AppConfig::default() }).unwrap();
+        let clean = parse_settings_backup(&hostile).unwrap();
+        assert_eq!(clean.remote_port, AppConfig::default().remote_port);
+        assert_eq!(clean.preamp_gain, 24.0);
     }
 }

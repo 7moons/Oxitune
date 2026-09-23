@@ -14,13 +14,14 @@ YTMD provides native operating system integration, minimal memory overhead (<100
 - **Seamless Crossfade**: Smooth audio transitions between consecutive tracks (0s to 12s configurable).
 - **Skip Silence**: Automatic smart detection and skipping of silent pauses at the beginning and end of tracks.
 - **Speed & Pitch Control**: Custom playback speed (0.5x – 2.0x) with optional pitch preservation.
+- **Your Own Presets**: Save any equalizer curve (with its preamp) under a name, pick it later, overwrite or delete it.
 
 ### Native Desktop Integration
 - **Linux MPRIS (D-Bus)**: Comprehensive media key support, lock screen player controls, KDE/GNOME audio applet integration.
 - **Discord Rich Presence (RPC)**: Live status showing current track, artist, album art, remaining duration, and play/pause state.
 - **System Tray Menu**: Fast background playback controls (Play/Pause, Next/Prev, Mini Player toggle, Settings, Quit).
 - **Native Notifications**: Real-time track change notifications with song title and artist.
-- **Global Shortcuts**: Control playback globally even when the window is minimized or unfocused.
+- **Global Shortcuts**: Media keys by default; set your own for play/pause, next, previous, like, dislike and mute in Settings > System. They work even when the window is hidden.
 - **Power Management**: Automatic system sleep inhibition during playback and optional pause on screen lock.
 - **Auto-Updates**: Checks for new signed releases shortly after launch and lets you install them with one click from Settings > About & Updates.
 
@@ -40,7 +41,7 @@ YTMD provides native operating system integration, minimal memory overhead (<100
 - Roles: the host makes people moderators, DJs (control playback) or listeners (listen only) and picks the role newcomers get.
 - The host and moderators can remove people; a removed install can't rejoin that session until the host lets it back in.
 - Optional join approval: newcomers wait until the host lets them in.
-- Shared queue: in a session, YouTube Music's "Up next" tab becomes "Queue" and shows the room's shared queue; "Add to queue" and "Play next" from any song's ⋮ menu add to it, and the host plays from it as each song ends. Everyone can react with emoji and vote to skip (a majority skips).
+- Shared queue: in a session, YouTube Music's "Up next" tab becomes "Queue" and shows the room's shared queue; "Add to queue" and "Play next" from any song's ⋮ menu add to it, DJs reorder it by dragging, and the host plays from it as each song ends or on any skip. Everyone can react with emoji and vote to skip (a majority skips).
 - The host can hand the session to someone else; if the host leaves or vanishes, the next person in line takes over under the same code and everyone reconnects on their own.
 - End-to-end encrypted with a key derived from the room code: the public brokers and the local network only see opaque bytes.
 - "Check connection" tells whether the current network can reach the sync servers.
@@ -53,12 +54,14 @@ YTMD provides native operating system integration, minimal memory overhead (<100
 ### Built-in Audio Downloader
 - Download tracks in multiple formats (MP3, FLAC, AAC, OPUS, WAV) with embedded metadata and cover artwork.
 
-### Themes & Custom Styling
-- Curated colorways: **OLED Pure Black**, **Nord Arctic**, **Catppuccin Mocha**, **Tokyo Night**, **Gruvbox Dark**, **Dracula**, **Rosé Pine**, and **Modern Dark**.
+### Look & Custom Styling
+- **Ambient Lighting**: a soft, blurred wash of the current song's cover behind YouTube Music, with the cover's color as the accent (intensity adjustable, or off for YouTube Music's own look).
 - Full support for user-defined custom CSS injection.
 
 ### Configuration
 - Persistent, human-readable configuration stored in `~/.ytmd/config.json`.
+- **Settings Backup**: export everything (equalizer presets and shortcuts included) to one file and import it on another computer.
+- **Logs**: written to `~/.ytmd/logs/` (rotated, 5 files kept); Settings > System opens the folder.
 
 ---
 
@@ -75,10 +78,13 @@ ytmd/
 │   │   ├── mpris.rs            # Linux MPRIS integration (D-Bus)
 │   │   ├── discord_rpc.rs      # Native Discord IPC socket client
 │   │   ├── tray.rs             # System tray menu and lifecycle
-│   │   ├── shortcuts.rs        # Global shortcuts registration
+│   │   ├── shortcuts.rs        # Configurable global shortcuts
 │   │   ├── local_files.rs      # Local directory scanner & metadata extractor
 │   │   ├── downloader.rs       # Audio stream downloader
-│   │   ├── sync_room.rs        # P2P Listen Together sync protocol
+│   │   ├── sync_room.rs        # Listen Together: rooms, roles, LAN transport, handoff
+│   │   ├── sync_room/features.rs # Join approval, votes, reactions, shared queue
+│   │   ├── p2p_sync.rs         # Listen Together over public MQTT brokers
+│   │   ├── sync_crypto.rs      # End-to-end encryption keyed by the room code
 │   │   ├── remote_server.rs    # Local web remote HTTP & WebSocket server
 │   │   └── power_manager.rs    # System sleep inhibitor and lock watcher
 │   ├── icons/                  # Application icons
@@ -93,7 +99,8 @@ ytmd/
 │   │   ├── lyrics/             # Synchronized lyrics viewer (LRCLIB)
 │   │   ├── adblock/            # Fast ad skipping & popup dismissal
 │   │   ├── sponsorblock/       # Non-music segment skipping
-│   │   ├── themes/             # Curated themes & custom CSS
+│   │   ├── themes/             # Ambient/Base look & custom CSS
+│   │   ├── sync-room/          # Listen Together on the page, shared-queue panel
 │   │   ├── ambient/            # Ambient canvas lighting effect
 │   │   ├── remote/             # Mobile web remote UI & QR modal
 │   │   └── volume/             # Mouse wheel volume adjustment

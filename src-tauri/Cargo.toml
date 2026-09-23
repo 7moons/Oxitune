@@ -28,7 +28,6 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg"]
 dirs = "5.0"
 url = "2.5"
 log = "0.4"
-env_logger = "0.11"
 walkdir = "2.5"
 id3 = "1.16"
 local-ip-address = "0.6"
@@ -38,6 +37,11 @@ rumqttc = { version = "0.25.1", default-features = false, features = ["use-rustl
 lofty = "0.25.1"
 tauri-plugin-updater = "2.0.0"
 tauri-plugin-single-instance = "2.0.0"
+# Log files in ~/.ytmd/logs (a release build has no console to log to).
+tauri-plugin-log = "2"
+# Settings: open the logs folder, pick files for settings backup.
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
 rustls = { version = "0.23", features = ["ring"] }
 # Listen Together end-to-end encryption (src/sync_crypto.rs). Both were
 # already in the tree via rustls and tauri.

@@ -33,6 +33,8 @@ pub struct AppState {
     pub power_manager: PowerManager,
     pub remote_token: String,
     pub remote_status: Arc<remote_server::RemoteServerStatus>,
+    /// Where tauri-plugin-log writes (`~/.ytmd/logs`).
+    pub logs_dir: std::path::PathBuf,
 }
 
 /// Installs the process-wide rustls crypto provider exactly once.
@@ -62,12 +64,6 @@ fn install_crypto_provider_for_tests() {
 pub fn run() {
     ensure_crypto_provider();
 
-    // Without this, every log::info!/warn!/error! call in the app (including
-    // ones diagnosing real startup failures) is silently discarded — the
-    // `log` facade is a no-op until some logger implementation registers
-    // itself, and nothing here was doing that.
-    env_logger::init();
-
     let config_manager = ConfigManager::new();
     let initial_config = config_manager.load();
 
@@ -78,6 +74,11 @@ pub fn run() {
     };
 
     let remote_token = remote_server::generate_token();
+    let logs_dir = config_manager
+        .config_path()
+        .parent()
+        .map(|dir| dir.join("logs"))
+        .unwrap_or_else(|| std::path::PathBuf::from("logs"));
     let sync_client_id = config_manager
         .config_path()
         .parent()
@@ -93,11 +94,13 @@ pub fn run() {
         power_manager: PowerManager::new(),
         remote_token: remote_token.clone(),
         remote_status: Arc::new(remote_server::RemoteServerStatus::new(initial_config.remote_enabled)),
+        logs_dir: logs_dir.clone(),
     });
 
     let app_state_for_setup = app_state.clone();
     let remote_port = initial_config.remote_port;
     let remote_enabled = initial_config.remote_enabled;
+    let initial_shortcuts = initial_config.shortcuts.clone();
 
     tauri::Builder::default()
         // Must be the first plugin: a second launch (even while this one sits
@@ -106,7 +109,27 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             tray::show_main_window(app);
         }))
+        // Every log::info!/warn!/error! goes to ~/.ytmd/logs/ytmd.log (and the
+        // console in dev): a release build has no console, so without files
+        // a user's "it doesn't work" left nothing to look at.
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .clear_targets()
+                .target(tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout))
+                .target(tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Folder {
+                    path: logs_dir,
+                    file_name: Some("ytmd".into()),
+                }))
+                .level(log::LevelFilter::Info)
+                .level_for("rumqttc", log::LevelFilter::Warn)
+                .level_for("tao", log::LevelFilter::Warn)
+                .max_file_size(2_000_000)
+                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(5))
+                .build(),
+        )
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::new().build())
@@ -118,8 +141,8 @@ pub fn run() {
             // Initialize Tray
             let _ = tray::setup_tray(&handle);
 
-            // Initialize Global Shortcuts
-            let _ = shortcuts::setup_shortcuts(&handle);
+            // Global shortcuts, as configured in Settings.
+            shortcuts::apply(&handle, &initial_shortcuts);
 
             // Mobile web remote: only listens on the LAN when the user has it
             // turned on (takes effect on restart, like the port).
@@ -259,7 +282,13 @@ pub fn run() {
             commands::send_sync_reaction,
             commands::sync_queue_remove,
             commands::sync_queue_play,
+            commands::sync_queue_move,
             commands::test_sync_connection,
+            commands::set_shortcut,
+            commands::reset_shortcuts,
+            commands::open_logs_folder,
+            commands::export_settings,
+            commands::import_settings,
             commands::broadcast_sync_state,
             commands::get_remote_info,
             commands::set_inhibit_sleep,

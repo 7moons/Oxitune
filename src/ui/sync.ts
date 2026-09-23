@@ -1,6 +1,7 @@
 import { openDialog, showToast } from '../preload/ui/kit';
 import { t } from '../preload/ui/i18n';
 import { canControl, canKick, MemberRole, roleOf, SYNC_REACTIONS, votesNeeded } from '../preload/syncRoles';
+import { DRAG_ICON, enableReorder, restoreReorderFocus } from '../preload/ui/reorder';
 import { initAmbientBackdrop } from './ambient';
 import { getInitials } from './format';
 import { COMPANION_LOCALES, I18nKey, tr } from './i18n';
@@ -56,7 +57,8 @@ const ICON = {
   remove: 'M14 8c0-2.21-1.79-4-4-4S6 5.79 6 8s1.79 4 4 4 4-1.79 4-4zm3 2v2h6v-2h-6zM2 18v2h16v-2c0-2.66-5.33-4-8-4s-8 1.34-8 4z',
   crown: 'M5 16 3 5l5.5 5L12 4l3.5 6L21 5l-2 11H5zm14 3c0 .6-.4 1-1 1H6c-.6 0-1-.4-1-1v-1h14v1z',
   play: 'M8 5v14l11-7z',
-  close: 'M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z'
+  close: 'M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z',
+  drag: DRAG_ICON
 };
 
 function svgIcon(path: string): SVGSVGElement {
@@ -236,6 +238,12 @@ function pendingRow(p: PendingMember): HTMLElement {
 function queueRow(q: QueueItem, room: RoomState, myRole: MemberRole): HTMLElement {
   const item = document.createElement('div');
   item.className = 'member-item queue-item';
+  if (canControl(myRole) && (room.queue?.length ?? 0) > 1) {
+    const handle = iconButton(ICON.drag, tr('sync.queue.drag', { title: q.title }), () => {});
+    handle.classList.add('queue-handle');
+    handle.dataset.itemId = q.id;
+    item.appendChild(handle);
+  }
   const thumb = document.createElement('img');
   thumb.className = 'queue-thumb';
   thumb.alt = '';
@@ -364,7 +372,11 @@ function renderRoomView(room: RoomState | null) {
   show($('queue-listener-hint'), !canControl(myRole));
   const queueCount = $('queue-count');
   if (queueCount) queueCount.textContent = queue.length ? tr('sync.queue.count', { count: queue.length }) : '';
-  $('queue-list')?.replaceChildren(...queue.map((q) => queueRow(q, room, myRole)));
+  const queueList = $('queue-list');
+  if (queueList) {
+    queueList.replaceChildren(...queue.map((q) => queueRow(q, room, myRole)));
+    restoreReorderFocus(queueList, '.queue-handle');
+  }
 
   const pending = room.is_host ? (room.pending ?? []) : [];
   show($('pending-section'), pending.length > 0);
@@ -618,6 +630,17 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     endBtn.disabled = false;
   });
+
+  // Shared queue: drag a row's handle (or arrow keys on it) to reorder.
+  const queueList = $('queue-list');
+  if (queueList) {
+    enableReorder({
+      list: queueList,
+      rowSelector: '.queue-item',
+      handleSelector: '.queue-handle',
+      onMove: (_from, to, itemId) => void invokeSync('sync_queue_move', { itemId, toIndex: to })
+    });
+  }
 
   // Connection test: which brokers this network reaches, and what that means.
   const testBtn = $<HTMLButtonElement>('test-connection-btn');

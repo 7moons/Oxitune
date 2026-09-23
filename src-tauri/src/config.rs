@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 
@@ -40,9 +41,33 @@ pub struct AppConfig {
     pub remote_port: u16,
     pub inhibit_sleep: bool,
     pub pause_on_lock: bool,
-    pub lastfm_enabled: bool,
-    pub lastfm_api_key: String,
-    pub lastfm_secret: String,
+    /// Equalizer presets the user saved; picked by `equalizer_preset` = id.
+    #[serde(default)]
+    pub equalizer_custom_presets: Vec<CustomEqPreset>,
+    /// Global shortcut per player action (`crate::shortcuts::ACTIONS`), as
+    /// an accelerator string; empty = no shortcut.
+    #[serde(default = "crate::shortcuts::default_shortcuts")]
+    pub shortcuts: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CustomEqPreset {
+    /// `user-` followed by a few lowercase letters/digits.
+    pub id: String,
+    pub name: String,
+    pub gains: Vec<f64>,
+    #[serde(default)]
+    pub preamp: f64,
+}
+
+const EQ_BANDS: usize = 10;
+const MAX_CUSTOM_PRESETS: usize = 30;
+const MAX_PRESET_NAME_CHARS: usize = 40;
+const MAX_ACCELERATOR_LEN: usize = 64;
+
+fn is_custom_preset_id(id: &str) -> bool {
+    id.strip_prefix("user-")
+        .is_some_and(|rest| (1..=16).contains(&rest.len()) && rest.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit()))
 }
 
 impl Default for AppConfig {
@@ -94,9 +119,8 @@ impl Default for AppConfig {
             remote_port: 9863,
             inhibit_sleep: true,
             pause_on_lock: true,
-            lastfm_enabled: false,
-            lastfm_api_key: "".to_string(),
-            lastfm_secret: "".to_string(),
+            equalizer_custom_presets: Vec::new(),
+            shortcuts: crate::shortcuts::default_shortcuts(),
         }
     }
 }
@@ -144,6 +168,32 @@ impl AppConfig {
         }
         if self.local_music_dir.trim().is_empty() {
             self.local_music_dir = AppConfig::default().local_music_dir;
+        }
+
+        // Custom presets: well-formed ids, no duplicates, a name, exactly one
+        // gain per band, everything in range.
+        let mut seen = std::collections::HashSet::new();
+        self.equalizer_custom_presets.retain(|p| is_custom_preset_id(&p.id) && seen.insert(p.id.clone()));
+        self.equalizer_custom_presets.truncate(MAX_CUSTOM_PRESETS);
+        for preset in self.equalizer_custom_presets.iter_mut() {
+            preset.name = preset.name.trim().chars().filter(|c| !c.is_control()).take(MAX_PRESET_NAME_CHARS).collect();
+            if preset.name.is_empty() {
+                preset.name = preset.id.clone();
+            }
+            preset.gains.resize(EQ_BANDS, 0.0);
+            for gain in preset.gains.iter_mut() {
+                *gain = clamp(*gain, -24.0, 24.0, 0.0);
+            }
+            preset.preamp = clamp(preset.preamp, -24.0, 24.0, 0.0);
+        }
+
+        // Shortcuts: only known actions, every action present (missing ones
+        // fall back to their default), no absurd strings. Whether a string
+        // is a valid, free shortcut is checked when it's registered.
+        let defaults = crate::shortcuts::default_shortcuts();
+        self.shortcuts.retain(|action, accel| defaults.contains_key(action) && accel.len() <= MAX_ACCELERATOR_LEN);
+        for (action, accel) in defaults {
+            self.shortcuts.entry(action).or_insert(accel);
         }
 
         self
@@ -462,5 +512,71 @@ mod tests {
 
         let loaded_again = manager.load();
         assert_eq!(loaded_again.custom_css, AppConfig::default().custom_css);
+    }
+
+    /// A config written before custom presets and shortcuts existed (and
+    /// still carrying the removed Last.fm fields) keeps every other value
+    /// instead of failing to parse and falling back to defaults.
+    #[test]
+    fn test_config_from_before_presets_and_shortcuts_still_loads() {
+        let mut saved = serde_json::to_value(AppConfig { crossfade_seconds: 4.0, ..AppConfig::default() }).unwrap();
+        let obj = saved.as_object_mut().unwrap();
+        obj.remove("equalizer_custom_presets");
+        obj.remove("shortcuts");
+        obj.insert("lastfm_enabled".into(), serde_json::json!(true));
+        obj.insert("lastfm_api_key".into(), serde_json::json!("k"));
+        let loaded: AppConfig = serde_json::from_value(saved).expect("old config still loads");
+        assert_eq!(loaded.crossfade_seconds, 4.0);
+        assert!(loaded.equalizer_custom_presets.is_empty());
+        assert_eq!(loaded.shortcuts, crate::shortcuts::default_shortcuts());
+    }
+
+    #[test]
+    fn test_custom_presets_are_sanitized() {
+        let preset = |id: &str, name: &str, gains: Vec<f64>, preamp: f64| CustomEqPreset {
+            id: id.into(),
+            name: name.into(),
+            gains,
+            preamp,
+        };
+        let config = AppConfig {
+            equalizer_custom_presets: vec![
+                preset("user-abc", "  Mój bas \n", vec![99.0, -99.0], f64::NAN),
+                preset("user-abc", "duplicate", vec![0.0; 10], 0.0),
+                preset("flat", "shadows a built-in", vec![0.0; 10], 0.0),
+                preset("user-x", "", vec![1.0; 40], 30.0),
+            ],
+            ..AppConfig::default()
+        }
+        .sanitized();
+        let presets = &config.equalizer_custom_presets;
+        assert_eq!(presets.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), vec!["user-abc", "user-x"]);
+        assert_eq!(presets[0].name, "Mój bas");
+        assert_eq!(presets[0].gains, vec![24.0, -24.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+        assert_eq!(presets[0].preamp, 0.0);
+        assert_eq!(presets[1].name, "user-x");
+        assert_eq!(presets[1].gains.len(), 10);
+        assert_eq!(presets[1].preamp, 24.0);
+
+        let many = AppConfig {
+            equalizer_custom_presets: (0..50).map(|i| preset(&format!("user-{i}"), "p", vec![0.0; 10], 0.0)).collect(),
+            ..AppConfig::default()
+        }
+        .sanitized();
+        assert_eq!(many.equalizer_custom_presets.len(), MAX_CUSTOM_PRESETS);
+    }
+
+    #[test]
+    fn test_shortcuts_keep_known_actions_and_fill_missing_ones() {
+        let mut shortcuts = BTreeMap::new();
+        shortcuts.insert("next".to_string(), "Control+Alt+ArrowRight".to_string());
+        shortcuts.insert("format_disk".to_string(), "Control+KeyF".to_string());
+        shortcuts.insert("like".to_string(), "x".repeat(500));
+        let clean = AppConfig { shortcuts, ..AppConfig::default() }.sanitized().shortcuts;
+        assert_eq!(clean.get("next").map(String::as_str), Some("Control+Alt+ArrowRight"));
+        assert!(!clean.contains_key("format_disk"));
+        assert_eq!(clean.get("like").map(String::as_str), Some(""), "too long: back to the default (none)");
+        assert_eq!(clean.get("play_pause").map(String::as_str), Some("MediaPlayPause"));
+        assert_eq!(clean.len(), crate::shortcuts::ACTIONS.len());
     }
 }
