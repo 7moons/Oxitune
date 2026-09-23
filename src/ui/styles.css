@@ -1015,6 +1015,22 @@ button {
 .member-role {
   color: var(--text-secondary);
 }
+.member-item .member-role-select {
+  flex: 0 0 auto;
+  width: auto;
+  height: 36px;
+}
+.member-avatar.is-muted {
+  background: var(--hover);
+  color: var(--text-secondary);
+}
+.member-item .btn {
+  flex: 0 0 auto;
+}
+#host-settings .select {
+  flex: 0 0 auto;
+  width: auto;
+}
 
 /* ------------------------------------------------------------ mini player */
 

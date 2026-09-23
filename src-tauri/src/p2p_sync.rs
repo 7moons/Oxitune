@@ -11,34 +11,41 @@
 //!      - `ytmd/v1/rooms/{CODE}/broadcast` (for host -> all guests State / Playback)
 //!      - `ytmd/v1/rooms/{CODE}/guest/{USER_ID}` (for direct responses to a specific guest)
 //!   3. The exact same `WireMessage` JSON vocabulary is exchanged with zero server hosting costs,
-//!      no accounts, no maintenance, and 100% reliable connectivity across NATs, firewalls, and ISPs.
+//!      no accounts and no maintenance.
+//!
+//! The host is present on every broker it can reach, and a guest tries all
+//! of them at once and keeps the first that answers with the room. Host and
+//! guest used to each pick "the first broker that answers within 2s", in
+//! order: a TLS handshake to HiveMQ alone takes ~1.2s from Poland, so a
+//! slightly slower guest (other country, first-use root-cert loading on
+//! Windows) settled on a different broker than the host and never found the
+//! room.
 
 use crate::sync_room::{
-    generate_user_id, RoomState, RoomStateWire, SyncEventSink, SyncRoomManager, WireMessage,
+    generate_user_id, JoinRequest, LeaveReason, RejectReason, RoomState, RoomStateWire, SyncEventSink,
+    SyncRoomManager, WireMessage, PROTOCOL_VERSION,
 };
 use rumqttc::{AsyncClient, ConnectReturnCode, Event, EventLoop, MqttOptions, Packet, QoS, Transport};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::Instant;
 
-/// TLS (8883), not plaintext MQTT (1883): the payload is room codes,
-/// nicknames, and now-playing title/artist, and this traffic transits a
-/// public broker over the open internet — anyone on-path (public Wi-Fi, a
-/// transit ISP, or the broker operator itself) could otherwise read or
-/// tamper with it. All three brokers below serve anonymous TLS on 8883
-/// with a publicly-trusted cert, so this costs nothing in reliability.
+/// TLS, never plaintext MQTT (1883): the payload is room codes, nicknames,
+/// and now-playing title/artist, and this traffic transits a public broker
+/// over the open internet. Each port is that broker's TLS listener with a
+/// publicly-trusted certificate: test.mosquitto.org's 8883 is signed by its
+/// own private CA, which rustls (rightly) rejects, so it's 8886 there.
 pub const PUBLIC_BROKERS: &[(&str, u16)] = &[
     ("broker.hivemq.com", 8883),
     ("broker.emqx.io", 8883),
-    ("test.mosquitto.org", 8883),
+    ("test.mosquitto.org", 8886),
 ];
 
-/// Per-broker time budgets. Host and guest both walk `PUBLIC_BROKERS` in
-/// order and only count a broker once it actually answers (ConnAck), so they
-/// land on the same one whenever the first reachable broker is reachable for
-/// both. A guest that finds no host on one broker moves on to the next;
-/// worst case 3 × (2s + 3s) = 15s before "room not found".
+/// Per-broker time budgets. Brokers are tried in parallel, so these don't
+/// add up: a guest's worst case is `connect + join_window`. `join_window`
+/// also covers the host still connecting to that broker when the guest's
+/// `Join` arrives (host connects in the background).
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct BrokerTimeouts {
     pub connect: Duration,
@@ -46,8 +53,8 @@ pub(crate) struct BrokerTimeouts {
 }
 
 const BROKER_TIMEOUTS: BrokerTimeouts = BrokerTimeouts {
-    connect: Duration::from_secs(2),
-    join_window: Duration::from_secs(3),
+    connect: Duration::from_secs(6),
+    join_window: Duration::from_secs(6),
 };
 const JOIN_RETRY_INTERVAL: Duration = Duration::from_millis(1000);
 /// How long a leaving peer keeps driving its MQTT event loop so the final
@@ -136,69 +143,102 @@ async fn connect_broker(
     }
 }
 
-/// The first broker in `brokers` order that completes a handshake.
-async fn connect_first_broker(
-    prefix: &str,
-    brokers: &[(&'static str, u16)],
-    timeout: Duration,
-) -> Result<(AsyncClient, EventLoop, &'static str), String> {
-    let mut errors = Vec::new();
-    for &(host, port) in brokers {
-        match connect_broker(prefix, host, port, timeout).await {
-            Ok((client, eventloop)) => return Ok((client, eventloop, host)),
-            Err(e) => {
-                log::debug!("Listen Together: broker unavailable: {e}");
-                errors.push(e);
-            }
-        }
-    }
-    Err(format!("no public broker reachable ({})", errors.join("; ")))
-}
-
 // ---------------------------------------------------------------------
 // Host side
 // ---------------------------------------------------------------------
 
-pub(crate) async fn host_provide(
+/// Resolves once hosting should stop (`true` sent, or the sender gone).
+/// Wraps `wait_for` so its non-`Send` guard never lives in a select! output.
+async fn stopped(shutdown: &mut watch::Receiver<bool>) {
+    let _ = shutdown.wait_for(|stop| *stop).await;
+}
+
+/// Starts hosting `room_code` on every broker in `PUBLIC_BROKERS`, each in
+/// its own background task. Every task that connects registers its own
+/// entry in the manager's peer map, so each broadcast goes out on every
+/// broker. `shutdown` flipping to `true` makes each task say goodbye to its
+/// guests and exit (or give up connecting).
+pub(crate) fn host_on_all_brokers(
     manager: Arc<SyncRoomManager>,
     sink: Arc<dyn SyncEventSink>,
     room_code: String,
-) -> Result<(tauri::async_runtime::JoinHandle<()>, oneshot::Sender<()>), String> {
-    let (client, eventloop, broker_name) =
-        connect_first_broker("ytmd-h", PUBLIC_BROKERS, BROKER_TIMEOUTS.connect).await?;
-    log::info!("Listen Together: Internet host connected via broker {}", broker_name);
+    generation: u64,
+    shutdown: watch::Receiver<bool>,
+) {
+    for &(broker, port) in PUBLIC_BROKERS {
+        tauri::async_runtime::spawn(host_on_broker(
+            manager.clone(),
+            sink.clone(),
+            room_code.clone(),
+            generation,
+            shutdown.clone(),
+            broker,
+            port,
+            BROKER_TIMEOUTS.connect,
+        ));
+    }
+}
 
-    let host_topic = room_topic_host(&room_code);
-    client
-        .subscribe(&host_topic, QoS::AtLeastOnce)
-        .await
-        .map_err(|e| format!("Failed to subscribe to host topic: {e}"))?;
+#[allow(clippy::too_many_arguments)]
+async fn host_on_broker(
+    manager: Arc<SyncRoomManager>,
+    sink: Arc<dyn SyncEventSink>,
+    room_code: String,
+    generation: u64,
+    mut shutdown: watch::Receiver<bool>,
+    broker: &'static str,
+    port: u16,
+    connect_timeout: Duration,
+) {
+    let connected = tokio::select! {
+        res = connect_broker("ytmd-h", broker, port, connect_timeout) => res,
+        _ = stopped(&mut shutdown) => return,
+    };
+    let (client, eventloop) = match connected {
+        Ok(c) => c,
+        Err(e) => {
+            log::warn!("Listen Together: not hosting over {e}");
+            return;
+        }
+    };
+    if *shutdown.borrow() || !manager.is_current_session(generation) {
+        let _ = client.try_disconnect();
+        return;
+    }
+    if client.try_subscribe(room_topic_host(&room_code), QoS::AtLeastOnce).is_err() {
+        return;
+    }
+    log::info!("Listen Together: hosting over the internet via {broker}");
 
+    // Keyed by session and broker, so a loop from an older room can never
+    // replace (or remove) a newer room's entry.
+    let peer_key = format!("internet:{generation}:{broker}");
     let (tx, rx) = mpsc::unbounded_channel::<WireMessage>();
-    manager.register_peer("internet_broadcast".to_string(), tx);
-
-    let (shutdown_tx, shutdown_rx) = oneshot::channel();
-    let task = tauri::async_runtime::spawn(run_host_loop(
-        client, eventloop, manager, sink, room_code, rx, shutdown_rx,
-    ));
-    Ok((task, shutdown_tx))
+    manager.register_peer(peer_key.clone(), tx);
+    run_host_loop(client, eventloop, &manager, &sink, &room_code, rx, shutdown).await;
+    manager.unregister_peer(&peer_key);
 }
 
 async fn run_host_loop(
     client: AsyncClient,
     mut eventloop: EventLoop,
-    manager: Arc<SyncRoomManager>,
-    sink: Arc<dyn SyncEventSink>,
-    room_code: String,
+    manager: &Arc<SyncRoomManager>,
+    sink: &Arc<dyn SyncEventSink>,
+    room_code: &str,
     mut outbox_rx: mpsc::UnboundedReceiver<WireMessage>,
-    mut shutdown_rx: oneshot::Receiver<()>,
+    mut shutdown: watch::Receiver<bool>,
 ) {
-    let host_topic = room_topic_host(&room_code);
-    let broadcast_topic = room_topic_broadcast(&room_code);
+    let host_topic = room_topic_host(room_code);
+    let broadcast_topic = room_topic_broadcast(room_code);
+    let reply = |user_id: &str, msg: &WireMessage| {
+        if let Ok(payload) = serde_json::to_vec(msg) {
+            let _ = client.try_publish(room_topic_guest(room_code, user_id), QoS::AtLeastOnce, false, payload);
+        }
+    };
 
     loop {
         tokio::select! {
-            _ = &mut shutdown_rx => {
+            _ = stopped(&mut shutdown) => {
                 let closed = WireMessage::Leave { user_id: HOST_CLOSED_USER_ID.to_string() };
                 if let Ok(payload) = serde_json::to_vec(&closed) {
                     publish_and_flush(&client, &mut eventloop, &broadcast_topic, payload).await;
@@ -215,68 +255,55 @@ async fn run_host_loop(
             }
             event = eventloop.poll() => {
                 match event {
-                    Ok(Event::Incoming(Packet::Publish(publish))) => {
-                        if publish.topic == host_topic {
-                            if let Ok(msg) = serde_json::from_slice::<WireMessage>(&publish.payload) {
-                                match msg {
-                                    // Guests re-send `Join` until they hear
-                                    // back; a repeat from a current member
-                                    // just gets the state again instead of a
-                                    // duplicate entry.
-                                    WireMessage::Join { user_id, .. } if manager.has_member(&user_id) => {
-                                        manager.touch_member(&user_id);
-                                        if let Some(room) = manager.get_room_state() {
-                                            let state_msg = WireMessage::State { room: RoomStateWire::from(&room) };
-                                            if let Ok(payload) = serde_json::to_vec(&state_msg) {
-                                                let guest_topic = room_topic_guest(&room_code, &user_id);
-                                                let _ = client.try_publish(&guest_topic, QoS::AtLeastOnce, false, payload);
-                                            }
-                                        }
-                                    }
-                                    WireMessage::Join { user_id, nickname } => {
-                                        match manager.add_member(user_id.clone(), nickname) {
-                                            Ok(room) => {
-                                                let guest_topic = room_topic_guest(&room_code, &user_id);
-                                                let state_msg = WireMessage::State {
-                                                    room: RoomStateWire::from(&room),
-                                                };
-                                                if let Ok(payload) = serde_json::to_vec(&state_msg) {
-                                                    let _ = client.try_publish(&guest_topic, QoS::AtLeastOnce, false, payload);
-                                                }
-                                                sink.room_updated(&room);
-                                                manager.broadcast_to_peers(&state_msg);
-                                            }
-                                            Err(_) => {
-                                                let guest_topic = room_topic_guest(&room_code, &user_id);
-                                                if let Ok(payload) = serde_json::to_vec(&WireMessage::Ack) {
-                                                    let _ = client.try_publish(&guest_topic, QoS::AtLeastOnce, false, payload);
-                                                }
-                                            }
-                                        }
-                                    }
-                                    WireMessage::Heartbeat { user_id } => manager.touch_member(&user_id),
-                                    WireMessage::Control { user_id, action } => {
-                                        manager.handle_guest_control(&user_id, action, &sink);
-                                    }
-                                    WireMessage::Leave { user_id } => {
-                                        manager.unregister_peer(&user_id);
-                                        if let Some(room) = manager.remove_member(&user_id) {
-                                            sink.room_updated(&room);
-                                            manager.broadcast_to_peers(&WireMessage::State {
-                                                room: RoomStateWire::from(&room),
-                                            });
-                                        }
-                                    }
-                                    _ => {}
+                    Ok(Event::Incoming(Packet::Publish(publish))) if publish.topic == host_topic => {
+                        let Ok(msg) = serde_json::from_slice::<WireMessage>(&publish.payload) else {
+                            continue;
+                        };
+                        match msg {
+                            // Guests re-send `Join` until they hear back, on
+                            // every broker at once; a repeat from a current
+                            // member just gets the state again instead of a
+                            // duplicate entry.
+                            WireMessage::Join { user_id, .. } if manager.has_member(&user_id) => {
+                                manager.touch_member(&user_id);
+                                if let Some(room) = manager.get_room_state() {
+                                    reply(&user_id, &WireMessage::State { room: RoomStateWire::from(&room) });
                                 }
                             }
+                            WireMessage::Join { user_id, nickname, client_id, protocol } => {
+                                let join = JoinRequest { user_id: user_id.clone(), nickname, client_id, protocol };
+                                match manager.admit_member(join) {
+                                    Ok(admission) => {
+                                        if let Some(old) = &admission.replaced {
+                                            manager.unregister_peer(old);
+                                        }
+                                        reply(&user_id, &WireMessage::State { room: RoomStateWire::from(&admission.room) });
+                                        manager.announce_room(&admission.room, sink);
+                                    }
+                                    Err(reason) => reply(&user_id, &WireMessage::Rejected { user_id: user_id.clone(), reason }),
+                                }
+                            }
+                            WireMessage::Heartbeat { user_id } => manager.touch_member(&user_id),
+                            WireMessage::Control { user_id, action } => {
+                                manager.handle_guest_control(&user_id, action, sink);
+                            }
+                            WireMessage::Moderate { user_id, action } => {
+                                manager.handle_guest_moderation(&user_id, action, sink);
+                            }
+                            WireMessage::Leave { user_id } => {
+                                manager.unregister_peer(&user_id);
+                                if let Some(room) = manager.remove_member(&user_id) {
+                                    manager.announce_room(&room, sink);
+                                }
+                            }
+                            _ => {}
                         }
                     }
+                    Ok(_) => {}
                     Err(e) => {
                         log::debug!("Host MQTT eventloop error: {:?}", e);
                         tokio::time::sleep(Duration::from_millis(500)).await;
                     }
-                    _ => {}
                 }
             }
         }
@@ -287,8 +314,16 @@ async fn run_host_loop(
 // Guest side
 // ---------------------------------------------------------------------
 
+/// i18n keys (`src/ui/i18n.ts`) the sync window shows for a failed join.
 fn not_found_err() -> String {
-    "Nie znaleziono pokoju — sprawdź kod, upewnij się że host ma otwarty pokój, i że oboje macie połączenie z internetem.".to_string()
+    "sync.error.notFound".to_string()
+}
+
+/// No broker answered at all: this network blocks outgoing MQTT over TLS
+/// (school/office firewalls often allow only web ports), or there's no
+/// internet. Different advice than "check the code", so a different message.
+fn unreachable_err() -> String {
+    "sync.error.noInternet".to_string()
 }
 
 pub(crate) async fn join_room(
@@ -300,8 +335,22 @@ pub(crate) async fn join_room(
     join_room_via(manager, sink, room_code, nickname, PUBLIC_BROKERS, BROKER_TIMEOUTS).await
 }
 
-/// Walks `brokers` in the same order the host does, trying the join
-/// handshake on each broker that answers, until one produces the room.
+/// How one broker's join attempt ended.
+enum Attempt {
+    Joined {
+        client: AsyncClient,
+        eventloop: Box<EventLoop>,
+        room: RoomStateWire,
+    },
+    Rejected(RejectReason),
+    /// Broker reachable, but no host answered for this code.
+    NoRoom,
+    Unreachable,
+}
+
+/// Tries every broker at once and keeps the first that lets us in. Our
+/// `Join` carries one member id on every broker, so the host (present on
+/// all of them) adds us once whichever arrives first.
 async fn join_room_via(
     manager: &Arc<SyncRoomManager>,
     sink: Arc<dyn SyncEventSink>,
@@ -312,58 +361,68 @@ async fn join_room_via(
 ) -> Result<RoomState, String> {
     let clean_code = room_code.trim().to_uppercase();
     let user_id = generate_user_id();
+    let join = WireMessage::Join {
+        user_id: user_id.clone(),
+        nickname,
+        client_id: manager.client_id().to_string(),
+        protocol: PROTOCOL_VERSION,
+    };
+    let join_payload = serde_json::to_vec(&join).map_err(|e| e.to_string())?;
 
+    let mut attempts = tokio::task::JoinSet::new();
     for &(host, port) in brokers {
-        let (client, eventloop) = match connect_broker("ytmd-g", host, port, timeouts.connect).await {
-            Ok(connected) => connected,
-            Err(e) => {
-                log::debug!("Listen Together: broker unavailable: {e}");
-                continue;
+        attempts.spawn(attempt_join(
+            host,
+            port,
+            timeouts,
+            clean_code.clone(),
+            user_id.clone(),
+            join_payload.clone(),
+        ));
+    }
+
+    let mut any_reachable = false;
+    while let Some(result) = attempts.join_next().await {
+        match result {
+            Ok(Attempt::Joined { client, eventloop, room }) => {
+                // The other attempts' connections close as they're dropped.
+                attempts.abort_all();
+                return start_guest_session(manager, sink, client, *eventloop, room, &clean_code, &user_id);
             }
-        };
-        log::info!("Listen Together: Internet guest looking for room via broker {host}");
-        if let Some(room) = try_join_on_broker(
-            manager,
-            &sink,
-            client,
-            eventloop,
-            &clean_code,
-            &user_id,
-            &nickname,
-            timeouts.join_window,
-        )
-        .await
-        {
-            return Ok(room);
+            Ok(Attempt::Rejected(reason)) => {
+                attempts.abort_all();
+                return Err(reason.message_key());
+            }
+            Ok(Attempt::NoRoom) => any_reachable = true,
+            Ok(Attempt::Unreachable) | Err(_) => {}
         }
     }
-    Err(not_found_err())
+    Err(if any_reachable { not_found_err() } else { unreachable_err() })
 }
 
-/// One broker's join attempt: publish `Join` (re-sent every
-/// `JOIN_RETRY_INTERVAL`) and wait up to `window` for a `State` that lists
-/// us. On success, hands the connection to `run_guest_loop` and returns the
-/// room; otherwise disconnects and returns `None`.
-#[allow(clippy::too_many_arguments)]
-async fn try_join_on_broker(
-    manager: &Arc<SyncRoomManager>,
-    sink: &Arc<dyn SyncEventSink>,
-    client: AsyncClient,
-    mut eventloop: EventLoop,
-    clean_code: &str,
-    user_id: &str,
-    nickname: &str,
-    window: Duration,
-) -> Option<RoomState> {
-    let guest_topic = room_topic_guest(clean_code, user_id);
-    let broadcast_topic = room_topic_broadcast(clean_code);
-    let host_topic = room_topic_host(clean_code);
-
-    let join_msg = WireMessage::Join {
-        user_id: user_id.to_string(),
-        nickname: nickname.to_string(),
+/// One broker's join handshake: publish `Join` (re-sent every
+/// `JOIN_RETRY_INTERVAL`) and wait up to `join_window` for a `State` that
+/// lists us, or a `Rejected` addressed to us.
+async fn attempt_join(
+    host: &'static str,
+    port: u16,
+    timeouts: BrokerTimeouts,
+    code: String,
+    user_id: String,
+    join_payload: Vec<u8>,
+) -> Attempt {
+    let (client, mut eventloop) = match connect_broker("ytmd-g", host, port, timeouts.connect).await {
+        Ok(connected) => connected,
+        Err(e) => {
+            log::info!("Listen Together: broker unavailable: {e}");
+            return Attempt::Unreachable;
+        }
     };
-    let join_payload = serde_json::to_vec(&join_msg).ok()?;
+    log::info!("Listen Together: looking for room via broker {host}");
+
+    let guest_topic = room_topic_guest(&code, &user_id);
+    let broadcast_topic = room_topic_broadcast(&code);
+    let host_topic = room_topic_host(&code);
     // The broker handles one connection's packets in order, so both
     // subscriptions are in place before it sees the Join.
     let queued = client.try_subscribe(&guest_topic, QoS::AtLeastOnce).is_ok()
@@ -372,64 +431,75 @@ async fn try_join_on_broker(
             .try_publish(&host_topic, QoS::AtLeastOnce, false, join_payload.clone())
             .is_ok();
     if !queued {
-        return None;
+        return Attempt::NoRoom;
     }
 
-    let deadline = Instant::now() + window;
+    let deadline = Instant::now() + timeouts.join_window;
     let mut last_join = Instant::now();
-
     loop {
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
             let _ = client.try_disconnect();
-            return None;
+            return Attempt::NoRoom;
         }
-
         if last_join.elapsed() >= JOIN_RETRY_INTERVAL {
             let _ = client.try_publish(&host_topic, QoS::AtLeastOnce, false, join_payload.clone());
             last_join = Instant::now();
         }
 
-        let poll_result = tokio::time::timeout(remaining.min(JOIN_RETRY_INTERVAL), eventloop.poll()).await;
-        match poll_result {
-            Ok(Ok(Event::Incoming(Packet::Publish(publish)))) => {
-                if publish.topic != guest_topic && publish.topic != broadcast_topic {
-                    continue;
+        match tokio::time::timeout(remaining.min(JOIN_RETRY_INTERVAL), eventloop.poll()).await {
+            Ok(Ok(Event::Incoming(Packet::Publish(publish))))
+                if publish.topic == guest_topic || publish.topic == broadcast_topic =>
+            {
+                match serde_json::from_slice::<WireMessage>(&publish.payload) {
+                    // A broadcast `State` from another guest's join can
+                    // arrive before ours is processed; only a state that
+                    // lists us means we're in.
+                    Ok(WireMessage::State { room }) if room.has_member(&user_id) => {
+                        return Attempt::Joined { client, eventloop: Box::new(eventloop), room };
+                    }
+                    Ok(WireMessage::Rejected { user_id: to, reason }) if to == user_id => {
+                        let _ = client.try_disconnect();
+                        return Attempt::Rejected(reason);
+                    }
+                    _ => {}
                 }
-                // A broadcast `State` from another guest's join can arrive
-                // before ours is processed; only a state that lists us means
-                // we're in.
-                let Ok(WireMessage::State { room }) = serde_json::from_slice::<WireMessage>(&publish.payload) else {
-                    continue;
-                };
-                if !room.has_member(user_id) {
-                    continue;
-                }
-                let generation = manager.begin_session();
-                let local_room = manager.apply_remote_room_update(room, user_id, generation)?;
-                // See `connect_to_host`: the injected page must learn it joined.
-                sink.room_updated(&local_room);
-
-                let m = manager.clone();
-                let s = sink.clone();
-                let uid = user_id.to_string();
-                let rcode = clean_code.to_string();
-                let (shutdown_tx, shutdown_rx) = oneshot::channel();
-                let (outbox, outbox_rx) = mpsc::unbounded_channel();
-                let reader_task = tauri::async_runtime::spawn(async move {
-                    run_guest_loop(client, eventloop, m, s, uid, rcode, shutdown_rx, outbox_rx, generation).await;
-                });
-                manager.set_p2p_guest_session(reader_task, shutdown_tx, user_id.to_string(), outbox);
-                return Some(local_room);
             }
-            Ok(Ok(_)) => {}
+            Ok(Ok(_)) | Err(_) => {}
             Ok(Err(e)) => {
                 log::debug!("Guest MQTT join poll error: {:?}", e);
                 tokio::time::sleep(Duration::from_millis(200)).await;
             }
-            Err(_) => {}
         }
     }
+}
+
+fn start_guest_session(
+    manager: &Arc<SyncRoomManager>,
+    sink: Arc<dyn SyncEventSink>,
+    client: AsyncClient,
+    eventloop: EventLoop,
+    room: RoomStateWire,
+    code: &str,
+    user_id: &str,
+) -> Result<RoomState, String> {
+    let generation = manager.begin_session();
+    let local_room = manager
+        .apply_remote_room_update(room, user_id, generation)
+        .ok_or("Left the room while joining.")?;
+    // See `connect_to_host`: the injected page must learn it joined.
+    sink.room_updated(&local_room);
+
+    let m = manager.clone();
+    let uid = user_id.to_string();
+    let rcode = code.to_string();
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let (outbox, outbox_rx) = mpsc::unbounded_channel();
+    let reader_task = tauri::async_runtime::spawn(async move {
+        run_guest_loop(client, eventloop, m, sink, uid, rcode, shutdown_rx, outbox_rx, generation).await;
+    });
+    manager.set_p2p_guest_session(reader_task, shutdown_tx, user_id.to_string(), outbox);
+    Ok(local_room)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -452,7 +522,7 @@ async fn run_guest_loop(
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut last_heard = Instant::now();
 
-    loop {
+    let reason = loop {
         let event = tokio::select! {
             // `leave_room` already cleared local state; only tell the host.
             _ = &mut shutdown_rx => {
@@ -467,7 +537,7 @@ async fn run_guest_loop(
                 // gone without a goodbye (crash, sleep, lost network).
                 if last_heard.elapsed() > manager.liveness.timeout {
                     log::info!("Listen Together: host silent, leaving room");
-                    break;
+                    break LeaveReason::Lost;
                 }
                 let _ = client.try_publish(&host_topic, QoS::AtMostOnce, false, heartbeat.clone());
                 continue;
@@ -490,10 +560,11 @@ async fn run_guest_loop(
                     continue;
                 };
                 match msg {
+                    WireMessage::Kicked { user_id } if user_id == my_user_id => break LeaveReason::Kicked,
                     // The host dropped us (e.g. evicted after a network
                     // blip): its broadcasts keep arriving, but we're no
                     // longer a member, so stop acting like one.
-                    WireMessage::State { room } if !room.has_member(&my_user_id) => break,
+                    WireMessage::State { room } if !room.has_member(&my_user_id) => break LeaveReason::Lost,
                     WireMessage::State { room } => match manager.apply_remote_room_update(room, &my_user_id, generation) {
                         Some(local) => sink.room_updated(&local),
                         None => return, // a newer session owns the state now
@@ -504,7 +575,7 @@ async fn run_guest_loop(
                         }
                         sink.playback_updated(&state);
                     }
-                    WireMessage::Leave { user_id } if user_id == HOST_CLOSED_USER_ID => break,
+                    WireMessage::Leave { user_id } if user_id == HOST_CLOSED_USER_ID => break LeaveReason::Closed,
                     _ => {}
                 }
             }
@@ -514,28 +585,33 @@ async fn run_guest_loop(
                 tokio::time::sleep(Duration::from_millis(500)).await;
             }
         }
-    }
+    };
 
     let _ = client.try_disconnect();
     if manager.clear_guest_if_current(generation) {
-        sink.room_left();
+        sink.room_left(reason);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sync_room::{RoomMember, SyncControlRequest, SyncPlaybackState};
+    use crate::sync_room::{MemberRole, RoomMember, SyncControlRequest, SyncPlaybackState};
 
-    struct NoopSink;
-    impl SyncEventSink for NoopSink {
+    #[derive(Default)]
+    struct RecordingSink {
+        left: parking_lot::Mutex<Vec<LeaveReason>>,
+    }
+    impl SyncEventSink for RecordingSink {
         fn room_updated(&self, _room: &RoomState) {}
         fn playback_updated(&self, _state: &SyncPlaybackState) {}
-        fn room_left(&self) {}
+        fn room_left(&self, reason: LeaveReason) {
+            self.left.lock().push(reason);
+        }
         fn control_requested(&self, _request: &SyncControlRequest) {}
     }
     fn noop_sink() -> Arc<dyn SyncEventSink> {
-        Arc::new(NoopSink)
+        Arc::new(RecordingSink::default())
     }
 
     /// Accepts TCP connections and never answers: a broker that's up at the
@@ -552,23 +628,20 @@ mod tests {
         (port, task)
     }
 
-    /// Regression: a handshake that timed out used to count as "connected",
-    /// so host and guest could each settle on a different broker.
+    /// Regression: a handshake that timed out used to count as "connected".
     #[tokio::test]
     async fn test_unanswered_broker_is_not_treated_as_connected() {
         let (port, task) = silent_listener().await;
         let res = connect_broker("ytmd-test", "127.0.0.1", port, Duration::from_millis(300)).await;
         assert!(res.is_err(), "no ConnAck must mean not connected");
-
-        let none = connect_first_broker("ytmd-test", &[("127.0.0.1", port)], Duration::from_millis(300)).await;
-        assert!(none.is_err());
         task.abort();
     }
 
-    /// A guest walks every broker and gives up with the usual message
-    /// within the summed per-broker budgets.
+    /// With no broker answering, the guest says so (network problem), not
+    /// "room not found" (wrong code), and gives up within one broker's
+    /// budget, since brokers are tried in parallel.
     #[tokio::test]
-    async fn test_guest_join_tries_each_broker_then_reports_not_found() {
+    async fn test_guest_join_with_no_reachable_broker_reports_network_problem() {
         let (silent_port, task) = silent_listener().await;
         let closed_port = {
             let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -576,18 +649,18 @@ mod tests {
         };
         let brokers: &[(&'static str, u16)] = &[("127.0.0.1", silent_port), ("127.0.0.1", closed_port)];
         let timeouts = BrokerTimeouts {
-            connect: Duration::from_millis(300),
+            connect: Duration::from_millis(1500),
             join_window: Duration::from_millis(300),
         };
         let manager = Arc::new(SyncRoomManager::new());
 
         let started = Instant::now();
         let res = join_room_via(&manager, noop_sink(), "YTMD-NOPE".into(), "G".into(), brokers, timeouts).await;
-        assert_eq!(res.err(), Some(not_found_err()));
-        // Guards that the injected per-broker timeouts are honored rather
-        // than the ~15s production budget. Not a tight bound: first-use TLS
-        // setup (loading native root certs) alone took seconds on CI runners.
-        assert!(started.elapsed() < Duration::from_secs(8), "took {:?}", started.elapsed());
+        assert_eq!(res.err(), Some(unreachable_err()));
+        // In parallel: ~one connect budget, not the sum over brokers. Loose
+        // bound: first-use TLS setup (loading native root certs) alone took
+        // seconds on CI runners.
+        assert!(started.elapsed() < Duration::from_secs(6), "took {:?}", started.elapsed());
         assert!(manager.get_room_state().is_none());
         task.abort();
     }
@@ -607,24 +680,17 @@ mod tests {
     }
 
     #[test]
-    fn test_public_brokers_list_not_empty() {
+    fn test_public_brokers_use_tls_listeners() {
+        // Room codes, nicknames, and now-playing metadata cross these
+        // brokers over the open internet: never the plaintext port, and
+        // create_mqtt_client must actually select a TLS transport.
         assert!(!PUBLIC_BROKERS.is_empty());
         for (host, port) in PUBLIC_BROKERS {
-            assert!(!host.is_empty());
-            assert!(*port > 0);
+            assert_ne!(*port, 1883, "{host} must use its TLS port, not plaintext 1883");
         }
-    }
-
-    #[test]
-    fn test_public_brokers_use_tls_port_not_plaintext() {
-        // Regression guard: room codes, nicknames, and now-playing metadata
-        // cross these brokers over the open internet. Port 1883 is
-        // unauthenticated plaintext MQTT — anyone on-path can read or
-        // tamper with it. Every broker here must be the TLS listener (8883),
-        // and create_mqtt_client must actually select a TLS transport.
-        for (host, port) in PUBLIC_BROKERS {
-            assert_eq!(*port, 8883, "{host} must use the TLS port, not plaintext 1883");
-        }
+        // Regression: test.mosquitto.org's 8883 uses a private CA that rustls
+        // rejects, so that broker never worked; 8886 is its Let's Encrypt one.
+        assert!(PUBLIC_BROKERS.contains(&("test.mosquitto.org", 8886)));
 
         let (client, eventloop) = create_mqtt_client("test", PUBLIC_BROKERS[0].0, PUBLIC_BROKERS[0].1);
         assert!(
@@ -635,85 +701,106 @@ mod tests {
     }
 
     #[test]
-    fn test_wire_message_serialization_for_mqtt() {
+    fn test_join_carries_client_id_and_protocol() {
         let join = WireMessage::Join {
             user_id: "user-abc".to_string(),
             nickname: "Guest".to_string(),
+            client_id: "c0ffee".to_string(),
+            protocol: PROTOCOL_VERSION,
         };
         let bytes = serde_json::to_vec(&join).expect("serialize join");
-        let de: WireMessage = serde_json::from_slice(&bytes).expect("deserialize join");
-        match de {
-            WireMessage::Join { user_id, nickname } => {
-                assert_eq!(user_id, "user-abc");
-                assert_eq!(nickname, "Guest");
+        match serde_json::from_slice(&bytes).expect("deserialize join") {
+            WireMessage::Join { user_id, nickname, client_id, protocol } => {
+                assert_eq!((user_id.as_str(), nickname.as_str(), client_id.as_str()), ("user-abc", "Guest", "c0ffee"));
+                assert_eq!(protocol, PROTOCOL_VERSION);
             }
             _ => panic!("Expected Join variant"),
         }
+        // A pre-2 guest's Join still parses (then gets rejected as outdated).
+        let old: WireMessage = serde_json::from_str(r#"{"type":"Join","user_id":"u","nickname":"n"}"#).unwrap();
+        assert!(matches!(old, WireMessage::Join { protocol: 0, ref client_id, .. } if client_id.is_empty()));
     }
 
-    #[tokio::test]
-    async fn test_p2p_host_and_guest_exchange_over_network() {
-        // Run an end-to-end check with a unique room code
+    /// Polls done for up to 8s: public brokers are slow and uneven, so a
+    /// fixed sleep either wastes time or flakes.
+    async fn eventually(done: impl Fn() -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(8);
+        while !done() && Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+
+    /// Needs the internet (public brokers); returns early without them.
+    /// Covers the whole internet path: join via any broker, playback, kick
+    /// (guest learns why), banned rejoin, and the host closing the room.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_internet_join_kick_and_ban() {
         let room_code = format!("YTMD-TEST-{}", rand::random::<u32>());
         let host_manager = Arc::new(SyncRoomManager::new());
-        let guest_manager = Arc::new(SyncRoomManager::new());
+        let guest_manager = Arc::new(SyncRoomManager::new().with_client_id("guest-install-1".into()));
+        let host_sink: Arc<dyn SyncEventSink> = Arc::new(RecordingSink::default());
+        let guest_sink = Arc::new(RecordingSink::default());
 
-        let host_user_id = "host-user-1".to_string();
-        let initial_room = RoomState {
+        let generation = host_manager.begin_session();
+        host_manager.set_local_room(RoomState {
             room_code: room_code.clone(),
             is_host: true,
-            current_user_id: host_user_id.clone(),
+            current_user_id: "host-user-1".to_string(),
             members: vec![RoomMember {
-                id: host_user_id.clone(),
+                id: "host-user-1".to_string(),
                 nickname: "Host".to_string(),
                 is_host: true,
                 joined_at_ms: 1000,
+                role: MemberRole::Host,
             }],
             playback_state: None,
+            default_role: MemberRole::Dj,
+            banned: Vec::new(),
+        });
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        host_on_all_brokers(host_manager.clone(), host_sink.clone(), room_code.clone(), generation, shutdown_rx);
+
+        let Ok(guest_room) = join_room(&guest_manager, guest_sink.clone(), room_code.clone(), "Guest".into()).await else {
+            eprintln!("no public broker reachable, skipping");
+            let _ = shutdown_tx.send(true);
+            return;
         };
-        host_manager.set_local_room(initial_room);
+        assert_eq!(guest_room.members.len(), 2);
+        assert_eq!(guest_room.members[1].role, MemberRole::Dj);
+        let guest_id = guest_room.current_user_id.clone();
 
-        // Start host
-        let host_task = host_provide(host_manager.clone(), noop_sink(), room_code.clone()).await;
-        if let Ok((h_task, h_shutdown)) = host_task {
-            // Join as guest
-            tokio::time::sleep(Duration::from_millis(500)).await;
-            let join_res = join_room(&guest_manager, noop_sink(), room_code.clone(), "Guest".to_string()).await;
-            if let Ok(guest_room) = join_res {
-                assert_eq!(guest_room.room_code, room_code);
-                assert_eq!(guest_room.members.len(), 2);
-                assert_eq!(guest_room.members[1].nickname, "Guest");
+        host_manager.broadcast_to_peers(&WireMessage::Playback {
+            state: SyncPlaybackState {
+                video_id: "dQw4w9WgXcQ".to_string(),
+                title: "Test Track".to_string(),
+                artist: "Test Artist".to_string(),
+                current_time_secs: 42.0,
+                is_playing: true,
+                timestamp_ms: 2000,
+            },
+        });
+        let delivered = || guest_manager.get_room_state().and_then(|r| r.playback_state).is_some();
+        eventually(delivered).await;
+        let got = guest_manager.get_room_state().and_then(|r| r.playback_state).map(|p| p.video_id);
+        assert_eq!(got.as_deref(), Some("dQw4w9WgXcQ"));
 
-                // Test playback broadcast
-                let playback = SyncPlaybackState {
-                    video_id: "test1234".to_string(),
-                    title: "Test Track".to_string(),
-                    artist: "Test Artist".to_string(),
-                    current_time_secs: 42.0,
-                    is_playing: true,
-                    timestamp_ms: 2000,
-                };
-                host_manager.broadcast_to_peers(&WireMessage::Playback {
-                    state: playback.clone(),
-                });
+        host_manager.kick("host-user-1", &guest_id, &host_sink).unwrap();
+        eventually(|| !guest_sink.left.lock().is_empty()).await;
+        assert_eq!(guest_sink.left.lock().as_slice(), &[LeaveReason::Kicked]);
+        assert!(guest_manager.get_room_state().is_none());
 
-                // Give it a moment to receive broadcast
-                tokio::time::sleep(Duration::from_millis(600)).await;
-                let guest_state = guest_manager.get_room_state();
-                if let Some(gs) = guest_state {
-                    if let Some(ps) = gs.playback_state {
-                        assert_eq!(ps.video_id, "test1234");
-                        assert_eq!(ps.title, "Test Track");
-                    }
-                }
+        let again = join_room(&guest_manager, guest_sink.clone(), room_code.clone(), "Guest".into()).await;
+        assert_eq!(again.err().as_deref(), Some("sync.error.banned"));
 
-                // Host closing the room must reach the internet guest too.
-                let _ = h_shutdown.send(());
-                tokio::time::sleep(Duration::from_millis(1500)).await;
-                assert!(guest_manager.get_room_state().is_none(), "guest still thinks it's in a closed room");
-                return;
-            }
-            h_task.abort();
-        }
+        host_manager.unban("guest-install-1", &host_sink).unwrap();
+        join_room(&guest_manager, guest_sink.clone(), room_code, "Guest".into())
+            .await
+            .expect("unbanned guest can come back");
+
+        // Host closing the room must reach the internet guest too.
+        let _ = shutdown_tx.send(true);
+        eventually(|| guest_manager.get_room_state().is_none()).await;
+        assert!(guest_manager.get_room_state().is_none(), "guest still thinks it's in a closed room");
+        assert_eq!(guest_sink.left.lock().last(), Some(&LeaveReason::Closed));
     }
 }

@@ -77,13 +77,18 @@ pub fn run() {
     };
 
     let remote_token = remote_server::generate_token();
+    let sync_client_id = config_manager
+        .config_path()
+        .parent()
+        .map(|dir| sync_room::load_or_create_client_id(&dir.join("sync_client_id")))
+        .unwrap_or_else(sync_room::generate_user_id);
 
     let app_state = Arc::new(AppState {
         config_manager,
         discord_rpc: Mutex::new(discord_rpc),
         mpris: Mutex::new(None),
         current_track: Mutex::new(None),
-        sync_room: Arc::new(SyncRoomManager::new()),
+        sync_room: Arc::new(SyncRoomManager::new().with_client_id(sync_client_id)),
         power_manager: PowerManager::new(),
         remote_token: remote_token.clone(),
         remote_status: Arc::new(remote_server::RemoteServerStatus::new(initial_config.remote_enabled)),
@@ -241,6 +246,10 @@ pub fn run() {
             commands::join_sync_room,
             commands::leave_sync_room,
             commands::get_sync_room_state,
+            commands::kick_sync_member,
+            commands::set_sync_member_role,
+            commands::set_sync_default_role,
+            commands::unban_sync_member,
             commands::broadcast_sync_state,
             commands::get_remote_info,
             commands::set_inhibit_sleep,

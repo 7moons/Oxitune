@@ -36,7 +36,10 @@ YTMD provides native operating system integration, minimal memory overhead (<100
 
 ### Listen Together (P2P Room Sync)
 - Synchronize your YTMD playback and queue with friends in real time.
-- Generate shareable room codes (`YTMD-XXXX`) with automatic host discovery on local or VPN/Tailscale networks.
+- Generate shareable room codes (`YTMD-XXXX`) with automatic host discovery on local or VPN/Tailscale networks, and over the internet through public MQTT brokers (all tried at once).
+- Roles: the host makes people moderators, DJs (control playback) or listeners (listen only) and picks the role newcomers get.
+- The host and moderators can remove people; a removed install can't rejoin that session until the host lets it back in.
+- Everyone in a session needs a YTMD release newer than 0.1.1 (sync protocol 2); older guests are turned away.
 
 ### Mobile Web Remote Control
 - Instant QR-code local network remote control.

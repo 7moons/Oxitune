@@ -1,8 +1,9 @@
-import { showToast } from '../preload/ui/kit';
+import { openDialog, showToast } from '../preload/ui/kit';
 import { t } from '../preload/ui/i18n';
+import { canKick, MemberRole, roleOf } from '../preload/syncRoles';
 import { initAmbientBackdrop } from './ambient';
 import { getInitials } from './format';
-import { tr } from './i18n';
+import { COMPANION_LOCALES, I18nKey, tr } from './i18n';
 import { initWindowChrome } from './window';
 
 interface RoomMember {
@@ -10,6 +11,12 @@ interface RoomMember {
   nickname: string;
   is_host: boolean;
   joined_at_ms: number;
+  role?: MemberRole;
+}
+
+interface BannedMember {
+  client_id: string;
+  nickname: string;
 }
 
 interface RoomState {
@@ -17,19 +24,158 @@ interface RoomState {
   is_host: boolean;
   current_user_id: string;
   members: RoomMember[];
+  default_role?: MemberRole;
+  banned?: BannedMember[];
 }
 
+type LeaveReason = 'left' | 'closed' | 'kicked' | 'lost';
+
 const NAME_STORAGE_KEY = 'ytmd-sync-name';
+const ASSIGNABLE_ROLES: MemberRole[] = ['moderator', 'dj', 'listener'];
+const REMOVE_ICON =
+  'M14 8c0-2.21-1.79-4-4-4S6 5.79 6 8s1.79 4 4 4 4-1.79 4-4zm3 2v2h6v-2h-6zM2 18v2h16v-2c0-2.66-5.33-4-8-4s-8 1.34-8 4z';
 
 let activeRoom: RoomState | null = null;
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T | null;
 const show = (el: HTMLElement | null, visible: boolean) => el?.classList.toggle('is-hidden', !visible);
 
+const isI18nKey = (s: string): s is I18nKey => s in COMPANION_LOCALES.en;
+
+/** The backend reports sync failures as i18n keys (`sync.error.*`); anything
+ * else is an OS/network message shown as is. */
 function errorMessage(e: unknown): string {
-  if (typeof e === 'string') return e;
-  if (e instanceof Error) return e.message;
-  return tr('common.unknownError');
+  const raw = typeof e === 'string' ? e : e instanceof Error ? e.message : null;
+  if (raw === null) return tr('common.unknownError');
+  return isI18nKey(raw) ? tr(raw) : raw;
+}
+
+const ROLE_LABEL: Record<MemberRole, I18nKey> = {
+  host: 'sync.role.host',
+  moderator: 'sync.role.moderator',
+  dj: 'sync.role.dj',
+  listener: 'sync.role.listener'
+};
+
+const LEFT_MESSAGE: Partial<Record<LeaveReason, I18nKey>> = {
+  kicked: 'sync.left.kicked',
+  lost: 'sync.left.lost',
+  closed: 'sync.left.closed'
+};
+
+async function invokeSync(cmd: string, args: Record<string, unknown>): Promise<boolean> {
+  if (!window.__TAURI__?.core) return false;
+  try {
+    await window.__TAURI__.core.invoke(cmd, args);
+    return true;
+  } catch (e) {
+    console.error(`[YTMD Sync] ${cmd} failed:`, e);
+    showToast(errorMessage(e));
+    return false;
+  }
+}
+
+function confirmKick(member: RoomMember) {
+  openDialog({
+    id: 'ytmd-kick-dialog',
+    title: tr('sync.kick.confirmTitle', { name: member.nickname }),
+    body: [document.createTextNode(tr('sync.kick.confirmBody'))],
+    actions: [
+      { label: tr('sync.kick.cancel') },
+      {
+        label: tr('sync.kick.confirm'),
+        filled: true,
+        onClick: (close) => {
+          close();
+          void invokeSync('kick_sync_member', { memberId: member.id }).then((ok) => {
+            if (ok) showToast(tr('sync.kick.done', { name: member.nickname }));
+          });
+        }
+      }
+    ]
+  });
+}
+
+function memberRow(m: RoomMember, room: RoomState, myRole: MemberRole): HTMLElement {
+  const item = document.createElement('div');
+  item.className = 'member-item';
+  const avatar = document.createElement('span');
+  avatar.className = 'member-avatar';
+  avatar.textContent = getInitials(m.nickname);
+  const name = document.createElement('span');
+  name.className = 'member-name';
+  const isMe = m.id === room.current_user_id;
+  name.textContent = isMe ? `${m.nickname} ${tr('sync.role.you')}` : m.nickname;
+  item.append(avatar, name);
+
+  const role = roleOf(m);
+  if (room.is_host && role !== 'host') {
+    const select = document.createElement('select');
+    select.className = 'select member-role-select';
+    const label = tr('sync.role.change', { name: m.nickname });
+    select.setAttribute('aria-label', label);
+    select.dataset.ytmdTooltip = label;
+    for (const r of ASSIGNABLE_ROLES) {
+      const option = document.createElement('option');
+      option.value = r;
+      option.textContent = tr(ROLE_LABEL[r]);
+      select.appendChild(option);
+    }
+    select.value = role;
+    select.addEventListener('change', () => {
+      void invokeSync('set_sync_member_role', { memberId: m.id, role: select.value }).then((ok) => {
+        if (!ok) select.value = role;
+      });
+    });
+    item.appendChild(select);
+  } else {
+    const label = document.createElement('span');
+    label.className = 'member-role';
+    label.textContent = tr(ROLE_LABEL[role]);
+    item.appendChild(label);
+  }
+
+  if (!isMe && canKick(myRole, role)) {
+    const kick = document.createElement('button');
+    kick.className = 'icon-btn sm';
+    const label = tr('sync.kick', { name: m.nickname });
+    kick.setAttribute('aria-label', label);
+    kick.dataset.ytmdTooltip = label;
+    const ns = 'http://www.w3.org/2000/svg';
+    const icon = document.createElementNS(ns, 'svg');
+    icon.setAttribute('class', 'icon');
+    icon.setAttribute('viewBox', '0 0 24 24');
+    const path = document.createElementNS(ns, 'path');
+    path.setAttribute('d', REMOVE_ICON);
+    icon.appendChild(path);
+    kick.appendChild(icon);
+    kick.addEventListener('click', () => confirmKick(m));
+    item.appendChild(kick);
+  }
+  return item;
+}
+
+function bannedRow(b: BannedMember): HTMLElement {
+  const item = document.createElement('div');
+  item.className = 'member-item';
+  const avatar = document.createElement('span');
+  avatar.className = 'member-avatar is-muted';
+  avatar.textContent = getInitials(b.nickname);
+  const name = document.createElement('span');
+  name.className = 'member-name';
+  name.textContent = b.nickname;
+  const unban = document.createElement('button');
+  unban.className = 'btn btn-tonal';
+  unban.textContent = tr('sync.unban');
+  unban.addEventListener('click', () => {
+    unban.disabled = true;
+    void invokeSync('unban_sync_member', { clientId: b.client_id }).then((ok) => {
+      if (ok) showToast(tr('sync.unban.done', { name: b.nickname }));
+      else unban.disabled = false;
+    });
+  });
+  item.append(avatar, name, unban);
+  return item;
 }
 
 function rememberedName(): string {
@@ -59,25 +205,17 @@ function renderRoomView(room: RoomState | null) {
   const count = $('member-count');
   if (count) count.textContent = t().syncListeners(room.members.length);
 
-  const list = $('members-list');
-  if (!list) return;
-  list.replaceChildren(
-    ...room.members.map((m) => {
-      const item = document.createElement('div');
-      item.className = 'member-item';
-      const avatar = document.createElement('span');
-      avatar.className = 'member-avatar';
-      avatar.textContent = getInitials(m.nickname);
-      const name = document.createElement('span');
-      name.className = 'member-name';
-      name.textContent = m.id === room.current_user_id ? `${m.nickname} ${tr('sync.role.you')}` : m.nickname;
-      const role = document.createElement('span');
-      role.className = 'member-role';
-      role.textContent = m.is_host ? tr('sync.role.host') : tr('sync.role.listener');
-      item.append(avatar, name, role);
-      return item;
-    })
-  );
+  const me = room.members.find((m) => m.id === room.current_user_id);
+  const myRole = me ? roleOf(me) : room.is_host ? 'host' : 'listener';
+  $('members-list')?.replaceChildren(...room.members.map((m) => memberRow(m, room, myRole)));
+
+  show($('host-settings'), room.is_host);
+  const defaultRole = $<HTMLSelectElement>('default-role');
+  if (defaultRole && document.activeElement !== defaultRole) defaultRole.value = room.default_role ?? 'dj';
+
+  const banned = room.is_host ? (room.banned ?? []) : [];
+  show($('banned-section'), banned.length > 0);
+  $('banned-list')?.replaceChildren(...banned.map(bannedRow));
 }
 
 function showFormError(id: string, message: string) {
@@ -279,12 +417,26 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  const defaultRole = $<HTMLSelectElement>('default-role');
+  defaultRole?.addEventListener('change', () => {
+    const previous = activeRoom?.default_role ?? 'dj';
+    void invokeSync('set_sync_default_role', { role: defaultRole.value }).then((ok) => {
+      if (!ok) defaultRole.value = previous;
+    });
+  });
+
   window.__TAURI__?.event.listen<RoomState>('sync-room-updated', (e) => {
     activeRoom = e.payload;
     renderRoomView(activeRoom);
   });
-  window.__TAURI__?.event.listen('sync-room-left', () => {
+  window.__TAURI__?.event.listen<{ reason?: LeaveReason } | null>('sync-room-left', (e) => {
     activeRoom = null;
     renderRoomView(null);
+    // Say why we're back at the start, unless we left ourselves.
+    const message = LEFT_MESSAGE[e.payload?.reason ?? 'left'];
+    if (message) {
+      selectTab(false);
+      showFormError('guest-error', tr(message));
+    }
   });
 });

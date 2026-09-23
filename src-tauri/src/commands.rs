@@ -525,8 +525,53 @@ pub fn leave_sync_room(
     state: State<'_, Arc<AppState>>,
 ) -> Result<(), String> {
     crate::sync_room::leave_room(&state.sync_room);
-    let _ = app_handle.emit("sync-room-left", ());
+    let _ = app_handle.emit(
+        "sync-room-left",
+        crate::sync_room::RoomLeftPayload { reason: crate::sync_room::LeaveReason::Left },
+    );
     Ok(())
+}
+
+/// Host or moderator: removes a member and bans their install from the room.
+#[tauri::command]
+pub fn kick_sync_member(
+    app_handle: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    member_id: String,
+) -> Result<(), String> {
+    let sink: Arc<dyn crate::sync_room::SyncEventSink> = Arc::new(app_handle);
+    crate::sync_room::kick_member(&state.sync_room, &sink, &member_id)
+}
+
+#[tauri::command]
+pub fn set_sync_member_role(
+    app_handle: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    member_id: String,
+    role: crate::sync_room::MemberRole,
+) -> Result<(), String> {
+    let sink: Arc<dyn crate::sync_room::SyncEventSink> = Arc::new(app_handle);
+    state.sync_room.set_member_role(&member_id, role, &sink)
+}
+
+#[tauri::command]
+pub fn set_sync_default_role(
+    app_handle: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    role: crate::sync_room::MemberRole,
+) -> Result<(), String> {
+    let sink: Arc<dyn crate::sync_room::SyncEventSink> = Arc::new(app_handle);
+    state.sync_room.set_default_role(role, &sink)
+}
+
+#[tauri::command]
+pub fn unban_sync_member(
+    app_handle: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    client_id: String,
+) -> Result<(), String> {
+    let sink: Arc<dyn crate::sync_room::SyncEventSink> = Arc::new(app_handle);
+    state.sync_room.unban(&client_id, &sink)
 }
 
 #[tauri::command]

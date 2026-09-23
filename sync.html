@@ -89,6 +89,26 @@
           <div class="member-list" id="members-list"></div>
         </div>
 
+        <div id="host-settings" class="is-hidden">
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="sync.defaultRole">New people join as</span>
+              <span class="setting-desc" data-i18n="sync.defaultRole.desc">DJs can skip, pause and pick songs. Listeners only listen.</span>
+            </div>
+            <select id="default-role" class="select" data-i18n-label="sync.defaultRole">
+              <option value="dj" data-i18n="sync.role.dj">DJ</option>
+              <option value="listener" data-i18n="sync.role.listener">Listener</option>
+            </select>
+          </div>
+        </div>
+
+        <div id="banned-section" class="is-hidden">
+          <div class="list-heading">
+            <span data-i18n="sync.banned.title">Removed</span>
+          </div>
+          <div class="member-list" id="banned-list"></div>
+        </div>
+
         <div class="form-actions">
           <button id="leave-room-btn" class="btn btn-tonal btn-danger" data-i18n="sync.leave">Leave session</button>
         </div>

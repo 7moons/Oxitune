@@ -6,11 +6,14 @@ import {
   controlForCommand,
   isStalePayload,
   LocalPlayback,
+  ownRole,
+  RoomMemberPayload,
   RoomSyncController,
   SyncPlaybackPayload,
   TransitEstimator
 } from '../plugins/sync-room';
 import { isSyncGuest } from '../preload/syncRole';
+import { canControl, canKick, roleOf } from '../preload/syncRoles';
 
 const payload = (over: Partial<SyncPlaybackPayload> = {}): SyncPlaybackPayload => ({
   video_id: 'dQw4w9WgXcQ',
@@ -327,6 +330,59 @@ describe('RoomSyncController (guest)', () => {
     const c = new RoomSyncController();
     c.setRoomState(true, true);
     expect(c.handleLocalTrackChange('bbbbbbbbbbb', 1_000)).toBeNull();
+  });
+
+  test('a listener guest sends nothing to the host and is told why', async () => {
+    g.document = { ...(g.document as object), documentElement: { lang: 'en' } }; // for t()
+    const toasts: string[] = [];
+    const c = new RoomSyncController((m) => toasts.push(m));
+    c.setRoomState(true, false, false);
+    let invoked = 0;
+    const invoke = async () => {
+      invoked++;
+      return null;
+    };
+    c.requestControl({ kind: 'next' }, invoke);
+    expect(invoked).toBe(0);
+    expect(toasts).toHaveLength(1);
+
+    c.handleRemotePlayback(payload({ timestamp_ms: 1_000 }), fakeVideo(), 1_000);
+    expect(c.handleLocalTrackChange('bbbbbbbbbbb', 2_000)).toBeNull(); // the host sync pulls it back instead
+
+    c.setRoomState(true, false, true); // promoted to DJ
+    c.requestControl({ kind: 'next' }, invoke);
+    expect(invoked).toBe(1);
+  });
+});
+
+describe('Listen Together roles', () => {
+  const room = (members: RoomMemberPayload[], me: string, isHost = false) => ({
+    members,
+    current_user_id: me,
+    is_host: isHost
+  });
+
+  test('own role, with members from hosts that predate roles counting as DJs', () => {
+    const members: RoomMemberPayload[] = [
+      { id: 'h', nickname: 'H', is_host: true },
+      { id: 'a', nickname: 'A', is_host: false, role: 'listener' },
+      { id: 'b', nickname: 'B', is_host: false }
+    ];
+    expect(ownRole(room(members, 'h', true))).toBe('host');
+    expect(ownRole(room(members, 'a'))).toBe('listener');
+    expect(ownRole(room(members, 'b'))).toBe('dj');
+    expect(canControl('listener')).toBe(false);
+    expect(canControl('dj')).toBe(true);
+  });
+
+  test('kick rights mirror MemberRole::can_kick in sync_room.rs', () => {
+    expect(canKick('host', 'moderator')).toBe(true);
+    expect(canKick('moderator', 'dj')).toBe(true);
+    expect(canKick('moderator', 'listener')).toBe(true);
+    expect(canKick('moderator', 'moderator')).toBe(false);
+    expect(canKick('moderator', 'host')).toBe(false);
+    expect(canKick('dj', 'listener')).toBe(false);
+    expect(roleOf({ is_host: true, role: 'listener' })).toBe('host');
   });
 });
 

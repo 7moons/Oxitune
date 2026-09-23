@@ -54,12 +54,123 @@ async fn read_line_capped<R: tokio::io::AsyncBufRead + Unpin>(
     (&mut *reader).take(MAX_LINE_LEN).read_line(buf).await
 }
 
+/// Sent in every `Join`. The host turns away guests below it with
+/// `RejectReason::Outdated`: before 2 a `Join` carried no `client_id`, so a
+/// kicked guest could come straight back.
+pub(crate) const PROTOCOL_VERSION: u32 = 2;
+const MAX_NICKNAME_CHARS: usize = 32;
+
+/// What a member may do in the room. Only the host's copy counts: it checks
+/// every guest request against it, so a guest editing its own view gains
+/// nothing.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MemberRole {
+    Host,
+    /// Controls playback and removes DJs and listeners.
+    Moderator,
+    /// Controls playback: skip, pause, pick songs. What every guest was
+    /// before roles existed, hence the default for a peer that sends none.
+    #[default]
+    Dj,
+    /// Listens only.
+    Listener,
+}
+
+impl MemberRole {
+    fn rank(self) -> u8 {
+        match self {
+            MemberRole::Host => 3,
+            MemberRole::Moderator => 2,
+            MemberRole::Dj => 1,
+            MemberRole::Listener => 0,
+        }
+    }
+
+    pub fn can_control(self) -> bool {
+        self != MemberRole::Listener
+    }
+
+    /// Host removes anyone else; a moderator removes DJs and listeners.
+    pub fn can_kick(self, target: MemberRole) -> bool {
+        self.rank() >= MemberRole::Moderator.rank() && self.rank() > target.rank()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RoomMember {
     pub id: String,
     pub nickname: String,
     pub is_host: bool,
     pub joined_at_ms: u64,
+    #[serde(default)]
+    pub role: MemberRole,
+}
+
+/// Someone the host removed. Keyed by the guest's install-wide `client_id`
+/// (not its per-join member id), so rejoining under a new id doesn't work.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BannedMember {
+    pub client_id: String,
+    pub nickname: String,
+}
+
+/// Why the host turned a `Join` away. Carried to the guest in `Rejected`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RejectReason {
+    Banned,
+    Full,
+    Outdated,
+    Closed,
+}
+
+impl RejectReason {
+    /// The i18n key the sync window shows for it (`src/ui/i18n.ts`).
+    pub(crate) fn message_key(self) -> String {
+        match self {
+            RejectReason::Banned => "sync.error.banned",
+            RejectReason::Full => "sync.error.full",
+            RejectReason::Outdated => "sync.error.outdated",
+            RejectReason::Closed => "sync.error.notFound",
+        }
+        .to_string()
+    }
+}
+
+/// Why this instance is no longer in a room, sent with `sync-room-left`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LeaveReason {
+    /// We left ourselves.
+    Left,
+    /// The host closed the room.
+    Closed,
+    /// The host (or a moderator) removed us.
+    Kicked,
+    /// The host went silent, or dropped us after a network blip.
+    Lost,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RoomLeftPayload {
+    pub reason: LeaveReason,
+}
+
+/// A guest's join request as the host sees it, whichever transport it came
+/// over.
+#[derive(Debug, Clone)]
+pub(crate) struct JoinRequest {
+    pub user_id: String,
+    pub nickname: String,
+    pub client_id: String,
+    pub protocol: u32,
+}
+
+pub(crate) struct Admission {
+    pub room: RoomState,
+    /// This guest's previous member id, if its install was already in.
+    pub replaced: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -84,6 +195,18 @@ pub struct RoomState {
     pub current_user_id: String,
     pub members: Vec<RoomMember>,
     pub playback_state: Option<SyncPlaybackState>,
+    /// The role a new guest gets.
+    #[serde(default)]
+    pub default_role: MemberRole,
+    /// Host only (never on the wire): who can't come back.
+    #[serde(default)]
+    pub banned: Vec<BannedMember>,
+}
+
+impl RoomState {
+    fn member(&self, member_id: &str) -> Option<&RoomMember> {
+        self.members.iter().find(|m| m.id == member_id)
+    }
 }
 
 /// The objective, shared part of room state that actually goes over the
@@ -98,6 +221,8 @@ pub(crate) struct RoomStateWire {
     room_code: String,
     members: Vec<RoomMember>,
     playback_state: Option<SyncPlaybackState>,
+    #[serde(default)]
+    default_role: MemberRole,
 }
 
 impl From<&RoomState> for RoomStateWire {
@@ -106,6 +231,7 @@ impl From<&RoomState> for RoomStateWire {
             room_code: r.room_code.clone(),
             members: r.members.clone(),
             playback_state: r.playback_state.clone(),
+            default_role: r.default_role,
         }
     }
 }
@@ -122,6 +248,8 @@ impl RoomStateWire {
             current_user_id,
             members: self.members,
             playback_state: self.playback_state,
+            default_role: self.default_role,
+            banned: Vec::new(),
         }
     }
 }
@@ -135,7 +263,25 @@ impl RoomStateWire {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub(crate) enum WireMessage {
-    Join { user_id: String, nickname: String },
+    /// `client_id` is stable per install (see `load_or_create_client_id`);
+    /// both fields are missing from pre-2 guests, which the host rejects.
+    Join {
+        user_id: String,
+        nickname: String,
+        #[serde(default)]
+        client_id: String,
+        #[serde(default)]
+        protocol: u32,
+    },
+    /// Host -> the guest whose `Join` was turned away.
+    Rejected { user_id: String, reason: RejectReason },
+    /// Host -> room: `user_id` was removed and banned. Sent to everyone (the
+    /// removed guest's connection may be the MQTT broadcast topic); only
+    /// that guest acts on it.
+    Kicked { user_id: String },
+    /// Guest -> host: a moderator's request. The host checks the sender's
+    /// role itself.
+    Moderate { user_id: String, action: Moderation },
     State { room: RoomStateWire },
     Playback { state: SyncPlaybackState },
     Leave { user_id: String },
@@ -175,6 +321,13 @@ impl SyncControl {
             _ => true,
         }
     }
+}
+
+/// What a moderator guest asks the host to do to another member.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Moderation {
+    Kick { member_id: String },
 }
 
 /// A guest's `Control` as handed to the host's page: the request and the
@@ -240,7 +393,7 @@ struct Beacon {
 pub trait SyncEventSink: Send + Sync + 'static {
     fn room_updated(&self, room: &RoomState);
     fn playback_updated(&self, state: &SyncPlaybackState);
-    fn room_left(&self);
+    fn room_left(&self, reason: LeaveReason);
     fn control_requested(&self, request: &SyncControlRequest);
 }
 
@@ -251,8 +404,8 @@ impl SyncEventSink for AppHandle {
     fn playback_updated(&self, state: &SyncPlaybackState) {
         let _ = self.emit("sync-playback-remote", state);
     }
-    fn room_left(&self) {
-        let _ = self.emit("sync-room-left", ());
+    fn room_left(&self, reason: LeaveReason) {
+        let _ = self.emit("sync-room-left", RoomLeftPayload { reason });
     }
     fn control_requested(&self, request: &SyncControlRequest) {
         let _ = self.emit("sync-control-remote", request);
@@ -262,17 +415,12 @@ impl SyncEventSink for AppHandle {
 struct HostSession {
     accept_task: tauri::async_runtime::JoinHandle<()>,
     beacon_task: tauri::async_runtime::JoinHandle<()>,
-    /// The libp2p rendezvous+relay event loop (see `p2p_sync.rs`), started
-    /// alongside the LAN beacon so a guest on a different network can find
-    /// this room through the public DHT while a same-LAN guest still gets
-    /// the faster UDP beacon path. `None` if the P2P swarm failed to start
-    /// (e.g. no usable transport) — LAN hosting still works without it.
-    p2p_task: Option<tauri::async_runtime::JoinHandle<()>>,
-    /// Asks the P2P host loop to publish a final `Leave` on the room's
-    /// broadcast topic before exiting, so internet guests learn the room
-    /// closed instead of silently waiting forever (the MQTT transport has
-    /// no connection-level EOF between host and guest like TCP does).
-    p2p_shutdown: Option<oneshot::Sender<()>>,
+    /// Flipped to `true` on leave: every internet (MQTT) host loop publishes
+    /// a final `Leave` on its broadcast topic and exits, so internet guests
+    /// learn the room closed instead of waiting (MQTT has no connection-level
+    /// EOF between host and guest like TCP does). A loop still connecting
+    /// just gives up. `None` when internet hosting is off.
+    internet_shutdown: Option<tokio::sync::watch::Sender<bool>>,
     /// Sends the host's heartbeat to every guest and evicts silent members.
     liveness_task: tauri::async_runtime::JoinHandle<()>,
     /// The TCP port this instance is listening on. Real guests never need
@@ -304,6 +452,39 @@ struct GuestSession {
     shutdown: Option<oneshot::Sender<()>>,
 }
 
+/// This install's identity in rooms, stored next to the config
+/// (`~/.ytmd/sync_client_id`) rather than in `config.json`, which every
+/// window can rewrite through `save_config`. Created on first use; if the
+/// file can't be written the id only lasts until restart.
+pub fn load_or_create_client_id(path: &std::path::Path) -> String {
+    if let Ok(existing) = std::fs::read_to_string(path) {
+        let id = existing.trim();
+        if is_valid_client_id(id) {
+            return id.to_string();
+        }
+    }
+    use rand::Rng;
+    let bytes: [u8; 16] = rand::rng().random();
+    let id: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+    if let Err(e) = std::fs::write(path, &id) {
+        log::warn!("Listen Together: couldn't save client id to {}: {e}", path.display());
+    }
+    id
+}
+
+fn is_valid_client_id(id: &str) -> bool {
+    (16..=64).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+}
+
+fn clean_nickname(raw: &str) -> String {
+    let name: String = raw.trim().chars().filter(|c| !c.is_control()).take(MAX_NICKNAME_CHARS).collect();
+    if name.is_empty() {
+        "?".to_string()
+    } else {
+        name
+    }
+}
+
 pub struct SyncRoomManager {
     state: Mutex<Option<RoomState>>,
     host: Mutex<Option<HostSession>>,
@@ -328,6 +509,11 @@ pub struct SyncRoomManager {
     /// Whether `create_room` also hosts over the internet (MQTT) transport.
     /// Only turned off by tests that must not depend on public brokers.
     internet_enabled: bool,
+    /// Our install-wide id, sent in every `Join`.
+    client_id: String,
+    /// Host side: each member's `client_id`, kept off the wire so members
+    /// can't learn (and join as) each other's.
+    member_clients: Mutex<HashMap<String, String>>,
 }
 
 impl Default for SyncRoomManager {
@@ -351,7 +537,20 @@ impl SyncRoomManager {
             session_gen: AtomicU64::new(0),
             liveness,
             internet_enabled,
+            client_id: generate_user_id(),
+            member_clients: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// The app passes its persisted id (`load_or_create_client_id`); without
+    /// it every run is a new identity and bans don't outlive a restart.
+    pub fn with_client_id(mut self, client_id: String) -> Self {
+        self.client_id = client_id;
+        self
+    }
+
+    pub(crate) fn client_id(&self) -> &str {
+        &self.client_id
     }
 
     /// Starts a new session generation and returns it.
@@ -379,20 +578,43 @@ impl SyncRoomManager {
     /// `pub(crate)`: called by both the TCP `peer_task` below and by
     /// `p2p_sync.rs`'s host loop when a peer's `Join` arrives — the
     /// membership/capacity logic is transport-agnostic.
-    pub(crate) fn add_member(&self, member_id: String, nickname: String) -> Result<RoomState, &'static str> {
-        let mut guard = self.state.lock();
-        let room = guard.as_mut().ok_or("Room closed")?;
-        if room.members.len() >= MAX_MEMBERS {
-            return Err("Room is full");
+    ///
+    /// A guest whose install is already in the room (it crashed or lost its
+    /// network and came back before eviction) replaces its old entry, whose
+    /// id comes back in `Admission::replaced` so the caller can drop that
+    /// connection.
+    pub(crate) fn admit_member(&self, join: JoinRequest) -> Result<Admission, RejectReason> {
+        if join.protocol < PROTOCOL_VERSION || join.client_id.is_empty() {
+            return Err(RejectReason::Outdated);
         }
-        self.last_seen.lock().insert(member_id.clone(), Instant::now());
+        let mut guard = self.state.lock();
+        let room = guard.as_mut().ok_or(RejectReason::Closed)?;
+        if room.banned.iter().any(|b| b.client_id == join.client_id) {
+            return Err(RejectReason::Banned);
+        }
+        let mut clients = self.member_clients.lock();
+        let replaced = clients
+            .iter()
+            .find(|(member, client)| **client == join.client_id && **member != join.user_id)
+            .map(|(member, _)| member.clone());
+        if let Some(old) = &replaced {
+            room.members.retain(|m| &m.id != old);
+            clients.remove(old);
+            self.last_seen.lock().remove(old);
+        }
+        if room.members.len() >= MAX_MEMBERS {
+            return Err(RejectReason::Full);
+        }
+        clients.insert(join.user_id.clone(), join.client_id);
+        self.last_seen.lock().insert(join.user_id.clone(), Instant::now());
         room.members.push(RoomMember {
-            id: member_id,
-            nickname,
+            id: join.user_id,
+            nickname: clean_nickname(&join.nickname),
             is_host: false,
             joined_at_ms: now_ms(),
+            role: room.default_role,
         });
-        Ok(room.clone())
+        Ok(Admission { room: room.clone(), replaced })
     }
 
     /// Whether `member_id` is currently in the room. The internet transport
@@ -414,6 +636,7 @@ impl SyncRoomManager {
         let before = room.members.len();
         room.members.retain(|m| m.id != member_id);
         self.last_seen.lock().remove(member_id);
+        self.member_clients.lock().remove(member_id);
         (room.members.len() != before).then(|| room.clone())
     }
 
@@ -464,21 +687,6 @@ impl SyncRoomManager {
         }
     }
 
-    /// Attaches the libp2p host event loop's task handle to the current
-    /// host session, if one exists, so `leave_room` can abort it alongside
-    /// the LAN accept/beacon tasks. A no-op if this instance isn't hosting
-    /// (e.g. `create_room` failed before this ran) or already left.
-    pub(crate) fn attach_p2p_host_task(
-        &self,
-        task: tauri::async_runtime::JoinHandle<()>,
-        shutdown: oneshot::Sender<()>,
-    ) {
-        if let Some(host) = self.host.lock().as_mut() {
-            host.p2p_task = Some(task);
-            host.p2p_shutdown = Some(shutdown);
-        }
-    }
-
     /// Records that this instance is now a guest of a room reached via
     /// libp2p, mirroring what `connect_to_host` does for a TCP guest
     /// session. `reader_task` owns the swarm and must be aborted (by
@@ -515,13 +723,118 @@ impl SyncRoomManager {
             let Some(room) = guard.as_ref().filter(|r| r.is_host) else {
                 return;
             };
-            match room.members.iter().find(|m| m.id == member_id) {
-                Some(m) => m.nickname.clone(),
-                None => return,
+            match room.member(member_id) {
+                Some(m) if m.role.can_control() => m.nickname.clone(),
+                _ => return,
             }
         };
         self.touch_member(member_id);
         sink.control_requested(&SyncControlRequest { from, action });
+    }
+
+    /// Host side: a guest's `Moderate` arrived.
+    pub(crate) fn handle_guest_moderation(&self, member_id: &str, action: Moderation, sink: &Arc<dyn SyncEventSink>) {
+        self.touch_member(member_id);
+        match action {
+            Moderation::Kick { member_id: target } => {
+                if let Err(e) = self.kick(member_id, &target, sink) {
+                    log::info!("Listen Together: refused kick of {target} by {member_id}: {e}");
+                }
+            }
+        }
+    }
+
+    /// Host side: removes `target_id` on behalf of `actor_id` (the host
+    /// itself or a moderator) and bans its install from coming back.
+    pub(crate) fn kick(&self, actor_id: &str, target_id: &str, sink: &Arc<dyn SyncEventSink>) -> Result<(), String> {
+        let banned = {
+            let mut guard = self.state.lock();
+            let room = guard.as_mut().filter(|r| r.is_host).ok_or("sync.error.notHost")?;
+            let actor = room.member(actor_id).ok_or("sync.error.notAllowed")?;
+            let target = room.member(target_id).ok_or("sync.error.noSuchMember")?;
+            if !actor.role.can_kick(target.role) {
+                return Err("sync.error.notAllowed".into());
+            }
+            let client_id = self
+                .member_clients
+                .lock()
+                .get(target_id)
+                .cloned()
+                .unwrap_or_else(|| target_id.to_string());
+            let ban = BannedMember { client_id, nickname: target.nickname.clone() };
+            if !room.banned.contains(&ban) {
+                room.banned.push(ban.clone());
+            }
+            ban
+        };
+        log::info!("Listen Together: {} removed from the room by {actor_id}", banned.nickname);
+        // Queued before the peer's sender is dropped below, so its TCP
+        // connection still delivers it before closing.
+        self.broadcast_to_peers(&WireMessage::Kicked { user_id: target_id.to_string() });
+        self.unregister_peer(target_id);
+        if let Some(room) = self.remove_member(target_id) {
+            self.announce_room(&room, sink);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn set_member_role(
+        &self,
+        target_id: &str,
+        role: MemberRole,
+        sink: &Arc<dyn SyncEventSink>,
+    ) -> Result<(), String> {
+        if role == MemberRole::Host {
+            return Err("sync.error.notAllowed".into());
+        }
+        let room = {
+            let mut guard = self.state.lock();
+            let room = guard.as_mut().filter(|r| r.is_host).ok_or("sync.error.notHost")?;
+            let target = room
+                .members
+                .iter_mut()
+                .find(|m| m.id == target_id)
+                .ok_or("sync.error.noSuchMember")?;
+            if target.is_host {
+                return Err("sync.error.notAllowed".into());
+            }
+            target.role = role;
+            room.clone()
+        };
+        self.announce_room(&room, sink);
+        Ok(())
+    }
+
+    pub(crate) fn set_default_role(&self, role: MemberRole, sink: &Arc<dyn SyncEventSink>) -> Result<(), String> {
+        if role == MemberRole::Host {
+            return Err("sync.error.notAllowed".into());
+        }
+        let room = {
+            let mut guard = self.state.lock();
+            let room = guard.as_mut().filter(|r| r.is_host).ok_or("sync.error.notHost")?;
+            room.default_role = role;
+            room.clone()
+        };
+        self.announce_room(&room, sink);
+        Ok(())
+    }
+
+    pub(crate) fn unban(&self, client_id: &str, sink: &Arc<dyn SyncEventSink>) -> Result<(), String> {
+        let room = {
+            let mut guard = self.state.lock();
+            let room = guard.as_mut().filter(|r| r.is_host).ok_or("sync.error.notHost")?;
+            room.banned.retain(|b| b.client_id != client_id);
+            room.clone()
+        };
+        // Only the host's own windows show the ban list.
+        sink.room_updated(&room);
+        Ok(())
+    }
+
+    /// Host side: tells this app's windows and every guest the new state.
+    pub(crate) fn announce_room(&self, room: &RoomState, sink: &Arc<dyn SyncEventSink>) {
+        sink.room_updated(room);
+        self.broadcast_to_peers(&WireMessage::State { room: RoomStateWire::from(room) });
     }
 
     #[cfg(test)]
@@ -639,6 +952,7 @@ pub async fn create_room(
         nickname: nickname.clone(),
         is_host: true,
         joined_at_ms: now_ms(),
+        role: MemberRole::Host,
     };
 
     let room = RoomState {
@@ -647,11 +961,14 @@ pub async fn create_room(
         current_user_id: user_id,
         members: vec![host_member],
         playback_state: None,
+        default_role: MemberRole::Dj,
+        banned: Vec::new(),
     };
     let generation = manager.begin_session();
     *manager.state.lock() = Some(room.clone());
     manager.peers.lock().clear(); // defensive: leave_room already clears this, but never start with stale entries
     manager.last_seen.lock().clear();
+    manager.member_clients.lock().clear();
 
     let accept_manager = manager.clone();
     let accept_sink = sink.clone();
@@ -662,25 +979,24 @@ pub async fn create_room(
     let liveness_task =
         tauri::async_runtime::spawn(host_liveness_loop(manager.clone(), sink.clone(), generation));
 
+    // Also host on every public MQTT broker (alongside the LAN beacon, not
+    // instead of it), each in the background: a guest joins through
+    // whichever broker it reaches first, so host and guest no longer have
+    // to land on the same one. Brokers that can't be reached are skipped;
+    // LAN hosting works without any.
+    let internet_shutdown = manager.internet_enabled.then(|| {
+        let (tx, rx) = tokio::sync::watch::channel(false);
+        crate::p2p_sync::host_on_all_brokers(manager.clone(), sink.clone(), room_code, generation, rx);
+        tx
+    });
+
     *manager.host.lock() = Some(HostSession {
         accept_task,
         beacon_task,
-        p2p_task: None,
-        p2p_shutdown: None,
+        internet_shutdown,
         liveness_task,
         port: tcp_port,
     });
-
-    // Announce on a public MQTT broker alongside the LAN beacon (not instead
-    // of it) so a same-network guest still gets the near-instant UDP path,
-    // while a guest on a different network can still find this room. Best
-    // effort: if no broker is reachable, LAN hosting still works without it.
-    if manager.internet_enabled {
-        match crate::p2p_sync::host_provide(manager.clone(), sink.clone(), room_code).await {
-            Ok((task, shutdown)) => manager.attach_p2p_host_task(task, shutdown),
-            Err(e) => log::warn!("Listen Together: internet (P2P) hosting unavailable: {e}"),
-        }
-    }
 
     // Every window (the injected YTM page in particular, whose sync plugin
     // gates host broadcasting on it) learns about the new room right away,
@@ -712,23 +1028,32 @@ async fn peer_task(stream: TcpStream, manager: Arc<SyncRoomManager>, sink: Arc<d
         return;
     }
 
-    let (member_id, nickname) = match serde_json::from_str::<WireMessage>(line.trim()) {
-        Ok(WireMessage::Join { user_id, nickname }) => (user_id, nickname),
+    let join = match serde_json::from_str::<WireMessage>(line.trim()) {
+        Ok(WireMessage::Join { user_id, nickname, client_id, protocol }) => {
+            JoinRequest { user_id, nickname, client_id, protocol }
+        }
         _ => return,
     };
+    let member_id = join.user_id.clone();
 
-    let room = match manager.add_member(member_id.clone(), nickname) {
-        Ok(r) => r,
-        Err(_) => return, // room full or already closed — drop the connection
+    let admission = match manager.admit_member(join) {
+        Ok(a) => a,
+        Err(reason) => {
+            // Tell the guest why before dropping the connection.
+            if let Ok(mut json) = serde_json::to_string(&WireMessage::Rejected { user_id: member_id, reason }) {
+                json.push('\n');
+                let _ = write_half.write_all(json.as_bytes()).await;
+            }
+            return;
+        }
     };
+    if let Some(old) = &admission.replaced {
+        manager.unregister_peer(old);
+    }
 
     let (tx, mut rx) = mpsc::unbounded_channel::<WireMessage>();
     manager.register_peer(member_id.clone(), tx);
-
-    sink.room_updated(&room);
-    manager.broadcast_to_peers(&WireMessage::State {
-        room: RoomStateWire::from(&room),
-    });
+    manager.announce_room(&admission.room, &sink);
 
     loop {
         line.clear();
@@ -736,13 +1061,19 @@ async fn peer_task(stream: TcpStream, manager: Arc<SyncRoomManager>, sink: Arc<d
             read_res = read_line_capped(&mut reader, &mut line) => {
                 match read_res {
                     Ok(0) | Err(_) => break,
-                    // Any line proves the guest is alive. Only `Control`
-                    // carries anything more; unknown lines are ignored so
-                    // newer guests don't break this host.
+                    // Any line proves the guest is alive. Only `Control` and
+                    // `Moderate` carry anything more; unknown lines are
+                    // ignored so newer guests don't break this host.
                     Ok(_) => {
                         manager.touch_member(&member_id);
-                        if let Ok(WireMessage::Control { action, .. }) = serde_json::from_str::<WireMessage>(line.trim()) {
-                            manager.handle_guest_control(&member_id, action, &sink);
+                        match serde_json::from_str::<WireMessage>(line.trim()) {
+                            Ok(WireMessage::Control { action, .. }) => {
+                                manager.handle_guest_control(&member_id, action, &sink);
+                            }
+                            Ok(WireMessage::Moderate { action, .. }) => {
+                                manager.handle_guest_moderation(&member_id, action, &sink);
+                            }
+                            _ => {}
                         }
                     }
                 }
@@ -765,10 +1096,7 @@ async fn peer_task(stream: TcpStream, manager: Arc<SyncRoomManager>, sink: Arc<d
 
     manager.unregister_peer(&member_id);
     if let Some(room) = manager.remove_member(&member_id) {
-        sink.room_updated(&room);
-        manager.broadcast_to_peers(&WireMessage::State {
-            room: RoomStateWire::from(&room),
-        });
+        manager.announce_room(&room, &sink);
     }
 }
 
@@ -788,10 +1116,7 @@ async fn host_liveness_loop(manager: Arc<SyncRoomManager>, sink: Arc<dyn SyncEve
         };
         manager.broadcast_to_peers(&WireMessage::Heartbeat { user_id: host_id });
         if let Some(room) = manager.evict_stale_members() {
-            sink.room_updated(&room);
-            manager.broadcast_to_peers(&WireMessage::State {
-                room: RoomStateWire::from(&room),
-            });
+            manager.announce_room(&room, &sink);
         }
     }
 }
@@ -888,6 +1213,8 @@ async fn connect_to_host(
     let join_msg = WireMessage::Join {
         user_id: user_id.clone(),
         nickname,
+        client_id: manager.client_id().to_string(),
+        protocol: PROTOCOL_VERSION,
     };
     let mut join_json = serde_json::to_string(&join_msg).map_err(|e| e.to_string())?;
     join_json.push('\n');
@@ -909,6 +1236,7 @@ async fn connect_to_host(
         serde_json::from_str(line.trim()).map_err(|_| "Invalid response from host.".to_string())?;
     let initial_wire = match initial {
         WireMessage::State { room } => room,
+        WireMessage::Rejected { reason, .. } => return Err(reason.message_key()),
         _ => return Err("Unexpected response from host.".to_string()),
     };
 
@@ -987,7 +1315,7 @@ async fn guest_reader_loop(
 ) {
     let silence_limit = manager.liveness.timeout;
     let mut line = String::new();
-    loop {
+    let reason = loop {
         line.clear();
         // The host pings every heartbeat interval, so a read that waits past
         // the liveness timeout means the host is gone even though TCP never
@@ -995,9 +1323,9 @@ async fn guest_reader_loop(
         match tokio::time::timeout(silence_limit, read_line_capped(&mut reader, &mut line)).await {
             Err(_) => {
                 log::info!("Listen Together: host silent for {silence_limit:?}, leaving room");
-                break;
+                break LeaveReason::Lost;
             }
-            Ok(Ok(0)) | Ok(Err(_)) => break,
+            Ok(Ok(0)) | Ok(Err(_)) => break LeaveReason::Closed,
             Ok(Ok(_)) => {
                 let Ok(msg) = serde_json::from_str::<WireMessage>(line.trim()) else {
                     continue;
@@ -1015,16 +1343,22 @@ async fn guest_reader_loop(
                         }
                         sink.playback_updated(&state);
                     }
+                    WireMessage::Kicked { user_id } if user_id == my_id => break LeaveReason::Kicked,
+                    WireMessage::Kicked { .. } => {} // someone else; the next State shows them gone
                     WireMessage::Heartbeat { .. } => {} // only proves liveness; the read above already counted it
-                    WireMessage::Join { .. } | WireMessage::Leave { .. } | WireMessage::Control { .. } => {} // host-bound only
+                    WireMessage::Join { .. }
+                    | WireMessage::Leave { .. }
+                    | WireMessage::Control { .. }
+                    | WireMessage::Moderate { .. } => {} // host-bound only
+                    WireMessage::Rejected { .. } => {} // only ever the reply to our Join
                     WireMessage::Ack => {} // Ack only exists on the internet transport
                 }
             }
         }
-    }
+    };
 
     if manager.clear_guest_if_current(generation) {
-        sink.room_left();
+        sink.room_left(reason);
     }
 }
 
@@ -1091,6 +1425,34 @@ pub fn send_control(manager: &Arc<SyncRoomManager>, action: SyncControl) -> Resu
         .map_err(|_| "Connection to the host is closed.".to_string())
 }
 
+/// Removes `member_id` from the room and bans it: directly when hosting,
+/// through the host when we're a moderator guest.
+pub fn kick_member(manager: &Arc<SyncRoomManager>, sink: &Arc<dyn SyncEventSink>, member_id: &str) -> Result<(), String> {
+    let (is_host, my_role, my_id, target_role) = {
+        let guard = manager.state.lock();
+        let room = guard.as_ref().ok_or("sync.error.notInRoom")?;
+        let me = room.member(&room.current_user_id).ok_or("sync.error.notInRoom")?;
+        let target = room.member(member_id).ok_or("sync.error.noSuchMember")?;
+        (room.is_host, me.role, me.id.clone(), target.role)
+    };
+    if is_host {
+        return manager.kick(&my_id, member_id, sink);
+    }
+    // The host re-checks; this only spares a pointless round trip.
+    if !my_role.can_kick(target_role) {
+        return Err("sync.error.notAllowed".into());
+    }
+    let guard = manager.guest.lock();
+    let guest = guard.as_ref().ok_or("sync.error.notInRoom")?;
+    guest
+        .outbox
+        .send(WireMessage::Moderate {
+            user_id: guest.user_id.clone(),
+            action: Moderation::Kick { member_id: member_id.to_string() },
+        })
+        .map_err(|_| "Connection to the host is closed.".to_string())
+}
+
 // ---------------------------------------------------------------------
 // Leaving
 // ---------------------------------------------------------------------
@@ -1103,22 +1465,16 @@ pub fn leave_room(manager: &Arc<SyncRoomManager>) {
         host.accept_task.abort();
         host.beacon_task.abort();
         host.liveness_task.abort();
-        match (host.p2p_shutdown, host.p2p_task) {
-            // The loop publishes its farewell and exits on its own.
-            (Some(shutdown), Some(task)) => {
-                if shutdown.send(()).is_err() {
-                    task.abort();
-                }
-            }
-            (_, Some(task)) => task.abort(),
-            _ => {}
+        // Each internet host loop publishes its farewell and exits on its
+        // own; a send error only means none is running any more.
+        if let Some(shutdown) = host.internet_shutdown {
+            let _ = shutdown.send(true);
         }
         // Dropping every registered peer's sender closes their mpsc
-        // channel; each peer_task's/P2P host loop's per-peer forwarder sees
-        // the channel end and exits on its own, closing that connection
-        // cleanly (TCP: peer_task's select! sees `rx.recv() == None`; P2P:
-        // aborting `p2p_task` above already tore the whole swarm down).
+        // channel; each peer_task sees `rx.recv() == None` and closes that
+        // TCP connection cleanly.
         manager.peers.lock().clear();
+        manager.member_clients.lock().clear();
     }
     if let Some(guest) = manager.guest.lock().take() {
         if let Some(task) = guest.writer_task {
@@ -1146,12 +1502,21 @@ mod tests {
     impl SyncEventSink for NoopSink {
         fn room_updated(&self, _room: &RoomState) {}
         fn playback_updated(&self, _state: &SyncPlaybackState) {}
-        fn room_left(&self) {}
+        fn room_left(&self, _reason: LeaveReason) {}
         fn control_requested(&self, _request: &SyncControlRequest) {}
     }
 
     fn noop_sink() -> Arc<dyn SyncEventSink> {
         Arc::new(NoopSink)
+    }
+
+    fn join_req(user_id: &str, client_id: &str) -> JoinRequest {
+        JoinRequest {
+            user_id: user_id.to_string(),
+            nickname: user_id.to_string(),
+            client_id: client_id.to_string(),
+            protocol: PROTOCOL_VERSION,
+        }
     }
 
     /// Default liveness, LAN only: loopback tests must not depend on
@@ -1196,55 +1561,38 @@ mod tests {
         let msg = WireMessage::Join {
             user_id: "user-1".to_string(),
             nickname: "Kacper".to_string(),
+            client_id: "install-1".to_string(),
+            protocol: PROTOCOL_VERSION,
         };
         let json = serde_json::to_string(&msg).unwrap();
         let back: WireMessage = serde_json::from_str(&json).unwrap();
         match back {
-            WireMessage::Join { user_id, nickname } => {
+            WireMessage::Join { user_id, nickname, client_id, .. } => {
                 assert_eq!(user_id, "user-1");
                 assert_eq!(nickname, "Kacper");
+                assert_eq!(client_id, "install-1");
             }
             _ => panic!("wrong variant"),
         }
     }
 
     #[test]
-    fn test_add_member_enforces_capacity() {
+    fn test_admit_member_enforces_capacity() {
         let manager = SyncRoomManager::new();
-        *manager.state.lock() = Some(RoomState {
-            room_code: "YTMD-TEST01".to_string(),
-            is_host: true,
-            current_user_id: "host".to_string(),
-            members: vec![RoomMember {
-                id: "host".to_string(),
-                nickname: "Host".to_string(),
-                is_host: true,
-                joined_at_ms: 0,
-            }],
-            playback_state: None,
-        });
+        manager.set_local_room(room_with(&[("host", true)]));
 
         for i in 0..(MAX_MEMBERS - 1) {
-            assert!(manager.add_member(format!("guest-{i}"), "G".to_string()).is_ok());
+            assert!(manager.admit_member(join_req(&format!("guest-{i}"), &format!("install-{i}"))).is_ok());
         }
         // Room is now full (MAX_MEMBERS members including host).
-        let result = manager.add_member("one-too-many".to_string(), "G".to_string());
-        assert!(result.is_err());
+        let result = manager.admit_member(join_req("one-too-many", "install-x"));
+        assert_eq!(result.err(), Some(RejectReason::Full));
     }
 
     #[test]
     fn test_remove_member_updates_state() {
         let manager = SyncRoomManager::new();
-        *manager.state.lock() = Some(RoomState {
-            room_code: "YTMD-TEST02".to_string(),
-            is_host: true,
-            current_user_id: "host".to_string(),
-            members: vec![
-                RoomMember { id: "host".to_string(), nickname: "Host".to_string(), is_host: true, joined_at_ms: 0 },
-                RoomMember { id: "guest-1".to_string(), nickname: "Guest".to_string(), is_host: false, joined_at_ms: 1 },
-            ],
-            playback_state: None,
-        });
+        manager.set_local_room(room_with(&[("host", true), ("guest-1", false)]));
 
         let updated = manager.remove_member("guest-1").unwrap();
         assert_eq!(updated.members.len(), 1);
@@ -1267,10 +1615,126 @@ mod tests {
                     nickname: id.to_string(),
                     is_host: *is_host,
                     joined_at_ms: 0,
+                    role: if *is_host { MemberRole::Host } else { MemberRole::Dj },
                 })
                 .collect(),
             playback_state: None,
+            default_role: MemberRole::Dj,
+            banned: Vec::new(),
         }
+    }
+
+    #[test]
+    fn test_role_permissions() {
+        use MemberRole::*;
+        assert!(Host.can_kick(Moderator) && Host.can_kick(Dj) && Host.can_kick(Listener));
+        assert!(Moderator.can_kick(Dj) && Moderator.can_kick(Listener));
+        assert!(!Moderator.can_kick(Moderator) && !Moderator.can_kick(Host));
+        assert!(!Dj.can_kick(Listener) && !Listener.can_kick(Listener));
+        assert!(Host.can_control() && Moderator.can_control() && Dj.can_control());
+        assert!(!Listener.can_control());
+        // A member from a host that predates roles defaults to the old behavior.
+        let m: RoomMember = serde_json::from_str(r#"{"id":"a","nickname":"n","is_host":false,"joined_at_ms":0}"#).unwrap();
+        assert_eq!(m.role, Dj);
+    }
+
+    /// The user-reported bug: a kicked guest could simply join again.
+    #[test]
+    fn test_kicked_install_cannot_rejoin_under_a_new_member_id() {
+        let manager = local_manager();
+        manager.set_local_room(room_with(&[("host", true)]));
+        manager.admit_member(join_req("guest-a", "install-1")).unwrap();
+
+        manager.kick("host", "guest-a", &noop_sink()).unwrap();
+        let room = manager.get_room_state().unwrap();
+        assert_eq!(room.members.len(), 1);
+        assert_eq!(room.banned, vec![BannedMember { client_id: "install-1".into(), nickname: "guest-a".into() }]);
+
+        assert_eq!(manager.admit_member(join_req("guest-b", "install-1")).err(), Some(RejectReason::Banned));
+        assert!(manager.admit_member(join_req("guest-c", "install-2")).is_ok(), "others still get in");
+
+        manager.unban("install-1", &noop_sink()).unwrap();
+        assert!(manager.admit_member(join_req("guest-d", "install-1")).is_ok());
+    }
+
+    #[test]
+    fn test_guests_without_client_id_are_turned_away_as_outdated() {
+        let manager = local_manager();
+        manager.set_local_room(room_with(&[("host", true)]));
+        let mut old = join_req("old", "");
+        old.protocol = 0;
+        assert_eq!(manager.admit_member(old).err(), Some(RejectReason::Outdated));
+    }
+
+    /// A guest whose app crashed and rejoined before eviction replaces its
+    /// ghost instead of showing up twice.
+    #[test]
+    fn test_rejoin_from_same_install_replaces_old_entry() {
+        let manager = local_manager();
+        manager.set_local_room(room_with(&[("host", true)]));
+        manager.admit_member(join_req("first", "install-1")).unwrap();
+        let admission = manager.admit_member(join_req("second", "install-1")).unwrap();
+        assert_eq!(admission.replaced.as_deref(), Some("first"));
+        let ids: Vec<_> = admission.room.members.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, vec!["host", "second"]);
+    }
+
+    #[test]
+    fn test_moderators_kick_below_them_only_and_roles_are_host_only() {
+        let manager = local_manager();
+        manager.set_local_room(room_with(&[("host", true)]));
+        for (id, install) in [("mod", "i-mod"), ("mod2", "i-mod2"), ("dj", "i-dj")] {
+            manager.admit_member(join_req(id, install)).unwrap();
+        }
+        let sink = noop_sink();
+        manager.set_member_role("mod", MemberRole::Moderator, &sink).unwrap();
+        manager.set_member_role("mod2", MemberRole::Moderator, &sink).unwrap();
+        assert!(manager.set_member_role("host", MemberRole::Listener, &sink).is_err());
+        assert!(manager.set_member_role("dj", MemberRole::Host, &sink).is_err());
+
+        assert!(manager.kick("dj", "mod", &sink).is_err(), "a DJ can't kick");
+        assert!(manager.kick("mod", "mod2", &sink).is_err(), "a moderator can't kick a moderator");
+        assert!(manager.kick("mod", "host", &sink).is_err());
+        manager.kick("mod", "dj", &sink).unwrap();
+        assert!(!manager.has_member("dj"));
+    }
+
+    #[test]
+    fn test_new_members_get_the_default_role_and_listeners_cannot_control() {
+        let manager = local_manager();
+        manager.set_local_room(room_with(&[("host", true)]));
+        let sink = Arc::new(RecordingSink::default());
+        let dyn_sink: Arc<dyn SyncEventSink> = sink.clone();
+        manager.set_default_role(MemberRole::Listener, &dyn_sink).unwrap();
+        let room = manager.admit_member(join_req("quiet", "install-1")).unwrap().room;
+        assert_eq!(room.member("quiet").unwrap().role, MemberRole::Listener);
+
+        manager.handle_guest_control("quiet", SyncControl::Next, &dyn_sink);
+        assert!(sink.controls.lock().is_empty(), "a listener's skip must not reach the host page");
+
+        manager.set_member_role("quiet", MemberRole::Dj, &dyn_sink).unwrap();
+        manager.handle_guest_control("quiet", SyncControl::Next, &dyn_sink);
+        assert_eq!(sink.controls.lock().len(), 1);
+    }
+
+    #[test]
+    fn test_client_id_persists_across_runs() {
+        let dir = std::env::temp_dir().join(format!("ytmd-client-id-{}", rand::random::<u32>()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("sync_client_id");
+        let first = load_or_create_client_id(&path);
+        assert_eq!(first.len(), 32);
+        assert_eq!(load_or_create_client_id(&path), first);
+        std::fs::write(&path, "garbage!").unwrap();
+        assert_ne!(load_or_create_client_id(&path), "garbage!", "an invalid file is replaced");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_nicknames_are_trimmed_and_capped() {
+        assert_eq!(clean_nickname("  Ola \n"), "Ola");
+        assert_eq!(clean_nickname(&"x".repeat(100)).chars().count(), MAX_NICKNAME_CHARS);
+        assert_eq!(clean_nickname("   "), "?");
     }
 
     #[test]
@@ -1406,6 +1870,7 @@ mod tests {
         playback_updates: Mutex<Vec<SyncPlaybackState>>,
         controls: Mutex<Vec<(String, SyncControl)>>,
         left: std::sync::atomic::AtomicUsize,
+        left_reasons: Mutex<Vec<LeaveReason>>,
     }
     impl SyncEventSink for RecordingSink {
         fn room_updated(&self, room: &RoomState) {
@@ -1414,12 +1879,57 @@ mod tests {
         fn playback_updated(&self, state: &SyncPlaybackState) {
             self.playback_updates.lock().push(state.clone());
         }
-        fn room_left(&self) {
+        fn room_left(&self, reason: LeaveReason) {
             self.left.fetch_add(1, Ordering::SeqCst);
+            self.left_reasons.lock().push(reason);
         }
         fn control_requested(&self, request: &SyncControlRequest) {
             self.controls.lock().push((request.from.clone(), request.action.clone()));
         }
+    }
+
+    /// Over the LAN transport: a kicked guest is told why and dropped, and
+    /// the same install can't get back in; a moderator guest can kick too.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_kick_over_lan_bans_the_install() {
+        let host_manager = local_manager();
+        let host_sink = Arc::new(RecordingSink::default());
+        let host_dyn: Arc<dyn SyncEventSink> = host_sink.clone();
+        create_room(&host_manager, host_dyn.clone(), "Host".to_string()).await.unwrap();
+        let addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), host_manager.host_port().unwrap());
+
+        let moderator = Arc::new(SyncRoomManager::with_options(LivenessConfig::default(), false).with_client_id("install-mod".into()));
+        let victim = Arc::new(SyncRoomManager::with_options(LivenessConfig::default(), false).with_client_id("install-victim".into()));
+        let mod_room = connect_to_host(&moderator, noop_sink(), addr, "Mod".to_string()).await.unwrap();
+        let victim_sink = Arc::new(RecordingSink::default());
+        let victim_room = connect_to_host(&victim, victim_sink.clone(), addr, "Victim".to_string()).await.unwrap();
+        host_manager.set_member_role(&mod_room.current_user_id, MemberRole::Moderator, &host_dyn).unwrap();
+
+        // The moderator's own view must know its role before it asks.
+        let mod_sees_role = wait_until(
+            || {
+                moderator.get_room_state().is_some_and(|r| {
+                    r.member(&r.current_user_id).is_some_and(|m| m.role == MemberRole::Moderator)
+                        && r.members.len() == 3
+                })
+            },
+            Duration::from_secs(2),
+        )
+        .await;
+        assert!(mod_sees_role);
+        kick_member(&moderator, &noop_sink(), &victim_room.current_user_id).unwrap();
+
+        let kicked = wait_until(|| victim_sink.left.load(Ordering::SeqCst) == 1, Duration::from_secs(2)).await;
+        assert!(kicked, "kicked guest should leave");
+        assert_eq!(victim_sink.left_reasons.lock().as_slice(), &[LeaveReason::Kicked]);
+        assert!(victim.get_room_state().is_none());
+        assert_eq!(host_manager.get_room_state().unwrap().banned.len(), 1);
+
+        let again = connect_to_host(&victim, noop_sink(), addr, "Victim again".to_string()).await;
+        assert_eq!(again.err().as_deref(), Some("sync.error.banned"));
+
+        leave_room(&moderator);
+        leave_room(&host_manager);
     }
 
     /// Guests used to have no way to act for the room: a skip on a guest
@@ -1519,7 +2029,7 @@ mod tests {
 
         // Raw client: joins, then never sends another byte.
         let mut raw = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).await.unwrap();
-        write_line(&mut raw, &WireMessage::Join { user_id: "user-silent".into(), nickname: "Ghost".into() }).await;
+        write_line(&mut raw, &WireMessage::Join { user_id: "user-silent".into(), nickname: "Ghost".into(), client_id: "install-silent".into(), protocol: PROTOCOL_VERSION }).await;
         let joined = wait_until(
             || host_manager.get_room_state().map(|r| r.members.len()).unwrap_or(0) == 2,
             Duration::from_secs(2),
@@ -1715,10 +2225,13 @@ mod tests {
                 is_playing: true,
                 timestamp_ms: 123,
             }),
+            default_role: MemberRole::Listener,
+            banned: vec![BannedMember { client_id: "secret-install".into(), nickname: "B".into() }],
         };
         let wire = RoomStateWire::from(&room);
         let msg = WireMessage::State { room: wire };
         let json = serde_json::to_string(&msg).unwrap();
+        assert!(!json.contains("secret-install"), "the ban list never leaves the host");
         let back: WireMessage = serde_json::from_str(&json).unwrap();
         match back {
             WireMessage::State { room: wire } => {
@@ -1727,6 +2240,8 @@ mod tests {
                 assert!(!local.is_host);
                 assert_eq!(local.current_user_id, "guest");
                 assert_eq!(local.playback_state.unwrap().video_id, "abc");
+                assert_eq!(local.default_role, MemberRole::Listener);
+                assert!(local.banned.is_empty());
             }
             _ => panic!("wrong variant"),
         }

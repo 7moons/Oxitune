@@ -4,6 +4,7 @@ import { setSyncStatus } from '../../preload/ui/navMenu';
 import { showToast } from '../../preload/ui/kit';
 import { t } from '../../preload/ui/i18n';
 import { setSyncGuest } from '../../preload/syncRole';
+import { canControl, MemberRole, roleOf } from '../../preload/syncRoles';
 
 export interface SyncPlaybackPayload {
   video_id: string;
@@ -18,9 +19,20 @@ export interface RoomMemberPayload {
   id: string;
   nickname: string;
   is_host: boolean;
+  /** Missing from hosts that predate roles, where every guest was a DJ. */
+  role?: MemberRole;
 }
 
-interface RoomStatePayload {
+/** Our own role in `room`. */
+export function ownRole(room: Pick<RoomStatePayload, 'members' | 'current_user_id' | 'is_host'>): MemberRole {
+  if (room.is_host) return 'host';
+  const me = room.members.find((m) => m.id === room.current_user_id);
+  return me ? roleOf(me) : 'dj';
+}
+
+type LeaveReason = 'left' | 'closed' | 'kicked' | 'lost';
+
+export interface RoomStatePayload {
   room_code: string;
   is_host: boolean;
   current_user_id: string;
@@ -264,6 +276,11 @@ function navigateToVideo(videoId: string) {
 export class RoomSyncController {
   private isHost = false;
   private inRoom = false;
+  /** Guest: whether our role may skip/pause/pick (not a listener). */
+  private canControl = true;
+
+  /** `notify` shows a message to the user (a toast outside of tests). */
+  constructor(private readonly notify: (message: string) => void = showToast) {}
   private lastBroadcast: { atMs: number; videoId: string; position: number; rate: number; playing: boolean } | null =
     null;
   private pendingNav: { videoId: string; atMs: number; attempts: number } | null = null;
@@ -281,10 +298,11 @@ export class RoomSyncController {
   /** Guest: speed catch-up in progress, and what to restore after it. */
   private rateCorrection: { video: HTMLVideoElement; rate: number; preservesPitch: boolean } | null = null;
 
-  public setRoomState(inRoom: boolean, isHost: boolean) {
+  public setRoomState(inRoom: boolean, isHost: boolean, canControl = true) {
     const roleChanged = inRoom !== this.inRoom || isHost !== this.isHost;
     this.inRoom = inRoom;
     this.isHost = isHost;
+    this.canControl = canControl;
     setSyncGuest(this.isGuest());
     if (!roleChanged) return;
     this.pendingNav = null;
@@ -310,7 +328,6 @@ export class RoomSyncController {
   public isGuest(): boolean {
     return this.inRoom && !this.isHost;
   }
-
   public handleRemotePlayback(payload: SyncPlaybackPayload, video: HTMLVideoElement | null, now = Date.now()) {
     if (!this.isGuest() || isAdPlaying()) return;
     if (isStalePayload(payload.timestamp_ms, this.newestPayloadMs)) return;
@@ -437,7 +454,8 @@ export class RoomSyncController {
    * navigation or YTM's autoplay, the user picked it, and it becomes the
    * room's song: returns the request to send the host. */
   public handleLocalTrackChange(videoId: string | undefined, now = Date.now()): SyncControl | null {
-    if (!this.isGuest() || !videoId || !VIDEO_ID_RE.test(videoId)) return null;
+    // A listener's pick isn't sent: the next host broadcast brings it back.
+    if (!this.isGuest() || !this.canControl || !videoId || !VIDEO_ID_RE.test(videoId)) return null;
     // No host state yet (just joined, or the page reloaded): nothing to diverge from.
     if (this.hostVideoId === null || videoId === this.hostVideoId) return null;
     const navAt = this.ownNavs.get(videoId);
@@ -449,9 +467,13 @@ export class RoomSyncController {
   }
 
   public requestControl(action: SyncControl, invoke: PluginContext['invoke']) {
+    if (!this.canControl) {
+      this.notify(t().syncListenerOnly);
+      return;
+    }
     invoke('send_sync_control', { action }).catch((e) => {
       console.error('[YTMD Room Sync] control request failed:', e);
-      showToast(t().actionFailed);
+      this.notify(t().actionFailed);
     });
   }
 
@@ -543,14 +565,15 @@ export function routeRoomPlayerCommand(command: string): boolean {
 /** Mirrors room state into the nav-bar chip and announces changes the way
  * YTM announces its own events: a short toast, no dialog. `announce` is
  * false when restoring state on page load (nothing new happened). */
-function applyRoomUi(room: RoomStatePayload | null, announce: boolean) {
+function applyRoomUi(room: RoomStatePayload | null, announce: boolean, leaveReason: LeaveReason = 'left') {
   const prev = lastRoom;
   lastRoom = room;
   setSyncStatus(room ? { roomCode: room.room_code, listeners: room.members.length, isHost: room.is_host } : null);
   if (!announce) return;
 
   if (!room) {
-    if (prev) showToast(t().syncRoomClosed);
+    if (!prev) return;
+    showToast(leaveReason === 'kicked' ? t().syncKicked : leaveReason === 'lost' ? t().syncLost : t().syncRoomClosed);
     return;
   }
   if (!prev || prev.room_code !== room.room_code) {
@@ -559,6 +582,12 @@ function applyRoomUi(room: RoomStatePayload | null, announce: boolean) {
   }
   const { joined, left } = diffMembers(prev.members, room.members, room.current_user_id);
   const messages = [...joined.map(t().syncJoined), ...left.map(t().syncLeft)];
+  const role = ownRole(room);
+  if (role !== ownRole(prev)) {
+    messages.push(
+      role === 'moderator' ? t().syncRoleModerator : role === 'listener' ? t().syncRoleListener : t().syncRoleDj
+    );
+  }
   if (messages.length > 0) showToast(messages.join(' · '));
 }
 
@@ -577,12 +606,12 @@ export const SyncRoomPlugin: YTMDPlugin = {
     if (window.__TAURI__?.event) {
       unlistenPromises.push(
         window.__TAURI__.event.listen<RoomStatePayload>('sync-room-updated', (e) => {
-          controller.setRoomState(true, e.payload.is_host);
+          controller.setRoomState(true, e.payload.is_host, canControl(ownRole(e.payload)));
           applyRoomUi(e.payload, true);
         }),
-        window.__TAURI__.event.listen('sync-room-left', () => {
+        window.__TAURI__.event.listen<{ reason?: LeaveReason } | null>('sync-room-left', (e) => {
           controller.setRoomState(false, false);
-          applyRoomUi(null, true);
+          applyRoomUi(null, true, e.payload?.reason ?? 'left');
         }),
         window.__TAURI__.event.listen<SyncPlaybackPayload>('sync-playback-remote', (e) => {
           controller.handleRemotePlayback(e.payload, ctx.getVideoElement());
@@ -618,7 +647,7 @@ export const SyncRoomPlugin: YTMDPlugin = {
       .then((state) => {
         if (controllerRef !== controller || !state || typeof state !== 'object') return;
         const room = state as RoomStatePayload;
-        controller.setRoomState(true, room.is_host);
+        controller.setRoomState(true, room.is_host, canControl(ownRole(room)));
         applyRoomUi(room, false);
         if (!room.is_host && room.playback_state) {
           controller.handleRemotePlayback(room.playback_state, ctx.getVideoElement());
