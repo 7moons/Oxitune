@@ -3,395 +3,313 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>YTMD Preferences</title>
+    <title data-i18n="settings.windowTitle">Settings</title>
     <link rel="stylesheet" href="./src/ui/styles.css" />
   </head>
   <body>
     <div id="ambient-backdrop" aria-hidden="true">
       <img id="ambient-cover" alt="" />
       <div id="ambient-veil"></div>
-      <div id="ambient-grain"></div>
     </div>
-    <header class="app-header" data-tauri-drag-region>
-      <div class="brand" data-tauri-drag-region>
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-        <span>YTMD Preferences</span>
+
+    <header class="titlebar" data-tauri-drag-region>
+      <div class="titlebar-title" data-tauri-drag-region>
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+        <span data-i18n="settings.windowTitle" data-tauri-drag-region>Settings</span>
       </div>
-      <div class="header-actions">
-        <button id="save-btn" class="btn-primary">Save Changes</button>
-        <div class="window-controls">
-          <button id="win-min-btn" class="window-btn" title="Minimize">
-            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 8h8"/></svg>
-          </button>
-          <button id="win-max-btn" class="window-btn" title="Maximize">
-            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1.5" y="1.5" width="7" height="7" rx="1"/></svg>
-          </button>
-          <button id="win-close-btn" class="window-btn close" title="Close">
-            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="m1.5 1.5 7 7m0-7-7 7"/></svg>
-          </button>
-        </div>
+      <span id="save-status" class="hint" aria-live="polite"></span>
+      <div class="window-controls">
+        <button id="win-min-btn" class="icon-btn sm" data-i18n-label="window.minimize" aria-label="Minimize"><svg class="icon" viewBox="0 0 24 24"><path d="M6 19h12v2H6z"/></svg></button>
+        <button id="win-max-btn" class="icon-btn sm" data-i18n-label="window.maximize" aria-label="Maximize"><svg class="icon" viewBox="0 0 24 24"><path d="M18 4H6c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H6V6h12v12z"/></svg></button>
+        <button id="win-close-btn" class="icon-btn sm window-close" data-i18n-label="window.close" aria-label="Close"><svg class="icon" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></button>
       </div>
     </header>
-    <div id="toast-container" class="toast-container"></div>
-    <main class="container">
-      <div class="settings-grid">
-        
-        <!-- Audio Engine & DSP -->
-        <div class="section-title">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-          <span>Audio Engine & Studio DSP</span>
-        </div>
 
-        <div class="eq-container">
-          <div class="eq-header">
-            <div>
-              <div class="setting-label">10-Band Graphic Equalizer</div>
-              <div class="setting-desc">Studio-grade parametric filter chain</div>
-            </div>
-            <div class="eq-controls-top">
-              <select id="eq_preset" class="eq-select">
-                <option value="flat">Preset: Flat</option>
-                <option value="bass_boost">Preset: Bass Boost</option>
-                <option value="bass_reducer">Preset: Bass Reducer</option>
-                <option value="treble_boost">Preset: Treble Boost</option>
-                <option value="vocal_clarity">Preset: Vocal Clarity</option>
-                <option value="electronic">Preset: Electronic / EDM</option>
-                <option value="rock">Preset: Rock / Metal</option>
-                <option value="classical">Preset: Classical / Acoustic</option>
-                <option value="pop">Preset: Pop</option>
-                <option value="custom">Custom</option>
+    <div class="settings-layout">
+      <nav class="settings-nav" id="settings-nav">
+        <button class="settings-nav-item is-active" data-section="sec-audio"><svg class="icon" viewBox="0 0 24 24"><path d="M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z"/></svg><span data-i18n="settings.nav.audio">Audio</span></button>
+        <button class="settings-nav-item" data-section="sec-appearance"><svg class="icon" viewBox="0 0 24 24"><path d="M12 3a9 9 0 0 0 0 18c.83 0 1.5-.67 1.5-1.5 0-.39-.15-.74-.39-1.01-.23-.26-.38-.61-.38-.99 0-.83.67-1.5 1.5-1.5H16c2.76 0 5-2.24 5-5 0-4.42-4.03-8-9-8zm-5.5 9c-.83 0-1.5-.67-1.5-1.5S5.67 9 6.5 9 8 9.67 8 10.5 7.33 12 6.5 12zm3-4C8.67 8 8 7.33 8 6.5S8.67 5 9.5 5s1.5.67 1.5 1.5S10.33 8 9.5 8zm5 0c-.83 0-1.5-.67-1.5-1.5S13.67 5 14.5 5s1.5.67 1.5 1.5S15.33 8 14.5 8zm3 4c-.83 0-1.5-.67-1.5-1.5S16.67 9 17.5 9s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/></svg><span data-i18n="settings.nav.appearance">Appearance</span></button>
+        <button class="settings-nav-item" data-section="sec-addons"><svg class="icon" viewBox="0 0 24 24"><path d="M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5a2.5 2.5 0 0 0-5 0V5H4c-1.1 0-1.99.9-1.99 2v3.8H3.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7 1.49 0 2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5a2.5 2.5 0 0 0 0-5z"/></svg><span data-i18n="settings.nav.addons">Add-ons</span></button>
+        <button class="settings-nav-item" data-section="sec-system"><svg class="icon" viewBox="0 0 24 24"><path d="M4 6h18V4H4c-1.1 0-2 .9-2 2v11H0v3h14v-3H4V6zm19 2h-6c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h6c.55 0 1-.45 1-1V9c0-.55-.45-1-1-1zm-1 9h-4v-7h4v7z"/></svg><span data-i18n="settings.nav.system">System</span></button>
+        <button class="settings-nav-item" data-section="sec-downloads"><svg class="icon" viewBox="0 0 24 24"><path d="M17 18v1H6v-1h11zm-.5-6.6-.7-.7-3.8 3.7V4h-1v10.4l-3.8-3.8-.7.7 5 5 5-4.9z"/></svg><span data-i18n="settings.nav.downloads">Downloads & library</span></button>
+        <button class="settings-nav-item" data-section="sec-remote"><svg class="icon" viewBox="0 0 24 24"><path d="M17 1.01 7 1c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-1.99-2-1.99zM17 19H7V5h10v14z"/></svg><span data-i18n="settings.nav.remote">Phone remote</span></button>
+        <button class="settings-nav-item" data-section="sec-about"><svg class="icon" viewBox="0 0 24 24"><path d="M11 7h2v2h-2zm0 4h2v6h-2zm1-9C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"/></svg><span data-i18n="settings.nav.about">About</span></button>
+      </nav>
+
+      <main class="settings-content" id="settings-content">
+        <section class="settings-section" id="sec-audio">
+          <h2 class="section-heading" data-i18n="settings.nav.audio">Audio</h2>
+
+          <div class="eq-panel">
+            <div class="eq-panel-head">
+              <div class="setting-text">
+                <span class="setting-title" data-i18n="settings.eq.title">Equalizer</span>
+                <span class="setting-desc" data-i18n="settings.eq.desc">10 bands, applied live</span>
+              </div>
+              <select id="eq_preset" class="select" data-i18n-label="settings.eq.preset">
+                <option value="flat" data-i18n="settings.eq.preset.flat">Flat</option>
+                <option value="bass_boost" data-i18n="settings.eq.preset.bass_boost">Bass boost</option>
+                <option value="bass_reducer" data-i18n="settings.eq.preset.bass_reducer">Bass reducer</option>
+                <option value="treble_boost" data-i18n="settings.eq.preset.treble_boost">Treble boost</option>
+                <option value="vocal_clarity" data-i18n="settings.eq.preset.vocal_clarity">Vocal clarity</option>
+                <option value="electronic" data-i18n="settings.eq.preset.electronic">Electronic</option>
+                <option value="rock" data-i18n="settings.eq.preset.rock">Rock</option>
+                <option value="classical" data-i18n="settings.eq.preset.classical">Classical</option>
+                <option value="pop" data-i18n="settings.eq.preset.pop">Pop</option>
+                <option value="custom" data-i18n="settings.eq.preset.custom">Custom</option>
               </select>
-              <button id="eq-reset-btn" class="btn-secondary" style="padding: 4px 10px; font-size: 11px;">Reset</button>
+              <button id="eq-reset-btn" class="btn btn-tonal" data-i18n="settings.eq.reset">Reset</button>
+            </div>
+            <div class="eq-preamp">
+              <span class="field-label" data-i18n="settings.eq.preamp">Preamp</span>
+              <input type="range" id="preamp_gain" min="-12" max="12" step="0.5" value="0" class="range" />
+              <span id="preamp_val" class="setting-value">0.0 dB</span>
+            </div>
+            <div class="eq-faders" id="eq-faders-grid"></div>
+          </div>
+
+          <div class="setting-row stack">
+            <div class="setting-row-head">
+              <div class="setting-text">
+                <span class="setting-title" data-i18n="settings.crossfade.title">Crossfade</span>
+                <span class="setting-desc" data-i18n="settings.crossfade.desc">Blends the end of one song into the start of the next</span>
+              </div>
+              <span id="crossfade_val" class="setting-value">Off</span>
+            </div>
+            <input type="range" id="crossfade_seconds" min="0" max="12" step="0.5" value="0" class="range" />
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.skipSilence.title">Skip silence</span>
+              <span class="setting-desc" data-i18n="settings.skipSilence.desc">Skips silent intros and outros</span>
+            </div>
+            <label class="toggle"><input type="checkbox" id="skip_silence_enabled" /><span class="toggle-track"></span></label>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.normalize.title">Normalize volume</span>
+              <span class="setting-desc" data-i18n="settings.normalize.desc">Evens out loudness between songs</span>
+            </div>
+            <label class="toggle"><input type="checkbox" id="loudness_normalization" /><span class="toggle-track"></span></label>
+          </div>
+
+          <div class="setting-row stack">
+            <div class="setting-row-head">
+              <div class="setting-text">
+                <span class="setting-title" data-i18n="settings.speed.title">Playback speed</span>
+              </div>
+              <span id="speed_val" class="setting-value">1.00×</span>
+            </div>
+            <input type="range" id="playback_speed" min="0.5" max="2.0" step="0.05" value="1.0" class="range" />
+            <div class="chip-row">
+              <button class="chip speed-preset-btn" data-speed="0.8">0.8×</button>
+              <button class="chip speed-preset-btn" data-speed="1.0" data-i18n="settings.speed.normal">Normal</button>
+              <button class="chip speed-preset-btn" data-speed="1.25">1.25×</button>
+              <button class="chip speed-preset-btn" data-speed="1.5">1.5×</button>
             </div>
           </div>
 
-          <!-- Preamp Slider -->
-          <div class="preamp-row">
-            <span class="preamp-label">Preamp Gain</span>
-            <input type="range" id="preamp_gain" min="-12" max="12" step="0.5" value="0" class="preamp-slider" />
-            <span id="preamp_val" class="preamp-val">0.0 dB</span>
-          </div>
-
-          <!-- 10 Vertical Faders -->
-          <div class="eq-faders-grid" id="eq-faders-grid">
-            <!-- Dynamically populated 10 vertical sliders -->
-          </div>
-        </div>
-
-        <!-- Crossfade -->
-        <div class="setting-card">
-          <div class="setting-info" style="flex: 1;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-              <span class="setting-label">Track Crossfade</span>
-              <span id="crossfade_val" class="preamp-val" style="width: auto;">Disabled</span>
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.pitch.title">Keep original pitch</span>
+              <span class="setting-desc" data-i18n="settings.pitch.desc">Voices don't sound higher or lower when you change speed</span>
             </div>
-            <input type="range" id="crossfade_seconds" min="0" max="12" step="0.5" value="0" class="preamp-slider" style="width: 100%;" />
-            <span class="setting-desc" style="margin-top: 4px;">Smoothly mixes the end of a track into the beginning of the next (0 to 12s)</span>
+            <label class="toggle"><input type="checkbox" id="preserve_pitch" checked /><span class="toggle-track"></span></label>
           </div>
-        </div>
+        </section>
 
-        <!-- Skip Silence -->
-        <div class="setting-card">
-          <div class="setting-info">
-            <span class="setting-label">Skip Silence</span>
-            <span class="setting-desc">Automatically cuts dead silence at the start and end of tracks (&lt; -50 dB)</span>
-          </div>
-          <label class="switch">
-            <input type="checkbox" id="skip_silence_enabled" />
-            <span class="slider"></span>
-          </label>
-        </div>
+        <section class="settings-section" id="sec-appearance">
+          <h2 class="section-heading" data-i18n="settings.nav.appearance">Appearance</h2>
 
-        <!-- Loudness Normalization -->
-        <div class="setting-card">
-          <div class="setting-info">
-            <span class="setting-label">Loudness Normalization (Auto-Gain)</span>
-            <span class="setting-desc">Smooths volume peaks and eliminates jumps between YouTube tracks</span>
-          </div>
-          <label class="switch">
-            <input type="checkbox" id="loudness_normalization" />
-            <span class="slider"></span>
-          </label>
-        </div>
-
-        <!-- Playback Speed & Pitch -->
-        <div class="setting-card" style="flex-direction: column; align-items: stretch; gap: 10px;">
-          <div style="display: flex; justify-content: space-between; align-items: center;">
-            <div>
-              <span class="setting-label">Playback Speed & Pitch</span>
-              <div class="setting-desc">Adjust playback rate with optional pitch preservation</div>
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.ambient.title">Ambient mode</span>
+              <span class="setting-desc" data-i18n="settings.ambient.desc">Tints the app with colors from the current song's artwork</span>
             </div>
-            <div style="display: flex; align-items: center; gap: 10px;">
-              <label style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); cursor: pointer;">
-                <input type="checkbox" id="preserve_pitch" checked />
-                <span>Preserve Pitch</span>
-              </label>
-              <span id="speed_val" class="preamp-val" style="width: 48px;">1.00x</span>
+            <label class="toggle"><input type="checkbox" id="ambient_lighting_enabled" /><span class="toggle-track"></span></label>
+          </div>
+
+          <div class="setting-row stack">
+            <div class="setting-row-head">
+              <div class="setting-text">
+                <span class="setting-title" data-i18n="settings.intensity.title">Ambient intensity</span>
+              </div>
+              <span id="ambient_intensity_val" class="setting-value">60%</span>
             </div>
+            <input type="range" id="ambient_intensity" min="0.1" max="1.0" step="0.05" value="0.6" class="range" />
           </div>
-          <input type="range" id="playback_speed" min="0.5" max="2.0" step="0.05" value="1.0" class="preamp-slider" style="width: 100%;" />
-          <div style="display: flex; gap: 6px;">
-            <button class="btn-secondary speed-preset-btn" data-speed="0.8" style="padding: 4px 10px; font-size: 11px;">0.8x</button>
-            <button class="btn-secondary speed-preset-btn" data-speed="1.0" style="padding: 4px 10px; font-size: 11px;">1.0x</button>
-            <button class="btn-secondary speed-preset-btn" data-speed="1.25" style="padding: 4px 10px; font-size: 11px;">1.25x</button>
-            <button class="btn-secondary speed-preset-btn" data-speed="1.5" style="padding: 4px 10px; font-size: 11px;">1.5x</button>
-          </div>
-        </div>
 
-        <!-- Visuals & Ambient Lighting -->
-        <div class="section-title">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
-          <span>Visuals & Ambient Glow</span>
-        </div>
-
-        <div class="setting-card">
-          <div class="setting-info">
-            <span class="setting-label">Dynamic Ambient Lighting</span>
-            <span class="setting-desc">Extracts album colors in real time and applies them across YouTube Music's whole chrome — nav bar, player bar and sidebar turn to glass so the glow shows through. Off falls back to one static dark theme.</span>
-          </div>
-          <label class="switch">
-            <input type="checkbox" id="ambient_lighting_enabled" />
-            <span class="slider"></span>
-          </label>
-        </div>
-
-        <div class="setting-card">
-          <div class="setting-info" style="flex: 1;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-              <span class="setting-label">Ambient Glow Intensity</span>
-              <span id="ambient_intensity_val" class="preamp-val" style="width: auto;">60%</span>
+          <div class="setting-row stack">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.css.title">Custom CSS</span>
+              <span class="setting-desc" data-i18n="settings.css.desc">Applied to YouTube Music as you type</span>
             </div>
-            <input type="range" id="ambient_intensity" min="0.1" max="1.0" step="0.05" value="0.6" class="preamp-slider" style="width: 100%;" />
+            <textarea id="custom_css" class="textarea" spellcheck="false" placeholder="ytmusic-nav-bar { … }"></textarea>
           </div>
-        </div>
+        </section>
 
-        <!-- Custom CSS -->
-        <div class="section-title">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></svg>
-          <span>Custom CSS</span>
-        </div>
+        <section class="settings-section" id="sec-addons">
+          <h2 class="section-heading" data-i18n="settings.nav.addons">Add-ons</h2>
 
-        <!-- Custom CSS live editor -->
-        <div class="setting-card" style="flex-direction: column; align-items: stretch; gap: 8px;">
-          <div style="display: flex; justify-content: space-between; align-items: center;">
-            <span class="setting-label">Custom CSS (Live Reload)</span>
-            <span class="setting-desc" style="font-size: 11px;">Updates in real time</span>
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.adblock.title">Block ads</span>
+              <span class="setting-desc" data-i18n="settings.adblock.desc">Removes ads and Premium prompts</span>
+            </div>
+            <label class="toggle"><input type="checkbox" id="adblock_enabled" /><span class="toggle-track"></span></label>
           </div>
-          <textarea id="custom_css" class="css-editor" placeholder="/* Enter custom CSS here (e.g. ytmusic-nav-bar { opacity: 0.9; }) */"></textarea>
-        </div>
 
-        <!-- Integrations -->
-        <div class="section-title">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>
-          <span>System & Integrations</span>
-        </div>
-        
-        <div class="setting-card">
-          <div class="setting-info">
-            <span class="setting-label">Discord Rich Presence</span>
-            <span class="setting-desc">Displays active song title, artist, duration and play status in Discord</span>
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.sponsorblock.title">SponsorBlock</span>
+              <span class="setting-desc" data-i18n="settings.sponsorblock.desc">Skips non-music parts of music videos</span>
+            </div>
+            <label class="toggle"><input type="checkbox" id="sponsorblock_enabled" /><span class="toggle-track"></span></label>
           </div>
-          <label class="switch">
-            <input type="checkbox" id="discord_rpc_enabled" />
-            <span class="slider"></span>
-          </label>
-        </div>
 
-        <div class="setting-card">
-          <div class="setting-info">
-            <span class="setting-label">MPRIS / Media Controls (Linux/D-Bus)</span>
-            <span class="setting-desc">Enables native OS media keys, notifications, lock screen and sound widget integration</span>
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.lyrics.title">Timed lyrics</span>
+              <span class="setting-desc" data-i18n="settings.lyrics.desc">Adds lyrics that follow the song to the Lyrics tab</span>
+            </div>
+            <label class="toggle"><input type="checkbox" id="lyrics_enabled" /><span class="toggle-track"></span></label>
           </div>
-          <label class="switch">
-            <input type="checkbox" id="mpris_enabled" />
-            <span class="slider"></span>
-          </label>
-        </div>
 
-        <div class="setting-card">
-          <div class="setting-info">
-            <span class="setting-label">Track Notifications</span>
-            <span class="setting-desc">Shows native desktop notification on song change</span>
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.notifications.title">Song notifications</span>
+              <span class="setting-desc" data-i18n="settings.notifications.desc">Shows a desktop notification when the song changes</span>
+            </div>
+            <label class="toggle"><input type="checkbox" id="notifications_enabled" /><span class="toggle-track"></span></label>
           </div>
-          <label class="switch">
-            <input type="checkbox" id="notifications_enabled" />
-            <span class="slider"></span>
-          </label>
-        </div>
+        </section>
 
-        <div class="setting-card">
-          <div class="setting-info">
-            <span class="setting-label">Close to Tray</span>
-            <span class="setting-desc">Keep YTMD playing in the system tray when closing the window</span>
+        <section class="settings-section" id="sec-system">
+          <h2 class="section-heading" data-i18n="settings.nav.system">System</h2>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.discord.title">Show on Discord</span>
+              <span class="setting-desc" data-i18n="settings.discord.desc">Shows what you're listening to in your Discord status</span>
+            </div>
+            <label class="toggle"><input type="checkbox" id="discord_rpc_enabled" /><span class="toggle-track"></span></label>
           </div>
-          <label class="switch">
-            <input type="checkbox" id="close_to_tray" />
-            <span class="slider"></span>
-          </label>
-        </div>
 
-        <!-- Plugins & Enhancements -->
-        <div class="section-title">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></svg>
-          <span>Plugins & Addons</span>
-        </div>
-
-        <div class="setting-card">
-          <div class="setting-info">
-            <span class="setting-label">AdBlock & Anti-Nag</span>
-            <span class="setting-desc">Skips video ads automatically and dismisses premium promotion popups</span>
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.mpris.title">Media keys & system controls</span>
+              <span class="setting-desc" data-i18n="settings.mpris.desc">Control playback from your keyboard and desktop</span>
+            </div>
+            <label class="toggle"><input type="checkbox" id="mpris_enabled" /><span class="toggle-track"></span></label>
           </div>
-          <label class="switch">
-            <input type="checkbox" id="adblock_enabled" />
-            <span class="slider"></span>
-          </label>
-        </div>
 
-        <div class="setting-card">
-          <div class="setting-info">
-            <span class="setting-label">SponsorBlock for Music</span>
-            <span class="setting-desc">Skips non-music music video intros, outros, and sponsor segments</span>
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.tray.title">Keep playing when closed</span>
+              <span class="setting-desc" data-i18n="settings.tray.desc">Closing the window hides it to the system tray</span>
+            </div>
+            <label class="toggle"><input type="checkbox" id="close_to_tray" /><span class="toggle-track"></span></label>
           </div>
-          <label class="switch">
-            <input type="checkbox" id="sponsorblock_enabled" />
-            <span class="slider"></span>
-          </label>
-        </div>
 
-        <div class="setting-card">
-          <div class="setting-info">
-            <span class="setting-label">Synchronized Lyrics (LRCLIB)</span>
-            <span class="setting-desc">Real-time scrolling synchronized lyrics with seek-on-click</span>
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.sleep.title">Stay awake while playing</span>
+              <span class="setting-desc" data-i18n="settings.sleep.desc">Keeps the computer from going to sleep during playback</span>
+            </div>
+            <label class="toggle"><input type="checkbox" id="inhibit_sleep" /><span class="toggle-track"></span></label>
           </div>
-          <label class="switch">
-            <input type="checkbox" id="lyrics_enabled" />
-            <span class="slider"></span>
-          </label>
-        </div>
 
-        <!-- Audio Downloader -->
-        <div class="section-title">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
-          <span>Built-in Downloader</span>
-        </div>
-
-        <div class="setting-card">
-          <div class="setting-info">
-            <span class="setting-label">Default Audio Format</span>
-            <span class="setting-desc">Format and bitrate for downloaded tracks</span>
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.lock.title">Pause when screen locks</span>
+              <span class="setting-desc" data-i18n="settings.lock.desc">Minimizing the window doesn't pause playback</span>
+            </div>
+            <label class="toggle"><input type="checkbox" id="pause_on_lock" /><span class="toggle-track"></span></label>
           </div>
-          <select id="download_format" class="eq-select">
-            <option value="mp3">MP3 (320 kbps Extreme Quality)</option>
-            <option value="flac">FLAC (Lossless Studio Audio)</option>
-            <option value="opus">Opus (High Efficiency Audio)</option>
-          </select>
-        </div>
+        </section>
 
-        <div class="setting-card">
-          <div class="setting-info">
-            <span class="setting-label">Embed Synced Lyrics & Art</span>
-            <span class="setting-desc">Embeds LRC lyrics and 1080p square album artwork into ID3 tags</span>
+        <section class="settings-section" id="sec-downloads">
+          <h2 class="section-heading" data-i18n="settings.nav.downloads">Downloads & library</h2>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.format.title">Download format</span>
+            </div>
+            <select id="download_format" class="select">
+              <option value="mp3" data-i18n="settings.format.mp3">MP3 · best compatibility</option>
+              <option value="flac" data-i18n="settings.format.flac">FLAC · lossless</option>
+              <option value="opus" data-i18n="settings.format.opus">Opus · smallest files</option>
+            </select>
           </div>
-          <label class="switch">
-            <input type="checkbox" id="embed_lyrics" />
-            <span class="slider"></span>
-          </label>
-        </div>
 
-        <div class="setting-card" style="flex-direction: column; align-items: stretch; gap: 6px;">
-          <span class="setting-label">Download Output Folder</span>
-          <input type="text" id="download_dir" class="search-box" style="width: 100%;" placeholder="~/Music/YTMD" />
-        </div>
-
-        <!-- Local Music Library -->
-        <div class="section-title">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
-          <span>Local Music Library</span>
-        </div>
-
-        <div class="setting-card" style="flex-direction: column; align-items: stretch; gap: 6px;">
-          <span class="setting-label">Local Music Directory</span>
-          <input type="text" id="local_music_dir" class="search-box" style="width: 100%;" placeholder="~/Music" />
-          <span class="setting-desc">Scans MP3, FLAC, M4A, OGG, OPUS, WAV files</span>
-        </div>
-
-        <!-- Web Remote -->
-        <div class="section-title">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/></svg>
-          <span>Mobile Web Remote (Wi-Fi)</span>
-        </div>
-
-        <div class="setting-card">
-          <div class="setting-info">
-            <span class="setting-label">Enable Mobile Web Remote</span>
-            <span class="setting-desc">Allows controlling playback from phone or tablet via local Wi-Fi</span>
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.embed.title">Save lyrics and artwork</span>
+              <span class="setting-desc" data-i18n="settings.embed.desc">Embeds them in downloaded files</span>
+            </div>
+            <label class="toggle"><input type="checkbox" id="embed_lyrics" /><span class="toggle-track"></span></label>
           </div>
-          <label class="switch">
-            <input type="checkbox" id="remote_enabled" />
-            <span class="slider"></span>
-          </label>
-        </div>
 
-        <div class="setting-card" style="display: flex; justify-content: space-between; align-items: center;">
-          <div class="setting-info">
-            <span class="setting-label">Remote Port</span>
-            <span class="setting-desc">Port for the embedded local HTTP server</span>
+          <div class="setting-row stack">
+            <label class="field">
+              <span class="setting-title" data-i18n="settings.downloadDir.title">Download folder</span>
+              <input type="text" id="download_dir" class="input" placeholder="~/Music/YTMD" spellcheck="false" />
+            </label>
           </div>
-          <input type="number" id="remote_port" class="search-box" style="width: 100px; text-align: center;" value="9863" />
-        </div>
 
-        <!-- Smart Power & Sleep -->
-        <div class="section-title">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" x2="12" y1="2" y2="12"/></svg>
-          <span>Smart Power & Screen Lock</span>
-        </div>
-
-        <div class="setting-card">
-          <div class="setting-info">
-            <span class="setting-label">Inhibit Sleep During Playback</span>
-            <span class="setting-desc">Prevents system from entering sleep mode while music is actively playing</span>
+          <div class="setting-row stack">
+            <label class="field">
+              <span class="setting-title" data-i18n="settings.localDir.title">Local music folder</span>
+              <input type="text" id="local_music_dir" class="input" placeholder="~/Music" spellcheck="false" />
+              <span class="setting-desc" data-i18n="settings.localDir.desc">MP3, FLAC, M4A, OGG, Opus and WAV files</span>
+            </label>
           </div>
-          <label class="switch">
-            <input type="checkbox" id="inhibit_sleep" />
-            <span class="slider"></span>
-          </label>
-        </div>
+        </section>
 
-        <div class="setting-card">
-          <div class="setting-info">
-            <span class="setting-label">Pause on Screen Lock</span>
-            <span class="setting-desc">Automatically pauses playback when locking your workstation</span>
+        <section class="settings-section" id="sec-remote">
+          <h2 class="section-heading" data-i18n="settings.nav.remote">Phone remote</h2>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.remote.title">Phone remote</span>
+              <span class="setting-desc" data-i18n="settings.remote.desc">Control playback from a phone on the same Wi-Fi. Takes effect after restarting the app.</span>
+            </div>
+            <label class="toggle"><input type="checkbox" id="remote_enabled" /><span class="toggle-track"></span></label>
           </div>
-          <label class="switch">
-            <input type="checkbox" id="pause_on_lock" />
-            <span class="slider"></span>
-          </label>
-        </div>
 
-        <!-- About & Updates -->
-        <div class="section-title">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
-          <span>About & Updates</span>
-        </div>
-
-        <div class="setting-card">
-          <div class="setting-info">
-            <span class="setting-label">YTMD Version</span>
-            <span class="setting-desc" id="app-version-desc">Version —</span>
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.port.title">Port</span>
+              <span class="setting-desc" data-i18n="settings.port.desc">Takes effect after restarting the app</span>
+            </div>
+            <input type="number" id="remote_port" class="input narrow" min="1024" max="65535" value="9863" />
           </div>
-          <button id="check-update-btn" class="btn-secondary">Check for Updates</button>
-        </div>
+        </section>
 
-        <div id="update-available-card" class="setting-card" style="display: none;">
-          <div class="setting-info">
-            <span class="setting-label" id="update-available-label">Update available</span>
-            <span class="setting-desc" id="update-available-desc"></span>
+        <section class="settings-section" id="sec-about">
+          <h2 class="section-heading" data-i18n="settings.nav.about">About</h2>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title">YTMD</span>
+              <span class="setting-desc" id="app-version-desc">—</span>
+            </div>
+            <button id="check-update-btn" class="btn btn-tonal" data-i18n="settings.update.check">Check for updates</button>
           </div>
-          <button id="install-update-btn" class="btn-primary">Install & Restart</button>
-        </div>
 
-      </div>
-    </main>
+          <div id="update-available-card" class="setting-row is-hidden">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.update.available">Update available</span>
+              <span class="setting-desc" id="update-available-desc"></span>
+            </div>
+            <button id="install-update-btn" class="btn btn-filled" data-i18n="settings.update.install">Update and restart</button>
+          </div>
+        </section>
+      </main>
+    </div>
+
     <script type="module" src="./src/ui/settings.ts"></script>
   </body>
 </html>

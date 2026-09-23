@@ -2,103 +2,93 @@ import { YTMDPlugin, PluginContext } from '../types';
 
 let cleanup: (() => void) | null = null;
 
-// Pure decision logic, covered directly by src/tests/power.test.ts: only
-// pause when the tab/screen actually went hidden, the feature is enabled,
-// and something is actually playing (never pause an already-paused video).
-export const shouldPauseOnLock = (isHidden: boolean, pauseOnLockEnabled: boolean, videoPaused: boolean): boolean =>
-  isHidden && pauseOnLockEnabled && !videoPaused;
+/** Whether the system should be kept awake right now. Read from the live
+ * config on every play/pause, so toggling the setting applies on the next
+ * state change instead of only after a restart. Default on. */
+export const shouldInhibitSleep = (inhibitSetting: unknown, playing: boolean): boolean =>
+  playing && inhibitSetting !== false;
 
 export const PowerPlugin: YTMDPlugin = {
   id: 'power_watchdog',
   name: 'Smart Power & Audio Watchdog',
-  description: 'Inhibits system sleep during active playback and auto-pauses when screen is locked',
+  description: 'Keeps the system awake during playback',
   defaultEnabled: true,
 
+  // Pausing on screen lock lives in the backend (screen_lock.rs listens for
+  // the desktop's real lock signal). It used to key off `document.hidden`
+  // here, which is also true when the window is merely minimized or hidden
+  // to the tray — so minimizing paused the music.
   onInit(ctx: PluginContext) {
     let wakeLock: WakeLockSentinel | null = null;
-    let checkVideoInterval: number | null = null;
+    let inhibited = false;
     let attachedVideo: HTMLVideoElement | null = null;
-    const inhibitSleep = ctx.config.inhibit_sleep !== false;
 
+    const setInhibit = (inhibit: boolean) => {
+      if (inhibited === inhibit) return;
+      inhibited = inhibit;
+      ctx.invoke('set_inhibit_sleep', { inhibit }).catch((e) => {
+        inhibited = !inhibit;
+        console.error('[YTMD Power] set_inhibit_sleep failed:', e);
+      });
+    };
+
+    // The system-level inhibitor (above) is what actually matters; the
+    // Screen Wake Lock API is a bonus that WebKitGTK usually doesn't have,
+    // so it must never gate the backend call.
     const requestWakeLock = async () => {
-      if (!inhibitSleep || wakeLock !== null) return;
+      if (!('wakeLock' in navigator) || wakeLock !== null) return;
       try {
-        if ('wakeLock' in navigator) {
-          wakeLock = await navigator.wakeLock.request('screen');
-          wakeLock.addEventListener('release', () => {
-            wakeLock = null;
-          });
-        }
-        await ctx.invoke('set_inhibit_sleep', { inhibit: true });
-      } catch {
-        // WakeLock not supported or denied
-      }
-    };
-
-    const releaseWakeLock = async () => {
-      if (wakeLock !== null) {
-        try {
-          await wakeLock.release();
+        wakeLock = await navigator.wakeLock.request('screen');
+        wakeLock.addEventListener('release', () => {
           wakeLock = null;
-        } catch {
-          // Release
-        }
+        });
+      } catch {
+        // Not supported or denied.
       }
-      await ctx.invoke('set_inhibit_sleep', { inhibit: false });
     };
 
-    const attachVideoListeners = (video: HTMLVideoElement) => {
-      video.addEventListener('play', requestWakeLock);
-      video.addEventListener('playing', requestWakeLock);
-      video.addEventListener('pause', releaseWakeLock);
-      video.addEventListener('ended', releaseWakeLock);
+    const releaseWakeLock = () => {
+      wakeLock?.release().catch(() => {});
+      wakeLock = null;
+    };
+
+    const sync = () => {
+      const video = ctx.getVideoElement();
+      const playing = !!video && !video.paused && !video.ended;
+      const inhibit = shouldInhibitSleep(ctx.config.inhibit_sleep, playing);
+      setInhibit(inhibit);
+      if (inhibit) void requestWakeLock();
+      else releaseWakeLock();
+    };
+
+    const attach = (video: HTMLVideoElement) => {
+      for (const ev of ['play', 'playing', 'pause', 'ended']) video.addEventListener(ev, sync);
       attachedVideo = video;
     };
-
-    const detachVideoListeners = (video: HTMLVideoElement) => {
-      video.removeEventListener('play', requestWakeLock);
-      video.removeEventListener('playing', requestWakeLock);
-      video.removeEventListener('pause', releaseWakeLock);
-      video.removeEventListener('ended', releaseWakeLock);
+    const detach = (video: HTMLVideoElement) => {
+      for (const ev of ['play', 'playing', 'pause', 'ended']) video.removeEventListener(ev, sync);
     };
 
-    const video = ctx.getVideoElement();
-    if (video) {
-      attachVideoListeners(video);
-    }
+    const initial = ctx.getVideoElement();
+    if (initial) attach(initial);
+    sync();
 
-    // YTM's SPA can swap out the <video> element (navigation/player reload).
-    // Keep polling so listeners always follow the live element instead of
-    // silently going stale for the rest of the session.
-    checkVideoInterval = window.setInterval(() => {
+    // YTM's SPA can swap out the <video> element; follow the live one.
+    const checkVideoInterval = window.setInterval(() => {
       const v = ctx.getVideoElement();
       if (v && v !== attachedVideo) {
-        if (attachedVideo) detachVideoListeners(attachedVideo);
-        attachVideoListeners(v);
+        if (attachedVideo) detach(attachedVideo);
+        attach(v);
+        sync();
       }
     }, 1000);
 
-    // Auto-pause when the screen locks or the window/tab is hidden, if enabled.
-    const handleVisibilityChange = () => {
-      const activeVideo = ctx.getVideoElement();
-      if (!activeVideo) return;
-      if (shouldPauseOnLock(document.hidden, Boolean(ctx.config.pause_on_lock), activeVideo.paused)) {
-        ctx.sendPlayerCommand('pause');
-      }
-    };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
     cleanup = () => {
-      if (checkVideoInterval !== null) {
-        clearInterval(checkVideoInterval);
-        checkVideoInterval = null;
-      }
-      if (attachedVideo) {
-        detachVideoListeners(attachedVideo);
-        attachedVideo = null;
-      }
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      void releaseWakeLock();
+      clearInterval(checkVideoInterval);
+      if (attachedVideo) detach(attachedVideo);
+      attachedVideo = null;
+      releaseWakeLock();
+      setInhibit(false);
     };
   },
 

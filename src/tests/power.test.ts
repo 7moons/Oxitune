@@ -1,20 +1,17 @@
 import { describe, expect, test } from 'bun:test';
-import { shouldPauseOnLock } from '../plugins/power';
+import { shouldInhibitSleep } from '../plugins/power';
 
-describe('Power: pause-on-lock decision logic', () => {
-  test('pauses when the screen locks/hides while playing and the feature is enabled', () => {
-    expect(shouldPauseOnLock(true, true, false)).toBe(true);
+describe('Power: keep the system awake while playing', () => {
+  test('inhibits only while playing', () => {
+    expect(shouldInhibitSleep(true, true)).toBe(true);
+    expect(shouldInhibitSleep(true, false)).toBe(false);
   });
 
-  test('does nothing if the feature is disabled', () => {
-    expect(shouldPauseOnLock(true, false, false)).toBe(false);
+  test('the setting defaults to on when missing', () => {
+    expect(shouldInhibitSleep(undefined, true)).toBe(true);
   });
 
-  test('does nothing if the tab/screen is not actually hidden', () => {
-    expect(shouldPauseOnLock(false, true, false)).toBe(false);
-  });
-
-  test('does not re-pause a video that is already paused', () => {
-    expect(shouldPauseOnLock(true, true, true)).toBe(false);
+  test('turning the setting off stops inhibiting', () => {
+    expect(shouldInhibitSleep(false, true)).toBe(false);
   });
 });

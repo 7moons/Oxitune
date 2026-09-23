@@ -6429,6 +6429,7 @@ dependencies = [
  "ctor 0.4.3",
  "dirs 5.0.1",
  "env_logger",
+ "futures-util",
  "id3",
  "image",
  "local-ip-address",
@@ -6456,6 +6457,7 @@ dependencies = [
  "walkdir",
  "webview2-com",
  "windows 0.61.3",
+ "zbus",
 ]
 
 [[package]]

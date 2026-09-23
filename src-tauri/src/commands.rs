@@ -541,11 +541,11 @@ pub fn broadcast_sync_state(
 #[tauri::command]
 pub fn get_remote_info(
     state: State<'_, Arc<AppState>>,
-    port: Option<u16>,
-) -> crate::remote_server::RemoteInfo {
-    let config = state.config_manager.load();
-    let target_port = port.unwrap_or(config.remote_port);
-    crate::remote_server::get_remote_info(target_port, &state.remote_token)
+) -> Result<crate::remote_server::RemoteInfo, String> {
+    // The port the server actually bound at startup, not the configured one:
+    // a port edited in Settings only applies after a restart.
+    let port = state.remote_status.serving_port()?;
+    Ok(crate::remote_server::get_remote_info(port, &state.remote_token))
 }
 
 #[tauri::command]

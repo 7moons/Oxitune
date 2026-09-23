@@ -128,8 +128,8 @@ bridge_commands! {
         Ok(Value::Null)
     }
     "get_remote_info" => |h, state, args| {
-        let cfg = state.config_manager.load();
-        to_data(remote_server::get_remote_info(cfg.remote_port, &state.remote_token))
+        let port = state.remote_status.serving_port()?;
+        to_data(remote_server::get_remote_info(port, &state.remote_token))
     }
     "toggle_settings_window" => |h, state, args| {
         commands::toggle_settings_window(h.clone())?;

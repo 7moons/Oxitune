@@ -8,6 +8,7 @@ pub mod mpris;
 pub mod p2p_sync;
 pub mod power_manager;
 pub mod remote_server;
+pub mod screen_lock;
 pub mod shortcuts;
 pub mod sync_room;
 pub mod tray;
@@ -30,6 +31,7 @@ pub struct AppState {
     pub sync_room: Arc<SyncRoomManager>,
     pub power_manager: PowerManager,
     pub remote_token: String,
+    pub remote_status: Arc<remote_server::RemoteServerStatus>,
 }
 
 /// Installs the process-wide rustls crypto provider exactly once.
@@ -84,10 +86,12 @@ pub fn run() {
         sync_room: Arc::new(SyncRoomManager::new()),
         power_manager: PowerManager::new(),
         remote_token: remote_token.clone(),
+        remote_status: Arc::new(remote_server::RemoteServerStatus::new(initial_config.remote_enabled)),
     });
 
     let app_state_for_setup = app_state.clone();
     let remote_port = initial_config.remote_port;
+    let remote_enabled = initial_config.remote_enabled;
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -105,8 +109,21 @@ pub fn run() {
             // Initialize Global Shortcuts
             let _ = shortcuts::setup_shortcuts(&handle);
 
-            // Start Local Bridge & Mobile Web Remote Server
-            remote_server::start_remote_server(handle.clone(), remote_port, remote_token.clone());
+            // Mobile web remote: only listens on the LAN when the user has it
+            // turned on (takes effect on restart, like the port).
+            if remote_enabled {
+                remote_server::start_remote_server(
+                    handle.clone(),
+                    remote_port,
+                    remote_token.clone(),
+                    app_state_for_setup.remote_status.clone(),
+                );
+            }
+
+            // Real screen-lock detection for "pause on lock" (Linux; no-op
+            // elsewhere). Replaces the page's `document.hidden` check, which
+            // also fired on minimize/hide-to-tray.
+            screen_lock::start(handle.clone());
 
             // Injected-page command bridge (see bridge.rs for the protocol).
             // Always answers when a request id is present, including for

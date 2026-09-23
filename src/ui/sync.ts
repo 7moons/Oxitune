@@ -1,5 +1,9 @@
+import { showToast } from '../preload/ui/kit';
+import { t } from '../preload/ui/i18n';
 import { initAmbientBackdrop } from './ambient';
 import { getInitials } from './format';
+import { tr } from './i18n';
+import { initWindowChrome } from './window';
 
 interface RoomMember {
   id: string;
@@ -15,175 +19,176 @@ interface RoomState {
   members: RoomMember[];
 }
 
+const NAME_STORAGE_KEY = 'ytmd-sync-name';
+
 let activeRoom: RoomState | null = null;
 
-function renderRoomView(room: RoomState | null) {
-  const setupView = document.getElementById('setup-view');
-  const activeView = document.getElementById('active-room-view');
+const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T | null;
+const show = (el: HTMLElement | null, visible: boolean) => el?.classList.toggle('is-hidden', !visible);
 
-  if (!setupView || !activeView) return;
-
-  if (!room) {
-    setupView.style.display = 'block';
-    activeView.style.display = 'none';
-    return;
-  }
-
-  setupView.style.display = 'none';
-  activeView.style.display = 'flex';
-  hideFormError('leave-room-error');
-
-  const codeDisplay = document.getElementById('room-code-display');
-  if (codeDisplay) codeDisplay.textContent = room.room_code;
-
-  const countEl = document.getElementById('member-count');
-  if (countEl) {
-    const len = room.members.length;
-    countEl.textContent = `${len} ${len === 1 ? 'listener' : 'listeners'}`;
-  }
-
-  const listEl = document.getElementById('members-list');
-  if (listEl) {
-    listEl.innerHTML = '';
-    room.members.forEach((m) => {
-      const item = document.createElement('div');
-      item.className = 'member-item';
-      const initials = getInitials(m.nickname);
-
-      item.innerHTML = `
-        <div style="display: flex; align-items: center; gap: 10px;">
-          <div class="member-avatar">${escapeHtml(initials)}</div>
-          <span style="font-weight: 500; color: var(--text-primary);">${escapeHtml(m.nickname)}</span>
-        </div>
-        ${m.is_host ? '<span class="badge-host">Host</span>' : '<span style="color: var(--text-muted); font-size: 11px;">Listener</span>'}
-      `;
-      listEl.appendChild(item);
-    });
-  }
-}
-
-function escapeHtml(str: string): string {
-  const div = document.createElement('div');
-  div.textContent = str;
-  return div.innerHTML;
-}
-
-const ERROR_ICON_SVG =
-  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
-
-/**
- * Toggles a button between its normal label and a spinner + status text,
- * and disables/re-enables every input in `siblingsToLock` alongside it —
- * so a pending create/join request can't be double-submitted and the form
- * fields don't silently change under a request that's already in flight.
- */
-function setButtonLoading(
-  button: HTMLButtonElement | null,
-  labelEl: HTMLElement | null,
-  loading: boolean,
-  loadingText: string,
-  originalText: string,
-  siblingsToLock: (HTMLElement | null)[]
-) {
-  if (!button || !labelEl) return;
-  button.disabled = loading;
-  siblingsToLock.forEach((el) => {
-    if (el) (el as HTMLInputElement).disabled = loading;
-  });
-  labelEl.innerHTML = loading
-    ? `<span class="spinner"></span><span>${escapeHtml(loadingText)}</span>`
-    : escapeHtml(originalText);
-}
-
-function showFormError(bannerId: string, message: string) {
-  const banner = document.getElementById(bannerId);
-  if (!banner) return;
-  banner.innerHTML = `${ERROR_ICON_SVG}<span>${escapeHtml(message)}</span>`;
-  banner.style.display = 'flex';
-}
-
-function hideFormError(bannerId: string) {
-  const banner = document.getElementById(bannerId);
-  if (banner) banner.style.display = 'none';
-}
-
-function setStatusHint(hintId: string, text: string) {
-  const hint = document.getElementById(hintId);
-  if (!hint) return;
-  if (text) {
-    hint.textContent = text;
-    hint.style.display = 'inline';
-  } else {
-    hint.style.display = 'none';
-  }
-}
-
-/** Human-readable message for whatever `invoke()` rejects with — Tauri
- * commands that return `Result<T, String>` reject with that string
- * directly, but fall back gracefully if something else shows up. */
 function errorMessage(e: unknown): string {
   if (typeof e === 'string') return e;
   if (e instanceof Error) return e.message;
-  return 'Something went wrong. Check the app logs for details.';
+  return tr('common.unknownError');
+}
+
+function rememberedName(): string {
+  try {
+    return localStorage.getItem(NAME_STORAGE_KEY) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function rememberName(name: string) {
+  try {
+    localStorage.setItem(NAME_STORAGE_KEY, name);
+  } catch {
+    // Storage blocked: the name just isn't prefilled next time.
+  }
+}
+
+function renderRoomView(room: RoomState | null) {
+  show($('setup-view'), !room);
+  show($('active-room-view'), !!room);
+  if (!room) return;
+  hideFormError('leave-room-error');
+
+  const code = $('room-code-display');
+  if (code) code.textContent = room.room_code;
+  const count = $('member-count');
+  if (count) count.textContent = t().syncListeners(room.members.length);
+
+  const list = $('members-list');
+  if (!list) return;
+  list.replaceChildren(
+    ...room.members.map((m) => {
+      const item = document.createElement('div');
+      item.className = 'member-item';
+      const avatar = document.createElement('span');
+      avatar.className = 'member-avatar';
+      avatar.textContent = getInitials(m.nickname);
+      const name = document.createElement('span');
+      name.className = 'member-name';
+      name.textContent = m.id === room.current_user_id ? `${m.nickname} ${tr('sync.role.you')}` : m.nickname;
+      const role = document.createElement('span');
+      role.className = 'member-role';
+      role.textContent = m.is_host ? tr('sync.role.host') : tr('sync.role.listener');
+      item.append(avatar, name, role);
+      return item;
+    })
+  );
+}
+
+function showFormError(id: string, message: string) {
+  const banner = $(id);
+  if (!banner) return;
+  const ns = 'http://www.w3.org/2000/svg';
+  const icon = document.createElementNS(ns, 'svg');
+  icon.setAttribute('class', 'icon');
+  icon.setAttribute('viewBox', '0 0 24 24');
+  const path = document.createElementNS(ns, 'path');
+  path.setAttribute('d', 'M11 15h2v2h-2zm0-8h2v6h-2zm.99-5C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z');
+  icon.appendChild(path);
+  const text = document.createElement('span');
+  text.textContent = message;
+  banner.replaceChildren(icon, text);
+  show(banner, true);
+}
+
+function hideFormError(id: string) {
+  show($(id), false);
+}
+
+function setStatusHint(id: string, text: string) {
+  const hint = $(id);
+  if (!hint) return;
+  hint.textContent = text;
+  show(hint, !!text);
+}
+
+/** Swaps a button to spinner + text while a request is in flight and locks
+ * the related inputs, so a pending create/join can't be double-submitted. */
+function setButtonLoading(
+  button: HTMLButtonElement | null,
+  labelEl: HTMLElement | null,
+  loadingText: string | null,
+  idleText: string,
+  lock: (HTMLInputElement | null)[]
+) {
+  if (!button || !labelEl) return;
+  const loading = loadingText !== null;
+  button.disabled = loading;
+  lock.forEach((el) => {
+    if (el) el.disabled = loading;
+  });
+  if (!loading) {
+    labelEl.textContent = idleText;
+    return;
+  }
+  const spinner = document.createElement('span');
+  spinner.className = 'spinner';
+  const text = document.createElement('span');
+  text.textContent = loadingText;
+  labelEl.replaceChildren(spinner, text);
 }
 
 async function loadRoomState() {
-  if (window.__TAURI__?.core) {
-    try {
-      const state = (await window.__TAURI__.core.invoke('get_sync_room_state')) as RoomState | null;
-      activeRoom = state;
-      renderRoomView(activeRoom);
-    } catch {
-      renderRoomView(null);
-    }
+  if (!window.__TAURI__?.core) return;
+  try {
+    activeRoom = (await window.__TAURI__.core.invoke('get_sync_room_state')) as RoomState | null;
+  } catch {
+    activeRoom = null;
   }
+  renderRoomView(activeRoom);
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  initWindowChrome();
   initAmbientBackdrop();
-  loadRoomState();
+  void loadRoomState();
 
-  // Tab switching
-  const tabHost = document.getElementById('tab-host');
-  const tabGuest = document.getElementById('tab-guest');
-  const panelHost = document.getElementById('panel-host');
-  const panelGuest = document.getElementById('panel-guest');
-
-  if (tabHost && tabGuest && panelHost && panelGuest) {
-    tabHost.addEventListener('click', () => {
-      tabHost.classList.add('active');
-      tabGuest.classList.remove('active');
-      panelHost.style.display = 'flex';
-      panelGuest.style.display = 'none';
-      hideFormError('guest-error');
-    });
-
-    tabGuest.addEventListener('click', () => {
-      tabGuest.classList.add('active');
-      tabHost.classList.remove('active');
-      panelGuest.style.display = 'flex';
-      panelHost.style.display = 'none';
-      hideFormError('host-error');
-    });
+  const hostNick = $<HTMLInputElement>('host-nickname');
+  const guestNick = $<HTMLInputElement>('guest-nickname');
+  const joinCode = $<HTMLInputElement>('join-code');
+  for (const input of [hostNick, guestNick]) {
+    if (!input) continue;
+    input.value = rememberedName();
+    input.placeholder = tr('sync.field.namePlaceholder');
   }
+  const nameFrom = (input: HTMLInputElement | null) => {
+    const name = input?.value.trim() || tr('sync.defaultName');
+    rememberName(input?.value.trim() ?? '');
+    return name;
+  };
 
-  // Create Room
-  const createBtn = document.getElementById('create-room-btn') as HTMLButtonElement | null;
-  const createBtnLabel = document.getElementById('create-room-btn-label');
-  const hostNickInput = document.getElementById('host-nickname') as HTMLInputElement;
+  // Tabs
+  const tabHost = $('tab-host');
+  const tabGuest = $('tab-guest');
+  const selectTab = (host: boolean) => {
+    tabHost?.classList.toggle('is-selected', host);
+    tabGuest?.classList.toggle('is-selected', !host);
+    tabHost?.setAttribute('aria-selected', String(host));
+    tabGuest?.setAttribute('aria-selected', String(!host));
+    show($('panel-host'), host);
+    show($('panel-guest'), !host);
+    hideFormError(host ? 'guest-error' : 'host-error');
+    (host ? hostNick : joinCode)?.focus();
+  };
+  tabHost?.addEventListener('click', () => selectTab(true));
+  tabGuest?.addEventListener('click', () => selectTab(false));
+
+  // Create
+  const createBtn = $<HTMLButtonElement>('create-room-btn');
+  const createLabel = $('create-room-btn-label');
   let createInFlight = false;
-
-  const handleCreateRoom = async () => {
-    if (createInFlight) return;
-    const nick = hostNickInput?.value.trim() || 'Host';
-    if (!window.__TAURI__?.core) return;
-
+  const handleCreate = async () => {
+    if (createInFlight || !window.__TAURI__?.core) return;
     createInFlight = true;
     hideFormError('host-error');
-    setButtonLoading(createBtn, createBtnLabel, true, 'Creating room…', 'Create Listening Room', [hostNickInput]);
-
+    setButtonLoading(createBtn, createLabel, tr('sync.creating'), tr('sync.create'), [hostNick]);
     try {
-      const room = (await window.__TAURI__.core.invoke('create_sync_room', { nickname: nick })) as RoomState;
+      const room = (await window.__TAURI__.core.invoke('create_sync_room', { nickname: nameFrom(hostNick) })) as RoomState;
       activeRoom = room;
       renderRoomView(room);
     } catch (e) {
@@ -191,55 +196,41 @@ document.addEventListener('DOMContentLoaded', () => {
       showFormError('host-error', errorMessage(e));
     } finally {
       createInFlight = false;
-      setButtonLoading(createBtn, createBtnLabel, false, '', 'Create Listening Room', [hostNickInput]);
+      setButtonLoading(createBtn, createLabel, null, tr('sync.create'), [hostNick]);
     }
   };
+  createBtn?.addEventListener('click', handleCreate);
+  hostNick?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') void handleCreate();
+  });
 
-  if (createBtn) createBtn.addEventListener('click', handleCreateRoom);
-  if (hostNickInput) {
-    hostNickInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') handleCreateRoom();
-    });
-  }
-
-  // Join Room
-  const joinBtn = document.getElementById('join-room-btn') as HTMLButtonElement | null;
-  const joinBtnLabel = document.getElementById('join-room-btn-label');
-  const joinCodeInput = document.getElementById('join-code') as HTMLInputElement;
-  const guestNickInput = document.getElementById('guest-nickname') as HTMLInputElement;
+  // Join. The backend tries the local network first (~2.5s), then the
+  // internet brokers (up to ~15s) with no progress events in between, so
+  // this timer only estimates when the internet phase began — enough that
+  // a longer wait doesn't look like the app hung.
+  const LAN_PHASE_ESTIMATE_MS = 3000;
+  const joinBtn = $<HTMLButtonElement>('join-room-btn');
+  const joinLabel = $('join-room-btn-label');
   let joinInFlight = false;
-
-  // The Rust side tries the LAN beacon first (~4s) before falling back to
-  // the internet (DHT) path, which can take up to ~20s more — see
-  // p2p_sync.rs. There's no intermediate progress event from the backend,
-  // so this is a client-side timer estimating when that fallback most
-  // likely kicked in, purely so a 15s wait doesn't look like the app hung.
-  const LAN_TIMEOUT_ESTIMATE_MS = 4500;
-  let joinPhaseTimer: ReturnType<typeof setTimeout> | null = null;
-
-  const handleJoinRoom = async () => {
+  const handleJoin = async () => {
     if (joinInFlight) return;
-    const code = joinCodeInput?.value.trim().toUpperCase();
-    const nick = guestNickInput?.value.trim() || 'Friend';
-
+    const code = joinCode?.value.trim().toUpperCase() ?? '';
     hideFormError('guest-error');
     if (!code) {
-      showFormError('guest-error', 'Enter a room code first.');
+      showFormError('guest-error', tr('sync.error.codeRequired'));
+      joinCode?.focus();
       return;
     }
     if (!window.__TAURI__?.core) return;
 
     joinInFlight = true;
-    setButtonLoading(joinBtn, joinBtnLabel, true, 'Searching…', 'Join Listening Room', [joinCodeInput, guestNickInput]);
-    setStatusHint('guest-status-hint', 'Looking for the room on your network…');
-    joinPhaseTimer = setTimeout(() => {
-      setStatusHint('guest-status-hint', "Not found nearby — trying the internet, this can take up to 20s…");
-    }, LAN_TIMEOUT_ESTIMATE_MS);
-
+    setButtonLoading(joinBtn, joinLabel, tr('sync.joining'), tr('sync.join'), [joinCode, guestNick]);
+    setStatusHint('guest-status-hint', tr('sync.hint.lan'));
+    const phaseTimer = setTimeout(() => setStatusHint('guest-status-hint', tr('sync.hint.internet')), LAN_PHASE_ESTIMATE_MS);
     try {
       const room = (await window.__TAURI__.core.invoke('join_sync_room', {
         roomCode: code,
-        nickname: nick
+        nickname: nameFrom(guestNick)
       })) as RoomState;
       activeRoom = room;
       renderRoomView(room);
@@ -248,82 +239,52 @@ document.addEventListener('DOMContentLoaded', () => {
       showFormError('guest-error', errorMessage(e));
     } finally {
       joinInFlight = false;
-      if (joinPhaseTimer) clearTimeout(joinPhaseTimer);
+      clearTimeout(phaseTimer);
       setStatusHint('guest-status-hint', '');
-      setButtonLoading(joinBtn, joinBtnLabel, false, '', 'Join Listening Room', [joinCodeInput, guestNickInput]);
+      setButtonLoading(joinBtn, joinLabel, null, tr('sync.join'), [joinCode, guestNick]);
     }
   };
-
-  if (joinBtn) joinBtn.addEventListener('click', handleJoinRoom);
-  if (joinCodeInput) {
-    joinCodeInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') handleJoinRoom();
-    });
-  }
-  if (guestNickInput) {
-    guestNickInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') handleJoinRoom();
+  joinBtn?.addEventListener('click', handleJoin);
+  for (const input of [joinCode, guestNick]) {
+    input?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') void handleJoin();
     });
   }
 
-  // Copy Code
-  const copyBtn = document.getElementById('copy-code-btn');
-  if (copyBtn) {
-    copyBtn.addEventListener('click', () => {
-      if (activeRoom) {
-        navigator.clipboard.writeText(activeRoom.room_code);
-        const originalHtml = copyBtn.innerHTML;
-        copyBtn.innerHTML = `
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-          <span style="color: #22c55e;">Copied!</span>
-        `;
-        setTimeout(() => {
-          copyBtn.innerHTML = originalHtml;
-        }, 1800);
-      }
-    });
-  }
+  $('copy-code-btn')?.addEventListener('click', async () => {
+    if (!activeRoom) return;
+    try {
+      await navigator.clipboard.writeText(activeRoom.room_code);
+      showToast(tr('sync.copied'));
+    } catch (e) {
+      console.error('[YTMD Sync] Copy failed:', e);
+      showToast(tr('common.unknownError'));
+    }
+  });
 
-  // Leave Room
-  const leaveBtn = document.getElementById('leave-room-btn') as HTMLButtonElement | null;
-  if (leaveBtn) {
-    leaveBtn.addEventListener('click', async () => {
-      if (window.__TAURI__?.core) {
-        hideFormError('leave-room-error');
-        leaveBtn.disabled = true;
-        try {
-          await window.__TAURI__.core.invoke('leave_sync_room');
-          activeRoom = null;
-          renderRoomView(null);
-        } catch (e) {
-          console.error('[YTMD Sync] Failed to leave room:', e);
-          showFormError('leave-room-error', `Couldn't leave the room: ${errorMessage(e)}`);
-        } finally {
-          leaveBtn.disabled = false;
-        }
-      }
-    });
-  }
-
-  // Listen to remote updates
-  if (window.__TAURI__?.event) {
-    window.__TAURI__.event.listen<RoomState>('sync-room-updated', (e) => {
-      activeRoom = e.payload;
-      renderRoomView(activeRoom);
-    });
-
-    window.__TAURI__.event.listen('sync-room-left', () => {
+  const leaveBtn = $<HTMLButtonElement>('leave-room-btn');
+  leaveBtn?.addEventListener('click', async () => {
+    if (!window.__TAURI__?.core) return;
+    hideFormError('leave-room-error');
+    leaveBtn.disabled = true;
+    try {
+      await window.__TAURI__.core.invoke('leave_sync_room');
       activeRoom = null;
       renderRoomView(null);
-    });
-  }
+    } catch (e) {
+      console.error('[YTMD Sync] Failed to leave room:', e);
+      showFormError('leave-room-error', tr('sync.error.leave', { reason: errorMessage(e) }));
+    } finally {
+      leaveBtn.disabled = false;
+    }
+  });
 
-  // Window Controls
-  const minBtn = document.getElementById('win-min-btn');
-  const maxBtn = document.getElementById('win-max-btn');
-  const closeBtn = document.getElementById('win-close-btn');
-
-  if (minBtn) minBtn.addEventListener('click', () => window.__TAURI__?.core.invoke('minimize_window'));
-  if (maxBtn) maxBtn.addEventListener('click', () => window.__TAURI__?.core.invoke('toggle_maximize_window'));
-  if (closeBtn) closeBtn.addEventListener('click', () => window.__TAURI__?.core.invoke('close_window'));
+  window.__TAURI__?.event.listen<RoomState>('sync-room-updated', (e) => {
+    activeRoom = e.payload;
+    renderRoomView(activeRoom);
+  });
+  window.__TAURI__?.event.listen('sync-room-left', () => {
+    activeRoom = null;
+    renderRoomView(null);
+  });
 });

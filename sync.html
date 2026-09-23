@@ -3,237 +3,99 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>YTMD Listen Together</title>
+    <title data-i18n="sync.windowTitle">Listen together</title>
     <link rel="stylesheet" href="./src/ui/styles.css" />
-    <style>
-      .sync-container {
-        position: relative;
-        z-index: 5;
-        padding: 24px 28px;
-        display: flex;
-        flex-direction: column;
-        gap: 18px;
-        min-height: calc(100vh - 42px);
-        overflow-y: auto;
-        box-sizing: border-box;
-      }
-      .tabs-header {
-        display: flex;
-        gap: 8px;
-        border-bottom: 1px solid var(--border);
-        padding-bottom: 8px;
-      }
-      .tab-btn {
-        background: none;
-        border: none;
-        color: var(--text-secondary);
-        font-family: inherit;
-        font-size: 12.5px;
-        font-weight: 500;
-        padding: 6px 14px;
-        border-radius: 6px;
-        cursor: pointer;
-        transition: background-color 0.12s ease, color 0.12s ease;
-      }
-      .tab-btn.active {
-        background: var(--bg-subtle);
-        color: var(--text-primary);
-        font-weight: 600;
-      }
-      .room-card {
-        background: var(--bg-surface);
-        backdrop-filter: var(--blur-panel);
-        -webkit-backdrop-filter: var(--blur-panel);
-        border: 1px solid var(--border);
-        border-radius: 14px;
-        padding: 20px;
-        display: flex;
-        flex-direction: column;
-        gap: 16px;
-        box-shadow: var(--shadow-panel);
-      }
-      .code-display {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        background: var(--bg-subtle);
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        padding: 12px 16px;
-      }
-      .code-text {
-        font-family: var(--font-mono);
-        font-size: 18px;
-        font-weight: 700;
-        letter-spacing: 2px;
-        color: var(--text-primary);
-      }
-      .member-list {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-      }
-      .member-item {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 8px 12px;
-        background: var(--bg-subtle);
-        border-radius: 8px;
-        font-size: 12.5px;
-      }
-      .member-avatar {
-        width: 24px;
-        height: 24px;
-        border-radius: 50%;
-        background: var(--bg-card-hover);
-        border: 1px solid var(--border);
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 11px;
-        font-weight: 600;
-        color: var(--text-secondary);
-      }
-      .badge-host {
-        font-size: 10px;
-        font-weight: 600;
-        background: color-mix(in srgb, var(--warning) 15%, transparent);
-        color: var(--warning);
-        border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
-        padding: 2px 6px;
-        border-radius: 4px;
-        text-transform: uppercase;
-      }
-      .status-pill {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        font-size: 12px;
-        color: var(--success);
-        font-weight: 500;
-      }
-      .status-dot {
-        width: 7px;
-        height: 7px;
-        border-radius: 50%;
-        background-color: var(--success);
-        box-shadow: 0 0 8px color-mix(in srgb, var(--success) 40%, transparent);
-      }
-    </style>
   </head>
   <body>
     <div id="ambient-backdrop" aria-hidden="true">
       <img id="ambient-cover" alt="" />
       <div id="ambient-veil"></div>
-      <div id="ambient-grain"></div>
     </div>
-    <header class="app-header" data-tauri-drag-region>
-      <div class="brand" data-tauri-drag-region>
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-        <span>Listen Together</span>
+
+    <header class="titlebar" data-tauri-drag-region>
+      <div class="titlebar-title" data-tauri-drag-region>
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
+        <span data-i18n="sync.windowTitle" data-tauri-drag-region>Listen together</span>
       </div>
       <div class="window-controls">
-        <button id="win-min-btn" class="window-btn" title="Minimize">
-          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 8h8"/></svg>
-        </button>
-        <button id="win-max-btn" class="window-btn" title="Maximize">
-          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1.5" y="1.5" width="7" height="7" rx="1"/></svg>
-        </button>
-        <button id="win-close-btn" class="window-btn close" title="Close">
-          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="m1.5 1.5 7 7m0-7-7 7"/></svg>
-        </button>
+        <button id="win-min-btn" class="icon-btn sm" data-i18n-label="window.minimize" aria-label="Minimize"><svg class="icon" viewBox="0 0 24 24"><path d="M6 19h12v2H6z"/></svg></button>
+        <button id="win-max-btn" class="icon-btn sm" data-i18n-label="window.maximize" aria-label="Maximize"><svg class="icon" viewBox="0 0 24 24"><path d="M18 4H6c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H6V6h12v12z"/></svg></button>
+        <button id="win-close-btn" class="icon-btn sm window-close" data-i18n-label="window.close" aria-label="Close"><svg class="icon" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></button>
       </div>
     </header>
-    <div class="sync-container">
-      
-      <!-- Room Setup Mode -->
-      <div id="setup-view">
-        <div style="margin-bottom: 16px;">
-          <h2 style="font-size: 16px; font-weight: 700; margin: 0 0 4px 0; color: var(--text-primary);">Listen Together (P2P Room Sync)</h2>
-          <span style="color: var(--text-secondary); font-size: 12.5px;">Synchronize your YTMD queue and playback with friends in real time.</span>
+
+    <main class="page">
+      <!-- Not in a room -->
+      <div id="setup-view" class="page-inner">
+        <div>
+          <h1 class="page-title" data-i18n="sync.setup.title">Listen together</h1>
+          <p class="page-lead" data-i18n="sync.setup.lead">Play the same music at the same time as your friends, wherever they are.</p>
         </div>
 
-        <div class="tabs-header">
-          <button id="tab-host" class="tab-btn active">Create Room (Host)</button>
-          <button id="tab-guest" class="tab-btn">Join Room (Guest)</button>
+        <div class="chip-row" role="tablist">
+          <button id="tab-host" class="chip is-selected" role="tab" aria-selected="true" data-i18n="sync.tab.host">Start a session</button>
+          <button id="tab-guest" class="chip" role="tab" aria-selected="false" data-i18n="sync.tab.guest">Join with a code</button>
         </div>
 
-        <!-- Create Room Panel -->
-        <div id="panel-host" class="room-card" style="margin-top: 14px;">
-          <div style="display: flex; flex-direction: column; gap: 6px;">
-            <label style="font-size: 12px; font-weight: 500; color: var(--text-secondary);">Your Display Nickname</label>
-            <input type="text" id="host-nickname" class="search-box" style="width: 100%;" placeholder="e.g. Kacper" value="Host" />
+        <div id="panel-host" class="form" role="tabpanel">
+          <label class="field">
+            <span class="field-label" data-i18n="sync.field.name">Your name</span>
+            <input type="text" id="host-nickname" class="input" maxlength="32" autocomplete="off" />
+          </label>
+          <div class="form-actions">
+            <button id="create-room-btn" class="btn btn-filled"><span id="create-room-btn-label" data-i18n="sync.create">Start session</span></button>
+            <span id="host-status-hint" class="hint is-hidden"></span>
           </div>
-          <div style="display: flex; align-items: center; gap: 10px;">
-            <button id="create-room-btn" class="btn-primary" style="align-self: flex-start;">
-              <span id="create-room-btn-label">Create Listening Room</span>
-            </button>
-            <span id="host-status-hint" style="font-size: 11.5px; color: var(--text-muted); display: none;"></span>
-          </div>
-          <div id="host-error" class="form-error" style="display: none;"></div>
+          <div id="host-error" class="form-error is-hidden" role="alert"></div>
         </div>
 
-        <!-- Join Room Panel -->
-        <div id="panel-guest" class="room-card" style="margin-top: 14px; display: none;">
-          <div style="display: flex; flex-direction: column; gap: 6px;">
-            <label style="font-size: 12px; font-weight: 500; color: var(--text-secondary);">Room Code</label>
-            <input type="text" id="join-code" class="search-box" style="width: 100%; font-family: var(--font-mono); text-transform: uppercase;" placeholder="YTMD-ABC123" />
+        <div id="panel-guest" class="form is-hidden" role="tabpanel">
+          <label class="field">
+            <span class="field-label" data-i18n="sync.field.code">Session code</span>
+            <input type="text" id="join-code" class="input mono" placeholder="YTMD-XXXXXXXXXX" autocomplete="off" spellcheck="false" />
+          </label>
+          <label class="field">
+            <span class="field-label" data-i18n="sync.field.name">Your name</span>
+            <input type="text" id="guest-nickname" class="input" maxlength="32" autocomplete="off" />
+          </label>
+          <div class="form-actions">
+            <button id="join-room-btn" class="btn btn-filled"><span id="join-room-btn-label" data-i18n="sync.join">Join</span></button>
+            <span id="guest-status-hint" class="hint is-hidden"></span>
           </div>
-          <div style="display: flex; flex-direction: column; gap: 6px;">
-            <label style="font-size: 12px; font-weight: 500; color: var(--text-secondary);">Your Display Nickname</label>
-            <input type="text" id="guest-nickname" class="search-box" style="width: 100%;" placeholder="e.g. Friend" value="Friend" />
-          </div>
-          <div style="display: flex; align-items: center; gap: 10px;">
-            <button id="join-room-btn" class="btn-primary" style="align-self: flex-start;">
-              <span id="join-room-btn-label">Join Listening Room</span>
-            </button>
-            <span id="guest-status-hint" style="font-size: 11.5px; color: var(--text-muted); display: none;"></span>
-          </div>
-          <div id="guest-error" class="form-error" style="display: none;"></div>
+          <div id="guest-error" class="form-error is-hidden" role="alert"></div>
         </div>
       </div>
 
-      <!-- Active Room Mode -->
-      <div id="active-room-view" style="display: none; flex-direction: column; gap: 16px;">
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-          <div>
-            <h2 style="font-size: 16px; font-weight: 700; margin: 0 0 4px 0; color: var(--text-primary);">Active Listening Room</h2>
-            <div class="status-pill">
-              <span class="status-dot"></span>
-              <span id="sync-status-label">Synchronized</span>
-            </div>
-          </div>
-          <button id="leave-room-btn" class="btn-secondary" style="color: #ef4444; border-color: rgba(239, 68, 68, 0.3);">Leave Room</button>
+      <!-- In a room -->
+      <div id="active-room-view" class="page-inner is-hidden">
+        <div>
+          <h1 class="page-title" data-i18n="sync.active.title">Listening together</h1>
+          <div class="status-line"><span class="status-dot"></span><span id="sync-status-label" data-i18n="sync.active.status">In sync</span></div>
         </div>
 
-        <div id="leave-room-error" class="form-error" style="display: none;"></div>
-
-        <div class="room-card">
-          <div>
-            <span style="font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.5px;">Shareable Room Code</span>
-            <div class="code-display" style="margin-top: 6px;">
-              <span class="code-text" id="room-code-display">YTMD-XXXX</span>
-              <button id="copy-code-btn" class="btn-secondary" style="font-size: 11px; padding: 4px 10px;">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
-                <span>Copy Code</span>
-              </button>
-            </div>
+        <div class="room-code-card">
+          <div class="setting-text">
+            <span class="hint" data-i18n="sync.active.codeLabel">Share this code to invite friends</span>
+            <span class="room-code" id="room-code-display">YTMD-</span>
           </div>
-
-          <div>
-            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-              <span style="font-size: 12px; font-weight: 600; color: var(--text-primary);">Connected Listeners</span>
-              <span id="member-count" style="font-size: 12px; color: var(--text-muted); font-family: var(--font-mono);">1 listener</span>
-            </div>
-            <div class="member-list" id="members-list">
-              <!-- Dynamically populated -->
-            </div>
-          </div>
+          <button id="copy-code-btn" class="icon-btn" data-i18n-label="sync.copy" aria-label="Copy code"><svg class="icon" viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg></button>
         </div>
+
+        <div>
+          <div class="list-heading">
+            <span data-i18n="sync.active.listeners">Listeners</span>
+            <span id="member-count" class="hint"></span>
+          </div>
+          <div class="member-list" id="members-list"></div>
+        </div>
+
+        <div class="form-actions">
+          <button id="leave-room-btn" class="btn btn-tonal btn-danger" data-i18n="sync.leave">Leave session</button>
+        </div>
+        <div id="leave-room-error" class="form-error is-hidden" role="alert"></div>
       </div>
+    </main>
 
-    </div>
     <script type="module" src="./src/ui/sync.ts"></script>
   </body>
 </html>

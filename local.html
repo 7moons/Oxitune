@@ -3,107 +3,99 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>YTMD Local Music Library</title>
+    <title data-i18n="local.windowTitle">Local music</title>
     <link rel="stylesheet" href="./src/ui/styles.css" />
   </head>
-  <body>
+  <body class="has-player-bar">
     <div id="ambient-backdrop" aria-hidden="true">
       <img id="ambient-cover" alt="" />
       <div id="ambient-veil"></div>
-      <div id="ambient-grain"></div>
-    </div>
-    <div class="local-header" data-tauri-drag-region>
-      <div style="display: flex; align-items: center; gap: 14px; flex: 1;" data-tauri-drag-region>
-        <div style="display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13.5px;">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
-          <span>Local Music Library</span>
-        </div>
-        <div style="position: relative; flex: 1; max-width: 380px;">
-          <input type="text" id="search-input" class="search-box" style="width: 100%; padding-right: 28px;" placeholder="Search title, artist or album..." />
-          <button id="clear-search-btn" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-muted); cursor: pointer; display: none; padding: 2px;">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-          </button>
-        </div>
-        <span id="track-count-badge" style="font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); font-weight: 500;">0 tracks</span>
-      </div>
-      <div style="display: flex; align-items: center; gap: 8px;">
-        <button id="rescan-btn" class="btn-secondary" style="font-size: 12px; padding: 6px 12px;">
-          <svg id="rescan-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
-          <span>Rescan</span>
-        </button>
-        <div class="window-controls">
-          <button id="win-min-btn" class="window-btn" title="Minimize">
-            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 8h8"/></svg>
-          </button>
-          <button id="win-max-btn" class="window-btn" title="Maximize">
-            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1.5" y="1.5" width="7" height="7" rx="1"/></svg>
-          </button>
-          <button id="win-close-btn" class="window-btn close" title="Close">
-            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="m1.5 1.5 7 7m0-7-7 7"/></svg>
-          </button>
-        </div>
-      </div>
     </div>
 
-    <div class="tracks-table-container">
-      <div id="loading-state" class="empty-state" style="display: none;">
-        <span class="spinner spinner-accent" style="width: 20px; height: 20px; border-width: 2.5px;"></span>
-        <span>Scanning music files…</span>
+    <header class="titlebar" data-tauri-drag-region>
+      <div class="titlebar-title" data-tauri-drag-region>
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm-2 5h-3v5.5a2.5 2.5 0 1 1-2.5-2.5c.57 0 1.08.19 1.5.51V9h4v2z"/></svg>
+        <span data-i18n="local.windowTitle" data-tauri-drag-region>Local music</span>
       </div>
-      <table class="tracks-table" id="tracks-table" style="display: none;">
+      <div class="window-controls">
+        <button id="win-min-btn" class="icon-btn sm" data-i18n-label="window.minimize" aria-label="Minimize"><svg class="icon" viewBox="0 0 24 24"><path d="M6 19h12v2H6z"/></svg></button>
+        <button id="win-max-btn" class="icon-btn sm" data-i18n-label="window.maximize" aria-label="Maximize"><svg class="icon" viewBox="0 0 24 24"><path d="M18 4H6c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H6V6h12v12z"/></svg></button>
+        <button id="win-close-btn" class="icon-btn sm window-close" data-i18n-label="window.close" aria-label="Close"><svg class="icon" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></button>
+      </div>
+    </header>
+
+    <div class="toolbar">
+      <div class="search">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.87 20.17l-5.59-5.59C16.35 13.35 17 11.75 17 10c0-3.87-3.13-7-7-7s-7 3.13-7 7 3.13 7 7 7c1.75 0 3.35-.65 4.58-1.71l5.59 5.59.7-.71zM10 16c-3.31 0-6-2.69-6-6s2.69-6 6-6 6 2.69 6 6-2.69 6-6 6z"/></svg>
+        <input type="text" id="search-input" class="input" data-i18n-placeholder="local.search" placeholder="Search your music" spellcheck="false" />
+        <button id="clear-search-btn" class="icon-btn sm is-hidden" data-i18n-label="local.clearSearch" aria-label="Clear search"><svg class="icon" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></button>
+      </div>
+      <span id="track-count-badge" class="toolbar-count"></span>
+      <button id="rescan-btn" class="btn btn-tonal">
+        <svg id="rescan-icon" class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+        <span data-i18n="local.rescan">Rescan</span>
+      </button>
+    </div>
+
+    <div class="list-scroll">
+      <div id="loading-state" class="empty-state is-hidden">
+        <span class="spinner lg"></span>
+        <span id="loading-label" data-i18n="local.scanning">Scanning your music…</span>
+      </div>
+      <table class="tracks-table is-hidden" id="tracks-table">
+        <colgroup>
+          <col style="width: 48px" />
+          <col />
+          <col style="width: 24%" />
+          <col style="width: 24%" />
+          <col style="width: 72px" />
+          <col style="width: 64px" />
+        </colgroup>
         <thead>
           <tr>
-            <th style="width: 44px; text-align: center;">#</th>
-            <th>Title</th>
-            <th>Artist</th>
-            <th>Album</th>
-            <th style="width: 80px;">Format</th>
-            <th style="width: 70px; text-align: right;">Time</th>
+            <th class="num-col">#</th>
+            <th data-i18n="local.col.title">Title</th>
+            <th data-i18n="local.col.artist">Artist</th>
+            <th data-i18n="local.col.album">Album</th>
+            <th data-i18n="local.col.format">Format</th>
+            <th class="time-col" data-i18n="local.col.time">Time</th>
           </tr>
         </thead>
         <tbody id="tracks-body"></tbody>
       </table>
       <div id="empty-state" class="empty-state">
-        <svg id="empty-state-icon" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/><line x1="12" y1="2" x2="12" y2="5"/></svg>
-        <span id="empty-state-text">No local music files found.</span>
-        <button id="scan-now-btn" class="btn-primary" style="font-size: 12px; padding: 6px 14px;">Scan Music Directory</button>
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
+        <span id="empty-state-text" data-i18n="local.empty">No music found in your local music folder</span>
+        <button id="scan-now-btn" class="btn btn-filled" data-i18n="local.scanNow">Scan folder</button>
       </div>
     </div>
 
-    <div class="local-player-bar" id="local-player-bar">
-      <div class="local-track-info">
-        <span id="playing-title" style="font-size: 13px; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">No track selected</span>
-        <span id="playing-artist" style="font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Offline Local Player</span>
+    <div class="player-bar" id="local-player-bar">
+      <div id="local-progress-track" class="player-progress" role="slider" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" data-i18n-label="local.seek" aria-label="Seek">
+        <div id="local-progress-fill" class="player-progress-fill"></div>
       </div>
 
-      <div class="local-player-center">
-        <div class="local-player-controls">
-          <button id="prev-track-btn" class="ctrl-btn" title="Previous Track" style="padding: 4px;">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg>
-          </button>
-          <button id="play-pause-btn" class="ctrl-btn play-btn" style="padding: 8px;" title="Play / Pause">
-            <svg id="play-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-            <svg id="pause-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="display: none;"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
-          </button>
-          <button id="next-track-btn" class="ctrl-btn" title="Next Track" style="padding: 4px;">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="m6 18 8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
-          </button>
-        </div>
-
-        <div style="display: flex; align-items: center; gap: 8px; width: 100%; font-size: 10.5px; font-family: var(--font-mono); color: var(--text-muted);">
-          <span id="current-time-text" style="width: 32px; text-align: right;">0:00</span>
-          <div id="local-progress-track" class="progress-track">
-            <div id="local-progress-fill" class="progress-fill"></div>
-          </div>
-          <span id="total-time-text" style="width: 32px;">0:00</span>
-        </div>
-      </div>
-
-      <div style="display: flex; align-items: center; gap: 8px; min-width: 140px; justify-content: flex-end;">
-        <button id="volume-icon-btn" class="ctrl-btn" style="padding: 4px;" title="Mute / Unmute">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+      <div class="player-controls">
+        <button id="prev-track-btn" class="icon-btn" data-i18n-label="player.previous" aria-label="Previous"><svg class="icon" viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg></button>
+        <button id="play-pause-btn" class="icon-btn play-btn" data-i18n-label="player.play" aria-label="Play">
+          <svg id="play-icon" class="icon" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+          <svg id="pause-icon" class="icon is-hidden" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
         </button>
-        <input type="range" id="volume-slider" min="0" max="1" step="0.05" value="1" class="preamp-slider" style="width: 70px;" />
+        <button id="next-track-btn" class="icon-btn" data-i18n-label="player.next" aria-label="Next"><svg class="icon" viewBox="0 0 24 24"><path d="m6 18 8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg></button>
+        <span class="player-time"><span id="current-time-text">0:00</span> / <span id="total-time-text">0:00</span></span>
+      </div>
+
+      <div class="player-meta">
+        <span id="playing-title" class="player-title" data-i18n="local.nothingPlaying">Pick a song to play</span>
+        <span id="playing-artist" class="player-subtitle"></span>
+      </div>
+
+      <div class="player-volume">
+        <button id="volume-icon-btn" class="icon-btn" data-i18n-label="player.mute" aria-label="Mute">
+          <svg id="volume-on-icon" class="icon" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+          <svg id="volume-off-icon" class="icon is-hidden" viewBox="0 0 24 24"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3 3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4 9.91 6.09 12 8.18V4z"/></svg>
+        </button>
+        <input type="range" id="volume-slider" min="0" max="1" step="0.05" value="1" class="range" data-i18n-label="player.volume" aria-label="Volume" />
       </div>
     </div>
 

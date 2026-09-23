@@ -15,9 +15,9 @@ export function formatDb(db: number): string {
   return `${sign}${db.toFixed(1)}`;
 }
 
-export function formatCrossfade(secs: number): string {
-  if (secs <= 0) return 'Disabled';
-  return `${secs.toFixed(1)}s`;
+export function formatCrossfade(secs: number, offLabel: string): string {
+  if (secs <= 0) return offLabel;
+  return `${secs.toFixed(1)} s`;
 }
 
 export function getInitials(name: string): string {
@@ -44,4 +44,17 @@ export function filterTracks<T extends SearchableTrack>(tracks: T[], query: stri
       t.artist.toLowerCase().includes(q) ||
       (!!t.album && t.album.toLowerCase().includes(q))
   );
+}
+
+/** Where playback is now, given the last report from the main window.
+ * The main window only reports on track/play-state changes, seeks and
+ * every ~15s, so the mini player advances the clock itself in between. */
+export function estimatePosition(
+  track: { current_time_secs: number; duration_secs: number; is_playing: boolean },
+  receivedAtMs: number,
+  nowMs: number
+): number {
+  const elapsed = track.is_playing ? Math.max(0, (nowMs - receivedAtMs) / 1000) : 0;
+  const pos = track.current_time_secs + elapsed;
+  return track.duration_secs > 0 ? Math.min(pos, track.duration_secs) : pos;
 }

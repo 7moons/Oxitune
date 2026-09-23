@@ -1,0 +1,354 @@
+/**
+ * Strings for the companion windows. Markup carries English defaults plus
+ * `data-i18n` (text), `data-i18n-label` (aria-label + tooltip) and
+ * `data-i18n-placeholder` keys; `applyI18n` swaps in the active locale.
+ * `src/tests/companion_i18n.test.ts` fails on any key used in the HTML or
+ * via `tr()` that a locale is missing.
+ */
+
+const en = {
+  'common.unknownError': 'Something went wrong. Try again.',
+  'window.minimize': 'Minimize',
+  'window.maximize': 'Maximize',
+  'window.close': 'Close',
+
+  'player.play': 'Play',
+  'player.pause': 'Pause',
+  'player.previous': 'Previous',
+  'player.next': 'Next',
+  'player.mute': 'Mute',
+  'player.volume': 'Volume',
+
+  'settings.windowTitle': 'Settings',
+  'settings.saved': 'Saved',
+  'settings.loadFailed': "Couldn't load your settings: {reason}",
+  'settings.saveFailed': "Couldn't save your settings: {reason}",
+  'settings.nav.audio': 'Audio',
+  'settings.nav.appearance': 'Appearance',
+  'settings.nav.addons': 'Add-ons',
+  'settings.nav.system': 'System',
+  'settings.nav.downloads': 'Downloads & library',
+  'settings.nav.remote': 'Phone remote',
+  'settings.nav.about': 'About',
+  'settings.eq.title': 'Equalizer',
+  'settings.eq.desc': '10 bands, applied as you adjust them',
+  'settings.eq.preset': 'Preset',
+  'settings.eq.preset.flat': 'Flat',
+  'settings.eq.preset.bass_boost': 'Bass boost',
+  'settings.eq.preset.bass_reducer': 'Bass reducer',
+  'settings.eq.preset.treble_boost': 'Treble boost',
+  'settings.eq.preset.vocal_clarity': 'Vocal clarity',
+  'settings.eq.preset.electronic': 'Electronic',
+  'settings.eq.preset.rock': 'Rock',
+  'settings.eq.preset.classical': 'Classical',
+  'settings.eq.preset.pop': 'Pop',
+  'settings.eq.preset.custom': 'Custom',
+  'settings.eq.reset': 'Reset',
+  'settings.eq.preamp': 'Preamp',
+  'settings.crossfade.title': 'Crossfade',
+  'settings.crossfade.desc': 'Blends the end of one song into the start of the next',
+  'settings.crossfade.off': 'Off',
+  'settings.skipSilence.title': 'Skip silence',
+  'settings.skipSilence.desc': 'Skips silent intros and outros',
+  'settings.normalize.title': 'Normalize volume',
+  'settings.normalize.desc': 'Evens out loudness between songs',
+  'settings.speed.title': 'Playback speed',
+  'settings.speed.normal': 'Normal',
+  'settings.pitch.title': 'Keep original pitch',
+  'settings.pitch.desc': "Voices don't sound higher or lower when you change the speed",
+  'settings.ambient.title': 'Ambient mode',
+  'settings.ambient.desc': "Tints the app with colors from the current song's artwork",
+  'settings.intensity.title': 'Ambient intensity',
+  'settings.css.title': 'Custom CSS',
+  'settings.css.desc': 'Applied to YouTube Music as you type',
+  'settings.adblock.title': 'Block ads',
+  'settings.adblock.desc': 'Removes ads and Premium prompts',
+  'settings.sponsorblock.title': 'SponsorBlock',
+  'settings.sponsorblock.desc': 'Skips non-music parts of music videos',
+  'settings.lyrics.title': 'Timed lyrics',
+  'settings.lyrics.desc': 'Adds lyrics that follow the song to the Lyrics tab',
+  'settings.notifications.title': 'Song notifications',
+  'settings.notifications.desc': 'Shows a desktop notification when the song changes',
+  'settings.discord.title': 'Show on Discord',
+  'settings.discord.desc': "Shows what you're listening to in your Discord status",
+  'settings.mpris.title': 'Media keys & system controls',
+  'settings.mpris.desc': 'Control playback from your keyboard and desktop',
+  'settings.tray.title': 'Keep playing when closed',
+  'settings.tray.desc': 'Closing the window hides it to the system tray',
+  'settings.sleep.title': 'Stay awake while playing',
+  'settings.sleep.desc': 'Keeps the computer from going to sleep during playback',
+  'settings.lock.title': 'Pause when the screen locks',
+  'settings.lock.desc': "Minimizing the window doesn't pause playback",
+  'settings.format.title': 'Download format',
+  'settings.format.mp3': 'MP3 · works everywhere',
+  'settings.format.flac': 'FLAC · lossless',
+  'settings.format.opus': 'Opus · smallest files',
+  'settings.embed.title': 'Save lyrics and artwork',
+  'settings.embed.desc': 'Embeds them in downloaded files',
+  'settings.downloadDir.title': 'Download folder',
+  'settings.localDir.title': 'Local music folder',
+  'settings.localDir.desc': 'MP3, FLAC, M4A, OGG, Opus and WAV files',
+  'settings.remote.title': 'Phone remote',
+  'settings.remote.desc': 'Control playback from a phone on the same Wi-Fi. Takes effect after restarting the app.',
+  'settings.port.title': 'Port',
+  'settings.port.desc': 'Takes effect after restarting the app',
+  'settings.version': 'Version {version}',
+  'settings.update.check': 'Check for updates',
+  'settings.update.checking': 'Checking…',
+  'settings.update.upToDate': "You're on the latest version",
+  'settings.update.checkFailed': "Couldn't check for updates: {reason}",
+  'settings.update.available': 'Update available',
+  'settings.update.ready': 'Version {version} is ready to install',
+  'settings.update.notes': 'Version {version}: {notes}',
+  'settings.update.install': 'Update and restart',
+  'settings.update.installing': 'Installing…',
+  'settings.update.installFailed': "Couldn't install the update: {reason}",
+
+  'sync.windowTitle': 'Listen together',
+  'sync.setup.title': 'Listen together',
+  'sync.setup.lead': 'Play the same music at the same time as your friends, wherever they are.',
+  'sync.tab.host': 'Start a session',
+  'sync.tab.guest': 'Join with a code',
+  'sync.field.name': 'Your name',
+  'sync.field.namePlaceholder': 'How friends will see you',
+  'sync.field.code': 'Session code',
+  'sync.defaultName': 'Listener',
+  'sync.create': 'Start session',
+  'sync.creating': 'Starting…',
+  'sync.join': 'Join',
+  'sync.joining': 'Joining…',
+  'sync.hint.lan': 'Looking on your network…',
+  'sync.hint.internet': 'Not nearby, trying over the internet. This can take up to 15 seconds.',
+  'sync.error.codeRequired': 'Enter the session code first',
+  'sync.error.leave': "Couldn't leave the session: {reason}",
+  'sync.active.title': 'Listening together',
+  'sync.active.status': 'In sync',
+  'sync.active.codeLabel': 'Share this code to invite friends',
+  'sync.active.listeners': 'Listeners',
+  'sync.copy': 'Copy code',
+  'sync.copied': 'Code copied',
+  'sync.leave': 'Leave session',
+  'sync.role.host': 'Host',
+  'sync.role.listener': 'Listener',
+  'sync.role.you': '(you)',
+
+  'local.windowTitle': 'Local music',
+  'local.search': 'Search your music',
+  'local.clearSearch': 'Clear search',
+  'local.rescan': 'Rescan',
+  'local.scanning': 'Scanning your music…',
+  'local.scanProgress': 'Scanning your music… {found} songs found',
+  'local.scanFailed': "Couldn't scan your music folder: {reason}",
+  'local.scanNow': 'Scan folder',
+  'local.empty': 'No music found in your local music folder',
+  'local.count': '{count} songs',
+  'local.countFiltered': '{shown} of {total} songs',
+  'local.col.title': 'Title',
+  'local.col.artist': 'Artist',
+  'local.col.album': 'Album',
+  'local.col.format': 'Format',
+  'local.col.time': 'Time',
+  'local.unknownArtist': 'Unknown artist',
+  'local.nothingPlaying': 'Pick a song to play',
+  'local.seek': 'Seek',
+
+  'mini.windowTitle': 'Mini player',
+  'mini.nothingPlaying': 'Nothing playing',
+  'mini.pin': 'Keep on top'
+};
+
+export type I18nKey = keyof typeof en;
+
+const pl: Record<I18nKey, string> = {
+  'common.unknownError': 'Coś poszło nie tak. Spróbuj ponownie.',
+  'window.minimize': 'Minimalizuj',
+  'window.maximize': 'Maksymalizuj',
+  'window.close': 'Zamknij',
+
+  'player.play': 'Odtwórz',
+  'player.pause': 'Wstrzymaj',
+  'player.previous': 'Poprzedni',
+  'player.next': 'Następny',
+  'player.mute': 'Wycisz',
+  'player.volume': 'Głośność',
+
+  'settings.windowTitle': 'Ustawienia',
+  'settings.saved': 'Zapisano',
+  'settings.loadFailed': 'Nie udało się wczytać ustawień: {reason}',
+  'settings.saveFailed': 'Nie udało się zapisać ustawień: {reason}',
+  'settings.nav.audio': 'Dźwięk',
+  'settings.nav.appearance': 'Wygląd',
+  'settings.nav.addons': 'Dodatki',
+  'settings.nav.system': 'System',
+  'settings.nav.downloads': 'Pobieranie i biblioteka',
+  'settings.nav.remote': 'Pilot w telefonie',
+  'settings.nav.about': 'Informacje',
+  'settings.eq.title': 'Korektor',
+  'settings.eq.desc': '10 pasm, zmiany słychać od razu',
+  'settings.eq.preset': 'Ustawienie wstępne',
+  'settings.eq.preset.flat': 'Płaski',
+  'settings.eq.preset.bass_boost': 'Więcej basu',
+  'settings.eq.preset.bass_reducer': 'Mniej basu',
+  'settings.eq.preset.treble_boost': 'Więcej sopranów',
+  'settings.eq.preset.vocal_clarity': 'Wyraźny wokal',
+  'settings.eq.preset.electronic': 'Elektronika',
+  'settings.eq.preset.rock': 'Rock',
+  'settings.eq.preset.classical': 'Klasyczna',
+  'settings.eq.preset.pop': 'Pop',
+  'settings.eq.preset.custom': 'Własne',
+  'settings.eq.reset': 'Resetuj',
+  'settings.eq.preamp': 'Przedwzmacniacz',
+  'settings.crossfade.title': 'Płynne przejścia',
+  'settings.crossfade.desc': 'Łączy koniec utworu z początkiem następnego',
+  'settings.crossfade.off': 'Wył.',
+  'settings.skipSilence.title': 'Pomijaj ciszę',
+  'settings.skipSilence.desc': 'Pomija ciche początki i końcówki utworów',
+  'settings.normalize.title': 'Wyrównuj głośność',
+  'settings.normalize.desc': 'Utwory grają podobnie głośno',
+  'settings.speed.title': 'Szybkość odtwarzania',
+  'settings.speed.normal': 'Normalna',
+  'settings.pitch.title': 'Zachowaj wysokość dźwięku',
+  'settings.pitch.desc': 'Głosy nie brzmią wyżej ani niżej po zmianie szybkości',
+  'settings.ambient.title': 'Tryb kinowy',
+  'settings.ambient.desc': 'Barwi aplikację kolorami okładki odtwarzanego utworu',
+  'settings.intensity.title': 'Intensywność trybu kinowego',
+  'settings.css.title': 'Własny CSS',
+  'settings.css.desc': 'Stosowany w YouTube Music na bieżąco',
+  'settings.adblock.title': 'Blokuj reklamy',
+  'settings.adblock.desc': 'Usuwa reklamy i zachęty do Premium',
+  'settings.sponsorblock.title': 'SponsorBlock',
+  'settings.sponsorblock.desc': 'Pomija fragmenty teledysków bez muzyki',
+  'settings.lyrics.title': 'Tekst z synchronizacją',
+  'settings.lyrics.desc': 'Dodaje do karty Tekst słowa podążające za utworem',
+  'settings.notifications.title': 'Powiadomienia o utworach',
+  'settings.notifications.desc': 'Pokazuje powiadomienie, gdy zmienia się utwór',
+  'settings.discord.title': 'Pokazuj na Discordzie',
+  'settings.discord.desc': 'Pokazuje w statusie Discorda, czego słuchasz',
+  'settings.mpris.title': 'Klawisze multimedialne i sterowanie systemowe',
+  'settings.mpris.desc': 'Steruj odtwarzaniem z klawiatury i pulpitu',
+  'settings.tray.title': 'Graj dalej po zamknięciu',
+  'settings.tray.desc': 'Zamknięcie okna chowa je do zasobnika systemowego',
+  'settings.sleep.title': 'Nie usypiaj podczas odtwarzania',
+  'settings.sleep.desc': 'Komputer nie przejdzie w stan uśpienia, gdy gra muzyka',
+  'settings.lock.title': 'Wstrzymuj po zablokowaniu ekranu',
+  'settings.lock.desc': 'Minimalizacja okna nie wstrzymuje odtwarzania',
+  'settings.format.title': 'Format pobierania',
+  'settings.format.mp3': 'MP3 · działa wszędzie',
+  'settings.format.flac': 'FLAC · bezstratny',
+  'settings.format.opus': 'Opus · najmniejsze pliki',
+  'settings.embed.title': 'Zapisuj tekst i okładkę',
+  'settings.embed.desc': 'Dołącza je do pobranych plików',
+  'settings.downloadDir.title': 'Folder pobierania',
+  'settings.localDir.title': 'Folder z muzyką lokalną',
+  'settings.localDir.desc': 'Pliki MP3, FLAC, M4A, OGG, Opus i WAV',
+  'settings.remote.title': 'Pilot w telefonie',
+  'settings.remote.desc': 'Steruj odtwarzaniem z telefonu w tej samej sieci Wi-Fi. Zmiana działa po ponownym uruchomieniu aplikacji.',
+  'settings.port.title': 'Port',
+  'settings.port.desc': 'Zmiana działa po ponownym uruchomieniu aplikacji',
+  'settings.version': 'Wersja {version}',
+  'settings.update.check': 'Sprawdź aktualizacje',
+  'settings.update.checking': 'Sprawdzanie…',
+  'settings.update.upToDate': 'Masz najnowszą wersję',
+  'settings.update.checkFailed': 'Nie udało się sprawdzić aktualizacji: {reason}',
+  'settings.update.available': 'Dostępna aktualizacja',
+  'settings.update.ready': 'Wersja {version} jest gotowa do instalacji',
+  'settings.update.notes': 'Wersja {version}: {notes}',
+  'settings.update.install': 'Zaktualizuj i uruchom ponownie',
+  'settings.update.installing': 'Instalowanie…',
+  'settings.update.installFailed': 'Nie udało się zainstalować aktualizacji: {reason}',
+
+  'sync.windowTitle': 'Słuchaj razem',
+  'sync.setup.title': 'Słuchaj razem',
+  'sync.setup.lead': 'Słuchajcie tej samej muzyki w tym samym momencie, gdziekolwiek jesteście.',
+  'sync.tab.host': 'Rozpocznij sesję',
+  'sync.tab.guest': 'Dołącz za pomocą kodu',
+  'sync.field.name': 'Twoje imię',
+  'sync.field.namePlaceholder': 'Tak zobaczą Cię znajomi',
+  'sync.field.code': 'Kod sesji',
+  'sync.defaultName': 'Słuchacz',
+  'sync.create': 'Rozpocznij sesję',
+  'sync.creating': 'Uruchamianie…',
+  'sync.join': 'Dołącz',
+  'sync.joining': 'Dołączanie…',
+  'sync.hint.lan': 'Szukanie w Twojej sieci…',
+  'sync.hint.internet': 'Nie ma w pobliżu, próba przez internet. To może potrwać do 15 sekund.',
+  'sync.error.codeRequired': 'Najpierw wpisz kod sesji',
+  'sync.error.leave': 'Nie udało się opuścić sesji: {reason}',
+  'sync.active.title': 'Słuchacie razem',
+  'sync.active.status': 'Zsynchronizowano',
+  'sync.active.codeLabel': 'Udostępnij ten kod, aby zaprosić znajomych',
+  'sync.active.listeners': 'Słuchacze',
+  'sync.copy': 'Kopiuj kod',
+  'sync.copied': 'Skopiowano kod',
+  'sync.leave': 'Opuść sesję',
+  'sync.role.host': 'Gospodarz',
+  'sync.role.listener': 'Słuchacz',
+  'sync.role.you': '(Ty)',
+
+  'local.windowTitle': 'Muzyka lokalna',
+  'local.search': 'Szukaj w swojej muzyce',
+  'local.clearSearch': 'Wyczyść wyszukiwanie',
+  'local.rescan': 'Skanuj ponownie',
+  'local.scanning': 'Skanowanie muzyki…',
+  'local.scanProgress': 'Skanowanie muzyki… znaleziono {found}',
+  'local.scanFailed': 'Nie udało się przeskanować folderu z muzyką: {reason}',
+  'local.scanNow': 'Skanuj folder',
+  'local.empty': 'Nie znaleziono muzyki w folderze z muzyką lokalną',
+  'local.count': 'Utwory: {count}',
+  'local.countFiltered': '{shown} z {total} utworów',
+  'local.col.title': 'Tytuł',
+  'local.col.artist': 'Wykonawca',
+  'local.col.album': 'Album',
+  'local.col.format': 'Format',
+  'local.col.time': 'Czas',
+  'local.unknownArtist': 'Nieznany wykonawca',
+  'local.nothingPlaying': 'Wybierz utwór do odtworzenia',
+  'local.seek': 'Przewiń',
+
+  'mini.windowTitle': 'Miniodtwarzacz',
+  'mini.nothingPlaying': 'Nic nie jest odtwarzane',
+  'mini.pin': 'Zawsze na wierzchu'
+};
+
+export const COMPANION_LOCALES: Record<string, Record<I18nKey, string>> = { en, pl };
+
+/** `pl-PL` → `pl`; anything without a translation → `en`. */
+export function resolveCompanionLocale(lang: string | null | undefined): string {
+  const base = (lang || '').toLowerCase().split(/[-_]/)[0];
+  return base in COMPANION_LOCALES ? base : 'en';
+}
+
+let locale = resolveCompanionLocale(typeof navigator !== 'undefined' ? navigator.language : 'en');
+
+export function formatMessage(template: string, vars?: Record<string, string | number>): string {
+  if (!vars) return template;
+  return template.replace(/\{(\w+)\}/g, (match, name: string) => (name in vars ? String(vars[name]) : match));
+}
+
+export function tr(key: I18nKey, vars?: Record<string, string | number>): string {
+  return formatMessage(COMPANION_LOCALES[locale][key] ?? en[key], vars);
+}
+
+const isKey = (key: string | undefined): key is I18nKey => !!key && key in en;
+
+export function applyI18n(root: Document): void {
+  // The injected-page kit (toasts, plural helpers) reads <html lang>.
+  root.documentElement.lang = locale;
+  root.querySelectorAll<HTMLElement>('[data-i18n]').forEach((el) => {
+    if (isKey(el.dataset.i18n)) el.textContent = tr(el.dataset.i18n);
+  });
+  root.querySelectorAll<HTMLElement>('[data-i18n-label]').forEach((el) => {
+    if (!isKey(el.dataset.i18nLabel)) return;
+    const label = tr(el.dataset.i18nLabel);
+    el.setAttribute('aria-label', label);
+    el.dataset.ytmdTooltip = label;
+  });
+  root.querySelectorAll<HTMLInputElement>('[data-i18n-placeholder]').forEach((el) => {
+    if (isKey(el.dataset.i18nPlaceholder)) el.placeholder = tr(el.dataset.i18nPlaceholder);
+  });
+}
+
+/** Test hook: switch locale without reloading. */
+export function setCompanionLocale(lang: string): void {
+  locale = resolveCompanionLocale(lang);
+}

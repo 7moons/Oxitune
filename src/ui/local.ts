@@ -1,5 +1,8 @@
 import { initAmbientBackdrop } from './ambient';
-import { formatDuration, filterTracks as matchTracks } from './format';
+import { formatDuration, filterTracks } from './format';
+import { tr } from './i18n';
+import { syncRange } from './range';
+import { initWindowChrome } from './window';
 
 interface LocalTrack {
   id: string;
@@ -13,367 +16,274 @@ interface LocalTrack {
 }
 
 let allTracks: LocalTrack[] = [];
-let currentFilteredTracks: LocalTrack[] = [];
-let currentTrackIndex = -1;
+let visibleTracks: LocalTrack[] = [];
+/** What next/previous walk through: the list as it looked when playback
+ * started, so searching mid-song doesn't reshuffle what plays next. */
+let queue: LocalTrack[] = [];
+let playingPath: string | null = null;
 let lastVolume = 1;
+let scanInFlight = false;
 
-const audioElement = document.getElementById('local-audio-element') as HTMLAudioElement;
+const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T | null;
+const show = (el: Element | null, visible: boolean) => el?.classList.toggle('is-hidden', !visible);
+const audio = document.getElementById('local-audio-element') as HTMLAudioElement;
 
-function updatePlayPauseIcons(isPlaying: boolean) {
-  const playIcon = document.getElementById('play-icon');
-  const pauseIcon = document.getElementById('pause-icon');
-  if (playIcon && pauseIcon) {
-    if (isPlaying) {
-      playIcon.style.display = 'none';
-      pauseIcon.style.display = 'block';
-    } else {
-      playIcon.style.display = 'block';
-      pauseIcon.style.display = 'none';
-    }
+function eqBars(): HTMLElement {
+  const bars = document.createElement('span');
+  bars.className = 'eq-bars';
+  for (let i = 0; i < 3; i++) {
+    const bar = document.createElement('span');
+    bar.className = 'eq-bar';
+    bars.appendChild(bar);
   }
+  return bars;
 }
 
-function updateTrackCountBadge(count: number, total: number) {
-  const badge = document.getElementById('track-count-badge');
-  if (badge) {
-    if (count === total) {
-      badge.textContent = `${total} ${total === 1 ? 'track' : 'tracks'}`;
-    } else {
-      badge.textContent = `Showing ${count} of ${total} tracks`;
-    }
-  }
+function updateCount() {
+  const badge = $('track-count-badge');
+  if (!badge) return;
+  badge.textContent =
+    visibleTracks.length === allTracks.length
+      ? tr('local.count', { count: allTracks.length })
+      : tr('local.countFiltered', { shown: visibleTracks.length, total: allTracks.length });
 }
 
-/** Swaps the empty-state message/icon between "haven't scanned yet" (or
- * "no matches") and "the scan itself failed" — these look identical
- * otherwise, which reads as the app silently doing nothing on a real error
- * (e.g. a missing/unreadable music directory). */
-function setEmptyStateError(message: string | null) {
-  const text = document.getElementById('empty-state-text');
-  const icon = document.getElementById('empty-state-icon');
-  if (!text || !icon) return;
-
-  if (message) {
-    text.textContent = message;
-    icon.innerHTML =
-      '<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>';
-    icon.setAttribute('stroke', '#f87171');
-  } else {
-    text.textContent = 'No local music files found.';
-    icon.innerHTML =
-      '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/><line x1="12" y1="2" x2="12" y2="5"/>';
-    icon.setAttribute('stroke', 'var(--text-muted)');
-  }
-}
-
-function renderTable(tracks: LocalTrack[]) {
-  currentFilteredTracks = tracks;
-  const tbody = document.getElementById('tracks-body');
-  const table = document.getElementById('tracks-table');
-  const emptyState = document.getElementById('empty-state');
-  const loadingState = document.getElementById('loading-state');
-
-  if (loadingState) loadingState.style.display = 'none';
-  if (!tbody || !table || !emptyState) return;
-
-  updateTrackCountBadge(tracks.length, allTracks.length);
-
-  if (tracks.length === 0) {
-    table.style.display = 'none';
-    emptyState.style.display = 'flex';
-    return;
-  }
-
-  table.style.display = 'table';
-  emptyState.style.display = 'none';
-  tbody.innerHTML = '';
-
-  tracks.forEach((t, idx) => {
-    const tr = document.createElement('tr');
-    tr.className = 'track-row';
-    const isCurrentPlaying = currentTrackIndex >= 0 && currentFilteredTracks[currentTrackIndex]?.file_path === t.file_path;
-    if (isCurrentPlaying) {
-      tr.classList.add('playing');
+/** Re-marks the playing row without rebuilding the table. */
+function updatePlayingRow() {
+  const playing = !audio.paused;
+  document.querySelectorAll<HTMLTableRowElement>('#tracks-body tr').forEach((row, idx) => {
+    const isCurrent = row.dataset.path === playingPath;
+    row.classList.toggle('playing', isCurrent);
+    const cell = row.firstElementChild as HTMLElement | null;
+    if (!cell) return;
+    if (isCurrent && playing) {
+      if (!cell.querySelector('.eq-bars')) cell.replaceChildren(eqBars());
+    } else if (cell.textContent !== String(idx + 1)) {
+      cell.textContent = String(idx + 1);
     }
-
-    const formatClass = t.file_format?.toLowerCase() === 'flac' ? 'format-badge flac' : 'format-badge';
-
-    const indexCellContent = isCurrentPlaying && !audioElement.paused
-      ? `<div class="eq-bars"><div class="eq-bar"></div><div class="eq-bar"></div><div class="eq-bar"></div></div>`
-      : `<span style="color: var(--text-muted); font-size: 11.5px; font-family: var(--font-mono);">${idx + 1}</span>`;
-
-    tr.innerHTML = `
-      <td style="text-align: center;">${indexCellContent}</td>
-      <td class="title-col">${escapeHtml(t.title)}</td>
-      <td>${escapeHtml(t.artist || 'Unknown Artist')}</td>
-      <td>${escapeHtml(t.album || '—')}</td>
-      <td><span class="${formatClass}">${escapeHtml(t.file_format || 'AUDIO')}</span></td>
-      <td style="text-align: right; font-family: var(--font-mono); font-size: 11.5px;">${formatDuration(t.duration_secs)}</td>
-    `;
-
-    tr.addEventListener('click', () => {
-      playTrackByIndex(idx);
-    });
-
-    tbody.appendChild(tr);
   });
 }
 
-function escapeHtml(str: string): string {
-  const div = document.createElement('div');
-  div.textContent = str;
-  return div.innerHTML;
+function renderTable(tracks: LocalTrack[]) {
+  visibleTracks = tracks;
+  show($('loading-state'), false);
+  updateCount();
+
+  const tbody = $('tracks-body');
+  if (!tbody) return;
+  show($('tracks-table'), tracks.length > 0);
+  show($('empty-state'), tracks.length === 0);
+
+  tbody.replaceChildren(
+    ...tracks.map((t, idx) => {
+      const row = document.createElement('tr');
+      row.className = 'track-row';
+      row.dataset.path = t.file_path;
+      const cell = (text: string, className?: string) => {
+        const td = document.createElement('td');
+        if (className) td.className = className;
+        td.textContent = text;
+        return td;
+      };
+      const format = document.createElement('td');
+      const badge = document.createElement('span');
+      badge.className = 'format-badge';
+      badge.textContent = t.file_format || '—';
+      format.appendChild(badge);
+
+      row.append(
+        cell(String(idx + 1), 'num-col'),
+        cell(t.title, 'title-col'),
+        cell(t.artist || tr('local.unknownArtist')),
+        cell(t.album || '—'),
+        format,
+        cell(formatDuration(t.duration_secs), 'time-col')
+      );
+      row.addEventListener('click', () => playTrack(t, tracks));
+      return row;
+    })
+  );
+  updatePlayingRow();
 }
 
-function playTrackByIndex(index: number) {
-  if (index < 0 || index >= currentFilteredTracks.length) return;
-  currentTrackIndex = index;
-  const track = currentFilteredTracks[index];
-
-  const titleEl = document.getElementById('playing-title');
-  const artistEl = document.getElementById('playing-artist');
-
-  if (titleEl) titleEl.textContent = track.title;
-  if (artistEl) artistEl.textContent = `${track.artist || 'Unknown Artist'} ${track.album ? '• ' + track.album : ''}`;
-
-  if (audioElement) {
-    const fileUrl = window.__TAURI__?.core
-      ? `asset://localhost/${encodeURIComponent(track.file_path)}`
-      : track.file_path;
-
-    audioElement.src = fileUrl;
-    audioElement.play().then(() => {
-      updatePlayPauseIcons(true);
-      renderTable(currentFilteredTracks);
-    }).catch(() => {
-      updatePlayPauseIcons(false);
-    });
-  }
+function setEmptyState(errorMessage: string | null) {
+  const empty = $('empty-state');
+  const text = $('empty-state-text');
+  empty?.classList.toggle('is-error', errorMessage !== null);
+  if (text) text.textContent = errorMessage ?? tr('local.empty');
 }
 
-function playNextTrack() {
-  if (currentFilteredTracks.length === 0) return;
-  const nextIdx = (currentTrackIndex + 1) % currentFilteredTracks.length;
-  playTrackByIndex(nextIdx);
+function updatePlayIcons() {
+  const playing = !audio.paused;
+  show($('play-icon'), !playing);
+  show($('pause-icon'), playing);
+  const btn = $('play-pause-btn');
+  const label = playing ? tr('player.pause') : tr('player.play');
+  btn?.setAttribute('aria-label', label);
+  if (btn) btn.dataset.ytmdTooltip = label;
 }
 
-function playPrevTrack() {
-  if (currentFilteredTracks.length === 0) return;
-  if (audioElement && audioElement.currentTime > 3) {
-    audioElement.currentTime = 0;
+function playTrack(track: LocalTrack, fromList: LocalTrack[]) {
+  queue = fromList;
+  playingPath = track.file_path;
+
+  const title = $('playing-title');
+  const subtitle = $('playing-artist');
+  if (title) title.textContent = track.title;
+  if (subtitle) subtitle.textContent = [track.artist || tr('local.unknownArtist'), track.album].filter(Boolean).join(' • ');
+
+  audio.src = window.__TAURI__?.core ? `asset://localhost/${encodeURIComponent(track.file_path)}` : track.file_path;
+  audio.play().catch((e) => console.error('[YTMD Local] Playback failed:', e));
+  updatePlayingRow();
+}
+
+function step(delta: 1 | -1) {
+  if (queue.length === 0) return;
+  if (delta === -1 && audio.currentTime > 3) {
+    audio.currentTime = 0;
     return;
   }
-  const prevIdx = (currentTrackIndex - 1 + currentFilteredTracks.length) % currentFilteredTracks.length;
-  playTrackByIndex(prevIdx);
+  const idx = queue.findIndex((t) => t.file_path === playingPath);
+  const next = queue[(idx + delta + queue.length) % queue.length];
+  if (next) playTrack(next, queue);
 }
 
-let scanInFlight = false;
-
 async function loadTracks() {
-  if (scanInFlight) return;
+  if (scanInFlight || !window.__TAURI__?.core) return;
   scanInFlight = true;
 
-  const loadingState = document.getElementById('loading-state');
-  const table = document.getElementById('tracks-table');
-  const emptyState = document.getElementById('empty-state');
-  const rescanIcon = document.getElementById('rescan-icon');
-  const rescanBtn = document.getElementById('rescan-btn') as HTMLButtonElement | null;
-
+  const rescanBtn = $<HTMLButtonElement>('rescan-btn');
+  const label = $('loading-label');
   if (rescanBtn) rescanBtn.disabled = true;
-  if (rescanIcon) rescanIcon.style.animation = 'spin 0.8s linear infinite';
-  if (loadingState) loadingState.style.display = 'flex';
-  if (table) table.style.display = 'none';
-  if (emptyState) emptyState.style.display = 'none';
-
-  const loadingLabel = loadingState?.querySelector('span:last-child') ?? null;
-  const resetLoadingLabel = () => {
-    if (loadingLabel) loadingLabel.textContent = 'Scanning music files…';
-  };
-  resetLoadingLabel();
+  show($('loading-state'), true);
+  show($('tracks-table'), false);
+  show($('empty-state'), false);
+  if (label) label.textContent = tr('local.scanning');
 
   let unlistenProgress: (() => void) | null = null;
-
   try {
-    if (window.__TAURI__?.core) {
-      if (window.__TAURI__.event) {
-        // Large libraries (10k+ files) can take a while to walk and tag-read;
-        // without this the user just stares at an indefinite spinner with no
-        // sign anything is happening.
-        unlistenProgress = await window.__TAURI__.event.listen<{ scanned: number; found: number }>(
-          'local-scan-progress',
-          (e) => {
-            if (loadingLabel) {
-              loadingLabel.textContent = `Scanning music files… ${e.payload.found} found (${e.payload.scanned} checked)`;
-            }
-          },
-        );
-      }
-
-      const tracks = (await window.__TAURI__.core.invoke('scan_local_music')) as LocalTrack[];
-      allTracks = tracks || [];
-      setEmptyStateError(null);
-      renderTable(allTracks);
-    } else {
-      renderTable([]);
-    }
+    // Large libraries take a while; show that something is happening.
+    unlistenProgress = await window.__TAURI__.event.listen<{ scanned: number; found: number }>('local-scan-progress', (e) => {
+      if (label) label.textContent = tr('local.scanProgress', { found: e.payload.found, scanned: e.payload.scanned });
+    });
+    const tracks = (await window.__TAURI__.core.invoke('scan_local_music')) as LocalTrack[];
+    allTracks = tracks || [];
+    setEmptyState(null);
   } catch (e) {
     console.error('[YTMD Local] Failed to scan directory:', e);
     allTracks = [];
-    const reason = typeof e === 'string' ? e : e instanceof Error ? e.message : 'Unknown error.';
-    setEmptyStateError(`Couldn't scan your music folder: ${reason}`);
-    renderTable([]);
+    const reason = typeof e === 'string' ? e : e instanceof Error ? e.message : tr('common.unknownError');
+    setEmptyState(tr('local.scanFailed', { reason }));
   } finally {
     unlistenProgress?.();
-    resetLoadingLabel();
     scanInFlight = false;
     if (rescanBtn) rescanBtn.disabled = false;
-    if (rescanIcon) rescanIcon.style.animation = 'none';
   }
+  applySearch();
+}
+
+function applySearch() {
+  const input = $<HTMLInputElement>('search-input');
+  const query = input?.value ?? '';
+  show($('clear-search-btn'), query.length > 0);
+  renderTable(filterTracks(allTracks, query));
+}
+
+function updateVolumeUi() {
+  const slider = $<HTMLInputElement>('volume-slider');
+  if (slider) {
+    slider.value = String(audio.muted ? 0 : audio.volume);
+    syncRange(slider);
+  }
+  const muted = audio.muted || audio.volume === 0;
+  show($('volume-on-icon'), !muted);
+  show($('volume-off-icon'), muted);
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  initWindowChrome();
   initAmbientBackdrop();
-  loadTracks();
+  setEmptyState(null);
+  updatePlayIcons();
+  void loadTracks();
 
-  const searchInput = document.getElementById('search-input') as HTMLInputElement;
-  const clearSearchBtn = document.getElementById('clear-search-btn');
+  const search = $<HTMLInputElement>('search-input');
+  search?.addEventListener('input', applySearch);
+  $('clear-search-btn')?.addEventListener('click', () => {
+    if (!search) return;
+    search.value = '';
+    applySearch();
+    search.focus();
+  });
 
-  const filterTracks = () => {
-    const query = searchInput ? searchInput.value.toLowerCase().trim() : '';
-    if (clearSearchBtn) {
-      clearSearchBtn.style.display = query.length > 0 ? 'block' : 'none';
-    }
-    if (!query) {
-      renderTable(allTracks);
+  $('rescan-btn')?.addEventListener('click', loadTracks);
+  $('scan-now-btn')?.addEventListener('click', loadTracks);
+
+  $('play-pause-btn')?.addEventListener('click', () => {
+    if (!audio.src) {
+      if (visibleTracks[0]) playTrack(visibleTracks[0], visibleTracks);
       return;
     }
-    renderTable(matchTracks(allTracks, query));
-  };
+    if (audio.paused) audio.play().catch((e) => console.error('[YTMD Local] Playback failed:', e));
+    else audio.pause();
+  });
+  $('prev-track-btn')?.addEventListener('click', () => step(-1));
+  $('next-track-btn')?.addEventListener('click', () => step(1));
 
-  if (searchInput) {
-    searchInput.addEventListener('input', filterTracks);
-  }
+  const progress = $('local-progress-track');
+  const fill = $('local-progress-fill');
+  audio.addEventListener('timeupdate', () => {
+    const cur = audio.currentTime || 0;
+    const dur = audio.duration || 0;
+    const curText = $('current-time-text');
+    const durText = $('total-time-text');
+    if (curText) curText.textContent = formatDuration(cur);
+    if (durText && dur > 0) durText.textContent = formatDuration(dur);
+    const pct = dur > 0 ? Math.min(100, Math.max(0, (cur / dur) * 100)) : 0;
+    if (fill) fill.style.width = `${pct}%`;
+    progress?.setAttribute('aria-valuenow', String(Math.round(pct)));
+  });
+  audio.addEventListener('play', () => {
+    updatePlayIcons();
+    updatePlayingRow();
+  });
+  audio.addEventListener('pause', () => {
+    updatePlayIcons();
+    updatePlayingRow();
+  });
+  audio.addEventListener('ended', () => step(1));
 
-  if (clearSearchBtn && searchInput) {
-    clearSearchBtn.addEventListener('click', () => {
-      searchInput.value = '';
-      clearSearchBtn.style.display = 'none';
-      renderTable(allTracks);
-      searchInput.focus();
-    });
-  }
+  progress?.addEventListener('click', (e) => {
+    const dur = audio.duration;
+    if (!dur || isNaN(dur)) return;
+    const rect = progress.getBoundingClientRect();
+    audio.currentTime = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)) * dur;
+  });
 
-  const rescanBtn = document.getElementById('rescan-btn');
-  if (rescanBtn) rescanBtn.addEventListener('click', loadTracks);
+  const volume = $<HTMLInputElement>('volume-slider');
+  volume?.addEventListener('input', () => {
+    const val = parseFloat(volume.value);
+    audio.muted = false;
+    audio.volume = val;
+    if (val > 0) lastVolume = val;
+    updateVolumeUi();
+  });
+  $('volume-icon-btn')?.addEventListener('click', () => {
+    if (audio.muted || audio.volume === 0) {
+      audio.muted = false;
+      audio.volume = lastVolume || 1;
+    } else {
+      lastVolume = audio.volume;
+      audio.muted = true;
+    }
+    updateVolumeUi();
+  });
 
-  const scanNowBtn = document.getElementById('scan-now-btn');
-  if (scanNowBtn) scanNowBtn.addEventListener('click', loadTracks);
-
-  // Playback Controls
-  const playPauseBtn = document.getElementById('play-pause-btn');
-  const prevTrackBtn = document.getElementById('prev-track-btn');
-  const nextTrackBtn = document.getElementById('next-track-btn');
-
-  if (playPauseBtn && audioElement) {
-    playPauseBtn.addEventListener('click', () => {
-      if (!audioElement.src && currentFilteredTracks.length > 0) {
-        playTrackByIndex(0);
-        return;
-      }
-      if (audioElement.paused) {
-        audioElement.play();
-        updatePlayPauseIcons(true);
-      } else {
-        audioElement.pause();
-        updatePlayPauseIcons(false);
-      }
-      renderTable(currentFilteredTracks);
-    });
-  }
-
-  if (prevTrackBtn) {
-    prevTrackBtn.addEventListener('click', playPrevTrack);
-  }
-
-  if (nextTrackBtn) {
-    nextTrackBtn.addEventListener('click', playNextTrack);
-  }
-
-  // Audio Progress & Seek
-  const progressTrack = document.getElementById('local-progress-track');
-  const progressFill = document.getElementById('local-progress-fill');
-  const currentTimeText = document.getElementById('current-time-text');
-  const totalTimeText = document.getElementById('total-time-text');
-
-  if (audioElement) {
-    audioElement.addEventListener('timeupdate', () => {
-      const cur = audioElement.currentTime || 0;
-      const dur = audioElement.duration || 0;
-      if (currentTimeText) currentTimeText.textContent = formatDuration(cur);
-      if (totalTimeText && dur > 0) totalTimeText.textContent = formatDuration(dur);
-      if (progressFill && dur > 0) {
-        const pct = Math.min(100, Math.max(0, (cur / dur) * 100));
-        progressFill.style.width = `${pct}%`;
-      }
-    });
-
-    audioElement.addEventListener('play', () => {
-      updatePlayPauseIcons(true);
-      renderTable(currentFilteredTracks);
-    });
-
-    audioElement.addEventListener('pause', () => {
-      updatePlayPauseIcons(false);
-      renderTable(currentFilteredTracks);
-    });
-
-    audioElement.addEventListener('ended', () => {
-      playNextTrack();
-    });
-  }
-
-  if (progressTrack && audioElement) {
-    progressTrack.addEventListener('click', (e) => {
-      const dur = audioElement.duration;
-      if (!dur || isNaN(dur)) return;
-      const rect = progressTrack.getBoundingClientRect();
-      const clickX = e.clientX - rect.left;
-      const pct = Math.max(0, Math.min(1, clickX / rect.width));
-      audioElement.currentTime = pct * dur;
-    });
-  }
-
-  // Volume slider & mute
-  const volumeSlider = document.getElementById('volume-slider') as HTMLInputElement;
-  const volumeIconBtn = document.getElementById('volume-icon-btn');
-
-  if (volumeSlider && audioElement) {
-    volumeSlider.addEventListener('input', () => {
-      const val = parseFloat(volumeSlider.value);
-      audioElement.volume = val;
-      if (val > 0) lastVolume = val;
-    });
-  }
-
-  if (volumeIconBtn && audioElement && volumeSlider) {
-    volumeIconBtn.addEventListener('click', () => {
-      if (audioElement.volume > 0) {
-        lastVolume = audioElement.volume;
-        audioElement.volume = 0;
-        volumeSlider.value = '0';
-      } else {
-        audioElement.volume = lastVolume || 1;
-        volumeSlider.value = String(audioElement.volume);
-      }
-    });
-  }
-
-  // Window Controls
-  const minBtn = document.getElementById('win-min-btn');
-  const maxBtn = document.getElementById('win-max-btn');
-  const closeBtn = document.getElementById('win-close-btn');
-
-  if (minBtn) minBtn.addEventListener('click', () => window.__TAURI__?.core.invoke('minimize_window'));
-  if (maxBtn) maxBtn.addEventListener('click', () => window.__TAURI__?.core.invoke('toggle_maximize_window'));
-  if (closeBtn) closeBtn.addEventListener('click', () => window.__TAURI__?.core.invoke('close_window'));
+  window.addEventListener('keydown', (e) => {
+    if ((e.target as HTMLElement | null)?.closest('input, textarea')) return;
+    if (e.code === 'Space') {
+      e.preventDefault();
+      $('play-pause-btn')?.click();
+    }
+  });
 });

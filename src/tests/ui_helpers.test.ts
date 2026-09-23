@@ -11,10 +11,10 @@ describe('companion window formatters', () => {
   });
 
   test('crossfade label', () => {
-    expect(formatCrossfade(0)).toBe('Disabled');
-    expect(formatCrossfade(-1)).toBe('Disabled');
-    expect(formatCrossfade(2.5)).toBe('2.5s');
-    expect(formatCrossfade(10)).toBe('10.0s');
+    expect(formatCrossfade(0, 'Off')).toBe('Off');
+    expect(formatCrossfade(-1, 'Wył.')).toBe('Wył.');
+    expect(formatCrossfade(2.5, 'Off')).toBe('2.5 s');
+    expect(formatCrossfade(10, 'Off')).toBe('10.0 s');
   });
 
   test('dB label has an explicit plus sign', () => {

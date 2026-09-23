@@ -3,6 +3,7 @@ use qrcode::render::svg;
 use qrcode::QrCode;
 use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, SocketAddr};
+use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -244,6 +245,51 @@ pub fn generate_qr_svg(url: &str) -> String {
     }
 }
 
+/// Whether the remote server is actually serving, so the pairing QR never
+/// advertises a URL nothing is listening on. `enabled` is fixed at startup
+/// (turning the remote on/off takes a restart); the bound port is set once
+/// the listener binds, which can fail (e.g. the port is taken).
+pub struct RemoteServerStatus {
+    enabled: bool,
+    /// 0 = not bound (yet, or bind failed).
+    bound_port: AtomicU16,
+}
+
+pub const REMOTE_OFF_ERROR: &str = "Remote is turned off";
+
+impl RemoteServerStatus {
+    pub fn new(enabled: bool) -> Self {
+        Self {
+            enabled,
+            bound_port: AtomicU16::new(0),
+        }
+    }
+
+    fn mark_bound(&self, port: u16) {
+        self.bound_port.store(port, Ordering::SeqCst);
+    }
+
+    /// The port the server is listening on, or why there isn't one.
+    pub fn serving_port(&self) -> Result<u16, String> {
+        let bound = match self.bound_port.load(Ordering::SeqCst) {
+            0 => None,
+            p => Some(p),
+        };
+        remote_availability(self.enabled, bound)
+    }
+}
+
+/// Pure decision behind `RemoteServerStatus::serving_port`.
+pub fn remote_availability(enabled: bool, bound_port: Option<u16>) -> Result<u16, String> {
+    match (enabled, bound_port) {
+        (false, _) => Err(REMOTE_OFF_ERROR.to_string()),
+        (true, Some(port)) => Ok(port),
+        (true, None) => {
+            Err("Remote server isn't running (its port may be in use by another app)".to_string())
+        }
+    }
+}
+
 pub fn get_remote_info(port: u16, token: &str) -> RemoteInfo {
     let ip = get_local_ip();
     let url = format!("http://{}:{}/?t={}", ip, port, token);
@@ -257,7 +303,7 @@ pub fn get_remote_info(port: u16, token: &str) -> RemoteInfo {
     }
 }
 
-pub fn start_remote_server(app_handle: AppHandle, port: u16, token: String) {
+pub fn start_remote_server(app_handle: AppHandle, port: u16, token: String, status: Arc<RemoteServerStatus>) {
     let token: Arc<str> = Arc::from(token);
     let connection_limiter = Arc::new(tokio::sync::Semaphore::new(MAX_CONNECTIONS));
 
@@ -266,6 +312,7 @@ pub fn start_remote_server(app_handle: AppHandle, port: u16, token: String) {
         let listener = match TcpListener::bind(addr).await {
             Ok(l) => {
                 log::info!("[YTMD Remote] Server listening on http://0.0.0.0:{}", port);
+                status.mark_bound(port);
                 l
             }
             Err(e) => {
@@ -635,6 +682,24 @@ mod tests {
         let svg = generate_qr_svg("http://192.168.1.100:9863");
         assert!(svg.contains("<svg"));
         assert!(svg.contains("</svg>"));
+    }
+
+    #[test]
+    fn test_remote_availability() {
+        assert_eq!(remote_availability(false, None), Err(REMOTE_OFF_ERROR.to_string()));
+        // Disabled wins even if something claimed a port.
+        assert_eq!(remote_availability(false, Some(9863)), Err(REMOTE_OFF_ERROR.to_string()));
+        assert_eq!(remote_availability(true, Some(9863)), Ok(9863));
+        assert!(remote_availability(true, None).unwrap_err().contains("isn't running"));
+    }
+
+    #[test]
+    fn test_remote_status_reports_bound_port() {
+        let status = RemoteServerStatus::new(true);
+        assert!(status.serving_port().is_err());
+        status.mark_bound(9870);
+        assert_eq!(status.serving_port(), Ok(9870));
+        assert_eq!(RemoteServerStatus::new(false).serving_port(), Err(REMOTE_OFF_ERROR.to_string()));
     }
 
     #[test]

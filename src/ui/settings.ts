@@ -1,10 +1,12 @@
 import { EQ_FREQUENCIES, EQ_PRESETS } from '../plugins/audio-dsp/presets';
+import { showToast } from '../preload/ui/kit';
 import { initAmbientBackdrop } from './ambient';
 import { formatDb, formatCrossfade } from './format';
+import { tr } from './i18n';
+import { syncRange } from './range';
+import { initWindowChrome } from './window';
 
 interface AppConfig {
-  autostart: boolean;
-  minimize_to_tray: boolean;
   close_to_tray: boolean;
   discord_rpc_enabled: boolean;
   mpris_enabled: boolean;
@@ -12,13 +14,7 @@ interface AppConfig {
   adblock_enabled: boolean;
   sponsorblock_enabled: boolean;
   lyrics_enabled: boolean;
-  miniplayer_enabled: boolean;
-  wheel_volume_step: number;
   custom_css: string;
-  custom_user_agent: string;
-  quality: string;
-  normalize_volume: boolean;
-  equalizer_enabled: boolean;
   equalizer_preset: string;
   equalizer_gains: number[];
   preamp_gain: number;
@@ -37,9 +33,8 @@ interface AppConfig {
   remote_port: number;
   inhibit_sleep: boolean;
   pause_on_lock: boolean;
-  lastfm_enabled: boolean;
-  lastfm_api_key: string;
-  lastfm_secret: string;
+  // Every other field of the backend's AppConfig round-trips untouched.
+  [key: string]: unknown;
 }
 
 interface UpdateInfo {
@@ -49,107 +44,116 @@ interface UpdateInfo {
   date: string | null;
 }
 
+/** Checkbox ids that map 1:1 to boolean AppConfig fields, with the value
+ * to show when the field is missing (matches AppConfig::default()). */
+const TOGGLES: [keyof AppConfig & string, boolean][] = [
+  ['discord_rpc_enabled', true],
+  ['mpris_enabled', true],
+  ['notifications_enabled', false],
+  ['close_to_tray', true],
+  ['adblock_enabled', true],
+  ['sponsorblock_enabled', true],
+  ['lyrics_enabled', true],
+  ['loudness_normalization', false],
+  ['skip_silence_enabled', false],
+  ['preserve_pitch', true],
+  ['ambient_lighting_enabled', true],
+  ['embed_lyrics', true],
+  ['remote_enabled', true],
+  ['inhibit_sleep', true],
+  ['pause_on_lock', true]
+];
+
+const SAVE_DEBOUNCE_MS = 500;
+
 let currentConfig: AppConfig | null = null;
 let currentGains: number[] = new Array(10).fill(0);
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
-const ERROR_ICON_SVG =
-  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
-
-/** Surfaces a backend failure as a self-dismissing toast in the corner —
- * settings' header has no room for an inline banner next to Save, unlike
- * Listen Together's room panels. */
-function showToast(message: string) {
-  const container = document.getElementById('toast-container');
-  if (!container) return;
-  const toast = document.createElement('div');
-  toast.className = 'toast';
-  toast.innerHTML = `${ERROR_ICON_SVG}<span>${escapeHtml(message)}</span>`;
-  container.appendChild(toast);
-  setTimeout(() => toast.remove(), 6000);
-}
-
-function escapeHtml(str: string): string {
-  const div = document.createElement('div');
-  div.textContent = str;
-  return div.innerHTML;
-}
+const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T | null;
 
 function errorMessage(e: unknown): string {
   if (typeof e === 'string') return e;
   if (e instanceof Error) return e.message;
-  return 'Something went wrong. Check the app logs for details.';
+  return tr('common.unknownError');
 }
 
 function formatFreq(freq: number): string {
-  if (freq >= 1000) {
-    return `${freq / 1000}k`;
-  }
-  return `${freq}`;
+  return freq >= 1000 ? `${freq / 1000}k` : `${freq}`;
+}
+
+function formatSpeed(speed: number): string {
+  return `${speed.toFixed(2)}×`;
+}
+
+function setRange(id: string, value: number) {
+  const el = $<HTMLInputElement>(id);
+  if (!el) return;
+  el.value = String(value);
+  syncRange(el);
 }
 
 function updateBadgeClass(badge: HTMLElement, val: number) {
   badge.classList.remove('positive', 'negative', 'zero');
-  if (val > 0) {
-    badge.classList.add('positive');
-  } else if (val < 0) {
-    badge.classList.add('negative');
-  } else {
-    badge.classList.add('zero');
+  badge.classList.add(val > 0 ? 'positive' : val < 0 ? 'negative' : 'zero');
+}
+
+async function emitLiveEvent(event: string, payload: unknown) {
+  try {
+    await window.__TAURI__?.event.emit(event, payload);
+  } catch (e) {
+    console.error(`[YTMD] Failed to emit ${event}:`, e);
   }
 }
 
-function renderEqSliders() {
-  const container = document.getElementById('eq-faders-grid');
-  if (!container) return;
+// ------------------------------------------------------------------ EQ
 
-  container.innerHTML = '';
+function renderEqSliders() {
+  const container = $('eq-faders-grid');
+  if (!container) return;
+  container.replaceChildren();
 
   EQ_FREQUENCIES.forEach((freq, idx) => {
     const col = document.createElement('div');
     col.className = 'eq-band-col';
 
     const val = currentGains[idx] || 0;
-    const valBadge = document.createElement('span');
-    valBadge.className = 'eq-gain-badge';
-    updateBadgeClass(valBadge, val);
-    valBadge.id = `eq-val-${idx}`;
-    valBadge.textContent = formatDb(val);
+    const badge = document.createElement('span');
+    badge.className = 'eq-gain-badge';
+    badge.id = `eq-val-${idx}`;
+    badge.textContent = formatDb(val);
+    updateBadgeClass(badge, val);
 
-    const sliderWrapper = document.createElement('div');
-    sliderWrapper.className = 'eq-slider-wrapper';
-
+    const wrapper = document.createElement('div');
+    wrapper.className = 'eq-slider-wrapper';
     const slider = document.createElement('input');
     slider.type = 'range';
-    slider.className = 'eq-v-slider';
+    slider.className = 'range eq-v-slider';
     slider.id = `eq-slider-${idx}`;
     slider.min = '-12';
     slider.max = '12';
     slider.step = '0.5';
     slider.value = String(val);
+    slider.setAttribute('aria-label', `${formatFreq(freq)} Hz`);
+    syncRange(slider);
 
     slider.addEventListener('input', () => {
       const v = parseFloat(slider.value);
       currentGains[idx] = v;
-      valBadge.textContent = formatDb(v);
-      updateBadgeClass(valBadge, v);
-
-      const presetSelect = document.getElementById('eq_preset') as HTMLSelectElement;
-      if (presetSelect && presetSelect.value !== 'custom') {
-        presetSelect.value = 'custom';
-      }
-
+      badge.textContent = formatDb(v);
+      updateBadgeClass(badge, v);
+      syncRange(slider);
+      const preset = $<HTMLSelectElement>('eq_preset');
+      if (preset) preset.value = 'custom';
       emitLiveEvent('set-eq-band', { bandIndex: idx, gain: v });
     });
 
-    sliderWrapper.appendChild(slider);
+    wrapper.appendChild(slider);
+    const label = document.createElement('span');
+    label.className = 'eq-freq-label';
+    label.textContent = formatFreq(freq);
 
-    const freqLabel = document.createElement('span');
-    freqLabel.className = 'eq-freq-label';
-    freqLabel.textContent = formatFreq(freq);
-
-    col.appendChild(valBadge);
-    col.appendChild(sliderWrapper);
-    col.appendChild(freqLabel);
+    col.append(badge, wrapper, label);
     container.appendChild(col);
   });
 }
@@ -157,9 +161,8 @@ function renderEqSliders() {
 function updateSlidersFromGains(gains: number[]) {
   currentGains = [...gains];
   gains.forEach((gain, idx) => {
-    const slider = document.getElementById(`eq-slider-${idx}`) as HTMLInputElement;
-    const badge = document.getElementById(`eq-val-${idx}`);
-    if (slider) slider.value = String(gain);
+    setRange(`eq-slider-${idx}`, gain);
+    const badge = $(`eq-val-${idx}`);
     if (badge) {
       badge.textContent = formatDb(gain);
       updateBadgeClass(badge, gain);
@@ -167,472 +170,313 @@ function updateSlidersFromGains(gains: number[]) {
   });
 }
 
-function updateSpeedPresetButtons(currentSpeed: number) {
+function setPreamp(value: number) {
+  setRange('preamp_gain', value);
+  const label = $('preamp_val');
+  if (label) label.textContent = `${formatDb(value)} dB`;
+}
+
+function setSpeed(speed: number) {
+  setRange('playback_speed', speed);
+  const label = $('speed_val');
+  if (label) label.textContent = formatSpeed(speed);
   document.querySelectorAll<HTMLButtonElement>('.speed-preset-btn').forEach((btn) => {
-    const speed = parseFloat(btn.dataset.speed || '1.0');
-    if (Math.abs(speed - currentSpeed) < 0.01) {
-      btn.style.background = 'var(--accent)';
-      btn.style.color = '#ffffff';
-      btn.style.borderColor = 'var(--accent)';
-    } else {
-      btn.style.background = 'var(--bg-subtle)';
-      btn.style.color = 'var(--text-primary)';
-      btn.style.borderColor = 'var(--border)';
-    }
+    const selected = Math.abs(parseFloat(btn.dataset.speed || '1') - speed) < 0.01;
+    btn.classList.toggle('is-selected', selected);
+    btn.setAttribute('aria-pressed', String(selected));
   });
 }
 
-async function emitLiveEvent(event: string, payload: unknown) {
-  const tauri = window.__TAURI__;
-  if (tauri?.event) {
-    try {
-      await tauri.event.emit(event, payload);
-    } catch {
-      // Cross-webview event
-    }
-  }
+function setCrossfade(secs: number) {
+  setRange('crossfade_seconds', secs);
+  const label = $('crossfade_val');
+  if (label) label.textContent = formatCrossfade(secs, tr('settings.crossfade.off'));
 }
 
+function setIntensity(value: number) {
+  setRange('ambient_intensity', value);
+  const label = $('ambient_intensity_val');
+  if (label) label.textContent = `${Math.round(value * 100)}%`;
+}
+
+// ------------------------------------------------------------ load/save
+
 async function loadSettings() {
-  if (window.__TAURI__?.core) {
-    try {
-      const config = (await window.__TAURI__.core.invoke('get_config')) as AppConfig;
-      currentConfig = config;
+  if (!window.__TAURI__?.core) {
+    renderEqSliders();
+    return;
+  }
+  try {
+    const config = (await window.__TAURI__.core.invoke('get_config')) as AppConfig;
+    currentConfig = config;
 
-      // Populate basic UI values
-      setCheckbox('discord_rpc_enabled', config.discord_rpc_enabled);
-      setCheckbox('mpris_enabled', config.mpris_enabled);
-      setCheckbox('notifications_enabled', config.notifications_enabled);
-      setCheckbox('close_to_tray', config.close_to_tray);
-      setCheckbox('adblock_enabled', config.adblock_enabled);
-      setCheckbox('sponsorblock_enabled', config.sponsorblock_enabled);
-      setCheckbox('lyrics_enabled', config.lyrics_enabled);
-      setCheckbox('loudness_normalization', config.loudness_normalization);
-      setCheckbox('skip_silence_enabled', config.skip_silence_enabled);
-      setCheckbox('preserve_pitch', config.preserve_pitch !== false);
-      setCheckbox('ambient_lighting_enabled', config.ambient_lighting_enabled !== false);
-      setCheckbox('embed_lyrics', config.embed_lyrics !== false);
-      setCheckbox('remote_enabled', config.remote_enabled !== false);
-      setCheckbox('inhibit_sleep', config.inhibit_sleep !== false);
-      setCheckbox('pause_on_lock', config.pause_on_lock !== false);
-
-      const remotePortInput = document.getElementById('remote_port') as HTMLInputElement;
-      if (remotePortInput) remotePortInput.value = String(config.remote_port || 9863);
-
-      // Downloader & Local Music fields
-      const downloadFormatSelect = document.getElementById('download_format') as HTMLSelectElement;
-      if (downloadFormatSelect) downloadFormatSelect.value = config.download_format || 'mp3';
-
-      const downloadDirInput = document.getElementById('download_dir') as HTMLInputElement;
-      if (downloadDirInput) downloadDirInput.value = config.download_dir || '';
-
-      const localDirInput = document.getElementById('local_music_dir') as HTMLInputElement;
-      if (localDirInput) localDirInput.value = config.local_music_dir || '';
-
-      // Ambient intensity slider
-      const intensitySlider = document.getElementById('ambient_intensity') as HTMLInputElement;
-      const intensityVal = document.getElementById('ambient_intensity_val');
-      if (intensitySlider) {
-        const intVal = config.ambient_intensity !== undefined ? config.ambient_intensity : 0.6;
-        intensitySlider.value = String(intVal);
-        if (intensityVal) intensityVal.textContent = `${Math.round(intVal * 100)}%`;
-      }
-
-      // Custom CSS
-      const cssEditor = document.getElementById('custom_css') as HTMLTextAreaElement;
-      if (cssEditor) {
-        cssEditor.value = config.custom_css || '';
-      }
-
-      // Preamp slider
-      const preampSlider = document.getElementById('preamp_gain') as HTMLInputElement;
-      const preampVal = document.getElementById('preamp_val');
-      if (preampSlider) {
-        preampSlider.value = String(config.preamp_gain || 0);
-      }
-      if (preampVal) {
-        preampVal.textContent = `${formatDb(config.preamp_gain || 0)} dB`;
-      }
-
-      // Crossfade slider
-      const crossfadeSlider = document.getElementById('crossfade_seconds') as HTMLInputElement;
-      const crossfadeVal = document.getElementById('crossfade_val');
-      if (crossfadeSlider) {
-        crossfadeSlider.value = String(config.crossfade_seconds || 0);
-      }
-      if (crossfadeVal) {
-        crossfadeVal.textContent = formatCrossfade(config.crossfade_seconds || 0);
-      }
-
-      // Playback speed slider
-      const speedSlider = document.getElementById('playback_speed') as HTMLInputElement;
-      const speedVal = document.getElementById('speed_val');
-      const initialSpeed = config.playback_speed || 1.0;
-      if (speedSlider) {
-        speedSlider.value = String(initialSpeed);
-      }
-      if (speedVal) {
-        speedVal.textContent = `${initialSpeed.toFixed(2)}x`;
-      }
-      updateSpeedPresetButtons(initialSpeed);
-
-      // Equalizer preset & gains
-      const presetSelect = document.getElementById('eq_preset') as HTMLSelectElement;
-      if (presetSelect) presetSelect.value = config.equalizer_preset || 'flat';
-
-      currentGains = config.equalizer_gains && config.equalizer_gains.length === 10
-        ? config.equalizer_gains
-        : new Array(10).fill(0);
-
-      renderEqSliders();
-    } catch (e) {
-      console.error('[YTMD] Failed to load settings:', e);
-      showToast(`Couldn't load your settings: ${errorMessage(e)}`);
+    for (const [id, fallback] of TOGGLES) {
+      const el = $<HTMLInputElement>(id);
+      if (el) el.checked = typeof config[id] === 'boolean' ? (config[id] as boolean) : fallback;
     }
-  } else {
+
+    const port = $<HTMLInputElement>('remote_port');
+    if (port) port.value = String(config.remote_port || 9863);
+    const format = $<HTMLSelectElement>('download_format');
+    if (format) format.value = config.download_format || 'mp3';
+    const downloadDir = $<HTMLInputElement>('download_dir');
+    if (downloadDir) downloadDir.value = config.download_dir || '';
+    const localDir = $<HTMLInputElement>('local_music_dir');
+    if (localDir) localDir.value = config.local_music_dir || '';
+    const css = $<HTMLTextAreaElement>('custom_css');
+    if (css) css.value = config.custom_css || '';
+
+    setIntensity(config.ambient_intensity ?? 0.6);
+    setPreamp(config.preamp_gain || 0);
+    setCrossfade(config.crossfade_seconds || 0);
+    setSpeed(config.playback_speed || 1.0);
+
+    const preset = $<HTMLSelectElement>('eq_preset');
+    if (preset) preset.value = config.equalizer_preset || 'flat';
+    currentGains =
+      config.equalizer_gains && config.equalizer_gains.length === 10 ? [...config.equalizer_gains] : new Array(10).fill(0);
+    renderEqSliders();
+  } catch (e) {
+    console.error('[YTMD] Failed to load settings:', e);
+    showToast(tr('settings.loadFailed', { reason: errorMessage(e) }), { durationMs: 8000 });
     renderEqSliders();
   }
 }
 
-function setCheckbox(id: string, value: boolean) {
-  const el = document.getElementById(id) as HTMLInputElement;
-  if (el) el.checked = value;
+function collectConfig(config: AppConfig): AppConfig {
+  const next: AppConfig = { ...config };
+  for (const [id] of TOGGLES) {
+    const el = $<HTMLInputElement>(id);
+    if (el) next[id] = el.checked;
+  }
+  const num = (id: string) => parseFloat($<HTMLInputElement>(id)?.value ?? '0');
+  const port = parseInt($<HTMLInputElement>('remote_port')?.value ?? '', 10);
+  next.remote_port = Number.isFinite(port) && port >= 1024 && port <= 65535 ? port : config.remote_port || 9863;
+  next.download_format = $<HTMLSelectElement>('download_format')?.value ?? next.download_format;
+  next.download_dir = $<HTMLInputElement>('download_dir')?.value ?? next.download_dir;
+  next.local_music_dir = $<HTMLInputElement>('local_music_dir')?.value ?? next.local_music_dir;
+  next.custom_css = $<HTMLTextAreaElement>('custom_css')?.value ?? next.custom_css;
+  next.equalizer_preset = $<HTMLSelectElement>('eq_preset')?.value ?? next.equalizer_preset;
+  next.ambient_intensity = num('ambient_intensity');
+  next.preamp_gain = num('preamp_gain');
+  next.crossfade_seconds = num('crossfade_seconds');
+  next.playback_speed = num('playback_speed');
+  next.equalizer_gains = [...currentGains];
+  return next;
 }
 
-function getCheckbox(id: string): boolean {
-  const el = document.getElementById(id) as HTMLInputElement;
-  return el ? el.checked : false;
+/** Settings apply as you change them, like YouTube Music's own settings —
+ * no Save button. Live effects are pushed immediately through the
+ * set-* events; persisting to disk is debounced. */
+function scheduleSave() {
+  if (saveTimer !== null) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    void saveSettings();
+  }, SAVE_DEBOUNCE_MS);
 }
 
 async function saveSettings() {
   if (!currentConfig || !window.__TAURI__?.core) return;
-
-  currentConfig.discord_rpc_enabled = getCheckbox('discord_rpc_enabled');
-  currentConfig.mpris_enabled = getCheckbox('mpris_enabled');
-  currentConfig.notifications_enabled = getCheckbox('notifications_enabled');
-  currentConfig.close_to_tray = getCheckbox('close_to_tray');
-  currentConfig.adblock_enabled = getCheckbox('adblock_enabled');
-  currentConfig.sponsorblock_enabled = getCheckbox('sponsorblock_enabled');
-  currentConfig.lyrics_enabled = getCheckbox('lyrics_enabled');
-  currentConfig.loudness_normalization = getCheckbox('loudness_normalization');
-  currentConfig.skip_silence_enabled = getCheckbox('skip_silence_enabled');
-  currentConfig.preserve_pitch = getCheckbox('preserve_pitch');
-  currentConfig.ambient_lighting_enabled = getCheckbox('ambient_lighting_enabled');
-  currentConfig.embed_lyrics = getCheckbox('embed_lyrics');
-  currentConfig.remote_enabled = getCheckbox('remote_enabled');
-  currentConfig.inhibit_sleep = getCheckbox('inhibit_sleep');
-  currentConfig.pause_on_lock = getCheckbox('pause_on_lock');
-
-  const remotePortInput = document.getElementById('remote_port') as HTMLInputElement;
-  if (remotePortInput) currentConfig.remote_port = parseInt(remotePortInput.value, 10) || 9863;
-
-  const downloadFormatSelect = document.getElementById('download_format') as HTMLSelectElement;
-  if (downloadFormatSelect) currentConfig.download_format = downloadFormatSelect.value;
-
-  const downloadDirInput = document.getElementById('download_dir') as HTMLInputElement;
-  if (downloadDirInput) currentConfig.download_dir = downloadDirInput.value;
-
-  const localDirInput = document.getElementById('local_music_dir') as HTMLInputElement;
-  if (localDirInput) currentConfig.local_music_dir = localDirInput.value;
-
-  const intensitySlider = document.getElementById('ambient_intensity') as HTMLInputElement;
-  if (intensitySlider) currentConfig.ambient_intensity = parseFloat(intensitySlider.value);
-
-  const cssEditor = document.getElementById('custom_css') as HTMLTextAreaElement;
-  if (cssEditor) currentConfig.custom_css = cssEditor.value;
-
-  const presetSelect = document.getElementById('eq_preset') as HTMLSelectElement;
-  if (presetSelect) currentConfig.equalizer_preset = presetSelect.value;
-
-  const preampSlider = document.getElementById('preamp_gain') as HTMLInputElement;
-  if (preampSlider) currentConfig.preamp_gain = parseFloat(preampSlider.value);
-
-  const crossfadeSlider = document.getElementById('crossfade_seconds') as HTMLInputElement;
-  if (crossfadeSlider) currentConfig.crossfade_seconds = parseFloat(crossfadeSlider.value);
-
-  const speedSlider = document.getElementById('playback_speed') as HTMLInputElement;
-  if (speedSlider) currentConfig.playback_speed = parseFloat(speedSlider.value);
-
-  currentConfig.equalizer_gains = [...currentGains];
-
-  const saveBtn = document.getElementById('save-btn') as HTMLButtonElement | null;
-  const savingHtml = '<span class="spinner"></span><span>Saving…</span>';
-  const idleText = 'Save Changes';
-  if (saveBtn) {
-    saveBtn.disabled = true;
-    saveBtn.innerHTML = savingHtml;
-  }
-
+  const next = collectConfig(currentConfig);
   try {
-    await window.__TAURI__.core.invoke('save_config', { config: currentConfig });
+    await window.__TAURI__.core.invoke('save_config', { config: next });
+    currentConfig = next;
     // Lets the main window's plugin registry re-check toggles
-    // (adblock/sponsorblock/lyrics/notifications/remote/...) immediately
-    // instead of only picking up the change on next app restart.
-    emitLiveEvent('config-updated', currentConfig);
-    if (saveBtn) {
-      saveBtn.textContent = 'Saved!';
+    // (adblock/sponsorblock/lyrics/notifications/remote/...) right away.
+    emitLiveEvent('config-updated', next);
+    const status = $('save-status');
+    if (status) {
+      status.textContent = tr('settings.saved');
       setTimeout(() => {
-        saveBtn.textContent = idleText;
+        if (status.textContent === tr('settings.saved')) status.textContent = '';
       }, 1500);
     }
   } catch (e) {
     console.error('[YTMD] Failed to save settings:', e);
-    showToast(`Couldn't save your settings: ${errorMessage(e)}`);
-    if (saveBtn) saveBtn.textContent = idleText;
-  } finally {
-    if (saveBtn) saveBtn.disabled = false;
+    showToast(tr('settings.saveFailed', { reason: errorMessage(e) }), { durationMs: 8000 });
   }
 }
+
+// -------------------------------------------------------------- updates
 
 async function loadAppVersion() {
-  const versionDesc = document.getElementById('app-version-desc');
-  if (!versionDesc || !window.__TAURI__?.core) return;
+  const desc = $('app-version-desc');
+  if (!desc || !window.__TAURI__?.core) return;
   try {
     const version = (await window.__TAURI__.core.invoke('get_app_version')) as string;
-    versionDesc.textContent = `Version ${version}`;
+    desc.textContent = tr('settings.version', { version });
   } catch {
-    // Leave the placeholder text if the version can't be read.
+    // Leave the placeholder if the version can't be read.
   }
 }
 
-function showUpdateAvailable(info: UpdateInfo) {
-  const card = document.getElementById('update-available-card');
-  const desc = document.getElementById('update-available-desc');
-  if (card) card.style.display = 'flex';
-  if (desc) {
-    desc.textContent = info.body
-      ? `Version ${info.version}: ${info.body}`
-      : `Version ${info.version} is ready to install.`;
+function setBusy(btn: HTMLButtonElement | null, busyLabel: string | null, idleLabel: string) {
+  if (!btn) return;
+  btn.disabled = busyLabel !== null;
+  if (busyLabel === null) {
+    btn.textContent = idleLabel;
+    return;
   }
+  const spinner = document.createElement('span');
+  spinner.className = 'spinner';
+  const text = document.createElement('span');
+  text.textContent = busyLabel;
+  btn.replaceChildren(spinner, text);
 }
 
-async function checkForUpdates(showUpToDateToast: boolean) {
+async function checkForUpdates(userInitiated: boolean) {
   if (!window.__TAURI__?.core) return;
-  const btn = document.getElementById('check-update-btn') as HTMLButtonElement | null;
-  const idleText = 'Check for Updates';
-
-  if (btn) {
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner"></span><span>Checking…</span>';
-  }
-
+  const btn = $<HTMLButtonElement>('check-update-btn');
+  setBusy(btn, tr('settings.update.checking'), tr('settings.update.check'));
   try {
     const info = (await window.__TAURI__.core.invoke('check_for_updates')) as UpdateInfo | null;
     if (info) {
-      showUpdateAvailable(info);
-    } else if (showUpToDateToast) {
-      showToast("You're already on the latest version.");
+      $('update-available-card')?.classList.remove('is-hidden');
+      const desc = $('update-available-desc');
+      if (desc) {
+        desc.textContent = info.body
+          ? tr('settings.update.notes', { version: info.version, notes: info.body })
+          : tr('settings.update.ready', { version: info.version });
+      }
+    } else if (userInitiated) {
+      showToast(tr('settings.update.upToDate'));
     }
   } catch (e) {
     console.error('[YTMD] Update check failed:', e);
-    if (showUpToDateToast) {
-      showToast(`Couldn't check for updates: ${errorMessage(e)}`);
-    }
+    if (userInitiated) showToast(tr('settings.update.checkFailed', { reason: errorMessage(e) }), { durationMs: 8000 });
   } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = idleText;
-    }
+    setBusy(btn, null, tr('settings.update.check'));
   }
 }
 
 async function installUpdate() {
   if (!window.__TAURI__?.core) return;
-  const btn = document.getElementById('install-update-btn') as HTMLButtonElement | null;
-  if (btn) {
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner"></span><span>Installing…</span>';
-  }
-
+  const btn = $<HTMLButtonElement>('install-update-btn');
+  setBusy(btn, tr('settings.update.installing'), tr('settings.update.install'));
   try {
-    // On success the app restarts itself — this promise never resolves in practice.
+    // On success the app restarts itself; this promise never resolves.
     await window.__TAURI__.core.invoke('install_update');
   } catch (e) {
     console.error('[YTMD] Update install failed:', e);
-    showToast(`Couldn't install the update: ${errorMessage(e)}`);
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = 'Install & Restart';
-    }
+    showToast(tr('settings.update.installFailed', { reason: errorMessage(e) }), { durationMs: 8000 });
+    setBusy(btn, null, tr('settings.update.install'));
   }
 }
 
-function initUpdateChecker() {
-  loadAppVersion();
-  checkForUpdates(false);
+// ---------------------------------------------------------- navigation
 
-  const checkBtn = document.getElementById('check-update-btn');
-  if (checkBtn) {
-    checkBtn.addEventListener('click', () => checkForUpdates(true));
-  }
+/** Left-hand categories like YouTube Music's settings: click to jump, and
+ * the category you're scrolled to stays highlighted. */
+function initSectionNav() {
+  const content = $('settings-content');
+  const items = Array.from(document.querySelectorAll<HTMLButtonElement>('.settings-nav-item'));
+  if (!content || items.length === 0) return;
 
-  const installBtn = document.getElementById('install-update-btn');
-  if (installBtn) {
-    installBtn.addEventListener('click', installUpdate);
-  }
-}
+  const setActive = (sectionId: string) => {
+    items.forEach((item) => item.classList.toggle('is-active', item.dataset.section === sectionId));
+  };
 
-document.addEventListener('DOMContentLoaded', () => {
-  initAmbientBackdrop();
-  loadSettings();
-  initUpdateChecker();
-
-  const saveBtn = document.getElementById('save-btn');
-  if (saveBtn) {
-    saveBtn.addEventListener('click', saveSettings);
-  }
-
-  // Preset dropdown listener
-  const presetSelect = document.getElementById('eq_preset') as HTMLSelectElement;
-  if (presetSelect) {
-    presetSelect.addEventListener('change', () => {
-      const presetId = presetSelect.value;
-      if (presetId !== 'custom' && EQ_PRESETS[presetId]) {
-        const preset = EQ_PRESETS[presetId];
-        updateSlidersFromGains(preset.gains);
-        emitLiveEvent('set-eq-all', { gains: preset.gains, preset: presetId });
-
-        if (preset.preamp !== undefined) {
-          const preampSlider = document.getElementById('preamp_gain') as HTMLInputElement;
-          const preampVal = document.getElementById('preamp_val');
-          if (preampSlider) preampSlider.value = String(preset.preamp);
-          if (preampVal) preampVal.textContent = `${formatDb(preset.preamp)} dB`;
-          emitLiveEvent('set-preamp', preset.preamp);
-        }
-      }
-    });
-  }
-
-  // Preamp slider listener
-  const preampSlider = document.getElementById('preamp_gain') as HTMLInputElement;
-  const preampVal = document.getElementById('preamp_val');
-  if (preampSlider && preampVal) {
-    preampSlider.addEventListener('input', () => {
-      const val = parseFloat(preampSlider.value);
-      preampVal.textContent = `${formatDb(val)} dB`;
-      emitLiveEvent('set-preamp', val);
-    });
-  }
-
-  // Crossfade slider listener
-  const crossfadeSlider = document.getElementById('crossfade_seconds') as HTMLInputElement;
-  const crossfadeVal = document.getElementById('crossfade_val');
-  if (crossfadeSlider && crossfadeVal) {
-    crossfadeSlider.addEventListener('input', () => {
-      const val = parseFloat(crossfadeSlider.value);
-      crossfadeVal.textContent = formatCrossfade(val);
-      emitLiveEvent('set-crossfade-seconds', val);
-    });
-  }
-
-  // Playback speed slider listener
-  const speedSlider = document.getElementById('playback_speed') as HTMLInputElement;
-  const speedVal = document.getElementById('speed_val');
-  if (speedSlider && speedVal) {
-    speedSlider.addEventListener('input', () => {
-      const val = parseFloat(speedSlider.value);
-      speedVal.textContent = `${val.toFixed(2)}x`;
-      updateSpeedPresetButtons(val);
-      emitLiveEvent('set-playback-rate', val);
-    });
-  }
-
-  // Speed preset buttons
-  document.querySelectorAll<HTMLButtonElement>('.speed-preset-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const speed = parseFloat(btn.dataset.speed || '1.0');
-      if (speedSlider) speedSlider.value = String(speed);
-      if (speedVal) speedVal.textContent = `${speed.toFixed(2)}x`;
-      updateSpeedPresetButtons(speed);
-      emitLiveEvent('set-playback-rate', speed);
+  items.forEach((item) => {
+    item.addEventListener('click', () => {
+      const section = item.dataset.section ? $(item.dataset.section) : null;
+      section?.scrollIntoView({ block: 'start' });
+      if (item.dataset.section) setActive(item.dataset.section);
     });
   });
 
-  // Preserve pitch toggle listener
-  const pitchCheck = document.getElementById('preserve_pitch') as HTMLInputElement;
-  if (pitchCheck) {
-    pitchCheck.addEventListener('change', () => {
-      emitLiveEvent('set-preserves-pitch', pitchCheck.checked);
-    });
-  }
+  const observer = new IntersectionObserver(
+    (entries) => {
+      const visible = entries.filter((e) => e.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+      if (visible[0]) setActive(visible[0].target.id);
+    },
+    { root: content, rootMargin: '0px 0px -70% 0px' }
+  );
+  content.querySelectorAll('.settings-section').forEach((s) => observer.observe(s));
+}
 
-  // Ambient Lighting listeners
-  const ambientCheck = document.getElementById('ambient_lighting_enabled') as HTMLInputElement;
-  if (ambientCheck) {
-    ambientCheck.addEventListener('change', () => {
-      emitLiveEvent('set-ambient-enabled', ambientCheck.checked);
-    });
-  }
+// --------------------------------------------------------------- wiring
 
-  const ambientSlider = document.getElementById('ambient_intensity') as HTMLInputElement;
-  const ambientVal = document.getElementById('ambient_intensity_val');
-  if (ambientSlider && ambientVal) {
-    ambientSlider.addEventListener('input', () => {
-      const val = parseFloat(ambientSlider.value);
-      ambientVal.textContent = `${Math.round(val * 100)}%`;
-      emitLiveEvent('set-ambient-intensity', val);
-    });
-  }
+document.addEventListener('DOMContentLoaded', () => {
+  initWindowChrome();
+  initAmbientBackdrop();
+  initSectionNav();
+  void loadSettings();
+  void loadAppVersion();
+  void checkForUpdates(false);
 
-  // Custom CSS textarea listener (Live Reload)
-  const cssEditor = document.getElementById('custom_css') as HTMLTextAreaElement;
-  if (cssEditor) {
-    cssEditor.addEventListener('input', () => {
-      emitLiveEvent('set-custom-css', cssEditor.value);
-    });
-  }
+  $('check-update-btn')?.addEventListener('click', () => checkForUpdates(true));
+  $('install-update-btn')?.addEventListener('click', installUpdate);
 
-  // Loudness Normalization switch listener
-  const normCheck = document.getElementById('loudness_normalization') as HTMLInputElement;
-  if (normCheck) {
-    normCheck.addEventListener('change', () => {
-      emitLiveEvent('set-loudness-normalization', normCheck.checked);
-    });
-  }
+  // Any edit anywhere in the settings persists (debounced).
+  const content = $('settings-content');
+  content?.addEventListener('change', scheduleSave);
+  content?.addEventListener('input', scheduleSave);
 
-  // Skip silence switch listener
-  const silenceCheck = document.getElementById('skip_silence_enabled') as HTMLInputElement;
-  if (silenceCheck) {
-    silenceCheck.addEventListener('change', () => {
-      emitLiveEvent('set-skip-silence', silenceCheck.checked);
-    });
-  }
+  const presetSelect = $<HTMLSelectElement>('eq_preset');
+  presetSelect?.addEventListener('change', () => {
+    const preset = EQ_PRESETS[presetSelect.value];
+    if (presetSelect.value === 'custom' || !preset) return;
+    updateSlidersFromGains(preset.gains);
+    emitLiveEvent('set-eq-all', { gains: preset.gains, preset: presetSelect.value });
+    if (preset.preamp !== undefined) {
+      setPreamp(preset.preamp);
+      emitLiveEvent('set-preamp', preset.preamp);
+    }
+  });
 
-  // Reset EQ button
-  const resetBtn = document.getElementById('eq-reset-btn');
-  if (resetBtn) {
-    resetBtn.addEventListener('click', () => {
-      if (presetSelect) presetSelect.value = 'flat';
-      updateSlidersFromGains(EQ_PRESETS.flat.gains);
-      emitLiveEvent('set-eq-all', { gains: EQ_PRESETS.flat.gains, preset: 'flat' });
-      if (preampSlider && preampVal) {
-        preampSlider.value = '0';
-        preampVal.textContent = '0.0 dB';
-        emitLiveEvent('set-preamp', 0);
-      }
-    });
-  }
+  $('eq-reset-btn')?.addEventListener('click', () => {
+    if (presetSelect) presetSelect.value = 'flat';
+    updateSlidersFromGains(EQ_PRESETS.flat.gains);
+    emitLiveEvent('set-eq-all', { gains: EQ_PRESETS.flat.gains, preset: 'flat' });
+    setPreamp(0);
+    emitLiveEvent('set-preamp', 0);
+    scheduleSave();
+  });
 
-  // Window Controls
-  const minBtn = document.getElementById('win-min-btn');
-  const maxBtn = document.getElementById('win-max-btn');
-  const closeBtn = document.getElementById('win-close-btn');
+  $<HTMLInputElement>('preamp_gain')?.addEventListener('input', (e) => {
+    const val = parseFloat((e.target as HTMLInputElement).value);
+    setPreamp(val);
+    emitLiveEvent('set-preamp', val);
+  });
 
-  if (minBtn) {
-    minBtn.addEventListener('click', () => {
-      window.__TAURI__?.core.invoke('minimize_window');
-    });
-  }
+  $<HTMLInputElement>('crossfade_seconds')?.addEventListener('input', (e) => {
+    const val = parseFloat((e.target as HTMLInputElement).value);
+    setCrossfade(val);
+    emitLiveEvent('set-crossfade-seconds', val);
+  });
 
-  if (maxBtn) {
-    maxBtn.addEventListener('click', () => {
-      window.__TAURI__?.core.invoke('toggle_maximize_window');
-    });
-  }
+  $<HTMLInputElement>('playback_speed')?.addEventListener('input', (e) => {
+    const val = parseFloat((e.target as HTMLInputElement).value);
+    setSpeed(val);
+    emitLiveEvent('set-playback-rate', val);
+  });
 
-  if (closeBtn) {
-    closeBtn.addEventListener('click', () => {
-      window.__TAURI__?.core.invoke('close_window');
+  document.querySelectorAll<HTMLButtonElement>('.speed-preset-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const speed = parseFloat(btn.dataset.speed || '1');
+      setSpeed(speed);
+      emitLiveEvent('set-playback-rate', speed);
+      scheduleSave();
     });
-  }
+  });
+
+  const liveToggle = (id: string, event: string) => {
+    const el = $<HTMLInputElement>(id);
+    el?.addEventListener('change', () => emitLiveEvent(event, el.checked));
+  };
+  liveToggle('preserve_pitch', 'set-preserves-pitch');
+  liveToggle('ambient_lighting_enabled', 'set-ambient-enabled');
+  liveToggle('loudness_normalization', 'set-loudness-normalization');
+  liveToggle('skip_silence_enabled', 'set-skip-silence');
+
+  $<HTMLInputElement>('ambient_intensity')?.addEventListener('input', (e) => {
+    const val = parseFloat((e.target as HTMLInputElement).value);
+    setIntensity(val);
+    emitLiveEvent('set-ambient-intensity', val);
+  });
+
+  $<HTMLTextAreaElement>('custom_css')?.addEventListener('input', (e) => {
+    emitLiveEvent('set-custom-css', (e.target as HTMLTextAreaElement).value);
+  });
 });
