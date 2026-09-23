@@ -325,6 +325,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)] // creating symlinks on Windows needs admin/developer mode
     fn test_scan_directory_does_not_follow_symlink_escaping_the_root() {
         use std::os::unix::fs::symlink;
 
