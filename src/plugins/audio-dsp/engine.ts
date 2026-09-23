@@ -1,6 +1,22 @@
 import { EQ_FREQUENCIES, EQ_PRESETS, clampGain } from './presets';
 import { PlayerBridge } from '../../preload/bridge';
 
+/** RMS level of time-domain samples in dBFS; -100 for (near) silence. */
+export function rmsToDb(samples: ArrayLike<number>): number {
+  if (samples.length === 0) return -100;
+  let sum = 0;
+  for (let i = 0; i < samples.length; i++) {
+    sum += samples[i] * samples[i];
+  }
+  const rms = Math.sqrt(sum / samples.length);
+  if (rms <= 0.00001) return -100;
+  return 20 * Math.log10(rms);
+}
+
+export function clampPlaybackRate(rate: number): number {
+  return Math.max(0.5, Math.min(2.0, rate));
+}
+
 export class AudioEngine {
   private static instance: AudioEngine | null = null;
   private audioCtx: AudioContext | null = null;
@@ -247,16 +263,8 @@ export class AudioEngine {
     if (!this.powerBuffer || this.powerBuffer.length !== this.analyserNode.fftSize) {
       this.powerBuffer = new Float32Array(this.analyserNode.fftSize);
     }
-    const buffer = this.powerBuffer;
-    this.analyserNode.getFloatTimeDomainData(buffer);
-
-    let sum = 0;
-    for (let i = 0; i < buffer.length; i++) {
-      sum += buffer[i] * buffer[i];
-    }
-    const rms = Math.sqrt(sum / buffer.length);
-    if (rms <= 0.00001) return -100;
-    return 20 * Math.log10(rms);
+    this.analyserNode.getFloatTimeDomainData(this.powerBuffer);
+    return rmsToDb(this.powerBuffer);
   }
 
   public getFrequencyData(): Uint8Array | null {
@@ -268,7 +276,7 @@ export class AudioEngine {
 
   // Speed & Pitch
   public setPlaybackRate(rate: number): void {
-    this.playbackRate = Math.max(0.5, Math.min(2.0, rate));
+    this.playbackRate = clampPlaybackRate(rate);
     this.applyRateAndPitch();
   }
 

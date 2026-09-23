@@ -1,5 +1,8 @@
 import { YTMDPlugin, PluginContext, TrackInfo } from '../types';
 import { PlayerBridge } from '../../preload/bridge';
+import { setSyncStatus } from '../../preload/ui/navMenu';
+import { showToast } from '../../preload/ui/kit';
+import { t } from '../../preload/ui/i18n';
 
 export interface SyncPlaybackPayload {
   video_id: string;
@@ -10,10 +13,32 @@ export interface SyncPlaybackPayload {
   timestamp_ms: number;
 }
 
+export interface RoomMemberPayload {
+  id: string;
+  nickname: string;
+  is_host: boolean;
+}
+
 interface RoomStatePayload {
   room_code: string;
   is_host: boolean;
+  current_user_id: string;
+  members: RoomMemberPayload[];
   playback_state: SyncPlaybackPayload | null;
+}
+
+/** Who arrived/left between two room snapshots, excluding ourselves. */
+export function diffMembers(
+  prev: RoomMemberPayload[],
+  next: RoomMemberPayload[],
+  selfId: string
+): { joined: string[]; left: string[] } {
+  const prevIds = new Set(prev.map((m) => m.id));
+  const nextIds = new Set(next.map((m) => m.id));
+  return {
+    joined: next.filter((m) => m.id !== selfId && !prevIds.has(m.id)).map((m) => m.nickname),
+    left: prev.filter((m) => m.id !== selfId && !nextIds.has(m.id)).map((m) => m.nickname)
+  };
 }
 
 export interface LocalPlayback {
@@ -168,6 +193,30 @@ export class RoomSyncController {
 
 let controllerRef: RoomSyncController | null = null;
 let cleanup: (() => void) | null = null;
+/** Last room snapshot seen, to announce joins/leaves; null when not in a room. */
+let lastRoom: RoomStatePayload | null = null;
+
+/** Mirrors room state into the nav-bar chip and announces changes the way
+ * YTM announces its own events: a short toast, no dialog. `announce` is
+ * false when restoring state on page load (nothing new happened). */
+function applyRoomUi(room: RoomStatePayload | null, announce: boolean) {
+  const prev = lastRoom;
+  lastRoom = room;
+  setSyncStatus(room ? { roomCode: room.room_code, listeners: room.members.length, isHost: room.is_host } : null);
+  if (!announce) return;
+
+  if (!room) {
+    if (prev) showToast(t().syncRoomClosed);
+    return;
+  }
+  if (!prev || prev.room_code !== room.room_code) {
+    if (!room.is_host) showToast(t().syncConnected);
+    return;
+  }
+  const { joined, left } = diffMembers(prev.members, room.members, room.current_user_id);
+  const messages = [...joined.map(t().syncJoined), ...left.map(t().syncLeft)];
+  if (messages.length > 0) showToast(messages.join(' · '));
+}
 
 export const SyncRoomPlugin: YTMDPlugin = {
   id: 'sync_room',
@@ -182,11 +231,13 @@ export const SyncRoomPlugin: YTMDPlugin = {
     const unlistenPromises: Promise<() => void>[] = [];
     if (window.__TAURI__?.event) {
       unlistenPromises.push(
-        window.__TAURI__.event.listen<{ room_code: string; is_host: boolean }>('sync-room-updated', (e) => {
+        window.__TAURI__.event.listen<RoomStatePayload>('sync-room-updated', (e) => {
           controller.setRoomState(true, e.payload.is_host);
+          applyRoomUi(e.payload, true);
         }),
         window.__TAURI__.event.listen('sync-room-left', () => {
           controller.setRoomState(false, false);
+          applyRoomUi(null, true);
         }),
         window.__TAURI__.event.listen<SyncPlaybackPayload>('sync-playback-remote', (e) => {
           controller.handleRemotePlayback(e.payload, ctx.getVideoElement());
@@ -203,6 +254,7 @@ export const SyncRoomPlugin: YTMDPlugin = {
         if (controllerRef !== controller || !state || typeof state !== 'object') return;
         const room = state as RoomStatePayload;
         controller.setRoomState(true, room.is_host);
+        applyRoomUi(room, false);
         if (!room.is_host && room.playback_state) {
           controller.handleRemotePlayback(room.playback_state, ctx.getVideoElement());
         }
@@ -212,6 +264,8 @@ export const SyncRoomPlugin: YTMDPlugin = {
     cleanup = () => {
       unlistenPromises.forEach((p) => p.then((unlisten) => unlisten()));
       controllerRef = null;
+      lastRoom = null;
+      setSyncStatus(null);
     };
   },
 

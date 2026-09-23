@@ -1,5 +1,6 @@
 import { EQ_FREQUENCIES, EQ_PRESETS } from '../plugins/audio-dsp/presets';
 import { initAmbientBackdrop } from './ambient';
+import { formatDb, formatCrossfade } from './format';
 
 interface AppConfig {
   autostart: boolean;
@@ -84,16 +85,6 @@ function formatFreq(freq: number): string {
     return `${freq / 1000}k`;
   }
   return `${freq}`;
-}
-
-function formatDb(db: number): string {
-  const sign = db > 0 ? '+' : '';
-  return `${sign}${db.toFixed(1)}`;
-}
-
-function formatCrossfade(secs: number): string {
-  if (secs <= 0) return 'Disabled';
-  return `${secs.toFixed(1)}s`;
 }
 
 function updateBadgeClass(badge: HTMLElement, val: number) {

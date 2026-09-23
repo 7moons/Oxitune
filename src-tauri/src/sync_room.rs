@@ -22,6 +22,7 @@ use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter};
@@ -110,6 +111,10 @@ impl From<&RoomState> for RoomStateWire {
 }
 
 impl RoomStateWire {
+    pub(crate) fn has_member(&self, member_id: &str) -> bool {
+        self.members.iter().any(|m| m.id == member_id)
+    }
+
     pub(crate) fn into_local_view(self, is_host: bool, current_user_id: String) -> RoomState {
         RoomState {
             room_code: self.room_code,
@@ -135,6 +140,52 @@ pub(crate) enum WireMessage {
     Playback { state: SyncPlaybackState },
     Leave { user_id: String },
     Ack,
+    /// Liveness ping: guests send one to the host, and the host sends one
+    /// (with its own id) to every guest, each `LivenessConfig::heartbeat_interval`.
+    /// Either side that hears nothing for `LivenessConfig::timeout` treats the
+    /// other as gone. Peers that predate this variant fail to parse it and
+    /// skip the line, same as any other unknown message.
+    Heartbeat { user_id: String },
+}
+
+/// How often peers ping each other and how long silence is tolerated before
+/// a member is evicted (host side) or the room is considered gone (guest
+/// side). Configurable so tests can run the same logic in milliseconds.
+#[derive(Debug, Clone, Copy)]
+pub struct LivenessConfig {
+    pub heartbeat_interval: Duration,
+    pub timeout: Duration,
+}
+
+impl Default for LivenessConfig {
+    fn default() -> Self {
+        Self {
+            heartbeat_interval: Duration::from_secs(5),
+            timeout: Duration::from_secs(15),
+        }
+    }
+}
+
+/// Members (never the host) whose last sign of life is older than `timeout`.
+/// A member with no `last_seen` entry is treated as just seen: every add goes
+/// through `add_member`, which records one, so a missing entry only means a
+/// racing removal, not silence.
+pub(crate) fn stale_members(
+    room: &RoomState,
+    last_seen: &HashMap<String, Instant>,
+    now: Instant,
+    timeout: Duration,
+) -> Vec<String> {
+    room.members
+        .iter()
+        .filter(|m| !m.is_host)
+        .filter(|m| {
+            last_seen
+                .get(&m.id)
+                .is_some_and(|seen| now.saturating_duration_since(*seen) > timeout)
+        })
+        .map(|m| m.id.clone())
+        .collect()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -181,6 +232,8 @@ struct HostSession {
     /// closed instead of silently waiting forever (the MQTT transport has
     /// no connection-level EOF between host and guest like TCP does).
     p2p_shutdown: Option<oneshot::Sender<()>>,
+    /// Sends the host's heartbeat to every guest and evicts silent members.
+    liveness_task: tauri::async_runtime::JoinHandle<()>,
     /// The TCP port this instance is listening on. Real guests never need
     /// this directly (they learn it from the UDP beacon); it exists so
     /// `SyncRoomManager::host_port` can hand it to tests that connect over
@@ -190,15 +243,15 @@ struct HostSession {
 
 struct GuestSession {
     reader_task: tauri::async_runtime::JoinHandle<()>,
-    /// Kept alive for the duration of the session. Dropping a split TCP
-    /// stream's write half immediately shuts down that direction (sends
-    /// FIN), which the host reads as EOF and treats as a disconnect — so
-    /// this must not be dropped until the guest actually leaves.
+    /// TCP only: sends this guest's heartbeats and owns the stream's write
+    /// half for the whole session. Dropping a split TCP stream's write half
+    /// immediately shuts down that direction (sends FIN), which the host
+    /// reads as a disconnect — so aborting this task on leave is also what
+    /// closes the connection.
     ///
     /// `None` for a P2P session (`p2p_sync.rs`): there `reader_task` owns
-    /// the whole libp2p swarm itself, so aborting it already tears down the
-    /// connection — no separate handle needs keeping alive.
-    _write_half: Option<tokio::net::tcp::OwnedWriteHalf>,
+    /// the MQTT client and sends heartbeats itself.
+    heartbeat_task: Option<tauri::async_runtime::JoinHandle<()>>,
     /// P2P only: asks the guest loop to publish `Leave` to the host and
     /// exit on its own (instead of being aborted mid-flight), so the host
     /// drops this member from the room right away.
@@ -217,6 +270,18 @@ pub struct SyncRoomManager {
     /// transports are currently hosting, so a broadcast reaches every
     /// connected guest — LAN and internet alike — through one call.
     peers: Mutex<HashMap<String, mpsc::UnboundedSender<WireMessage>>>,
+    /// Host side: when each member was last heard from (join, heartbeat, or
+    /// any other message), for evicting guests that vanished without a
+    /// `Leave` (crash, network drop, sleep).
+    last_seen: Mutex<HashMap<String, Instant>>,
+    /// Bumped on every create/join/leave. Background tasks capture the value
+    /// they were started under and stop touching shared state once it moves
+    /// on, so a dying session's loop can never clobber a newer one.
+    session_gen: AtomicU64,
+    pub(crate) liveness: LivenessConfig,
+    /// Whether `create_room` also hosts over the internet (MQTT) transport.
+    /// Only turned off by tests that must not depend on public brokers.
+    internet_enabled: bool,
 }
 
 impl Default for SyncRoomManager {
@@ -227,12 +292,29 @@ impl Default for SyncRoomManager {
 
 impl SyncRoomManager {
     pub fn new() -> Self {
+        Self::with_options(LivenessConfig::default(), true)
+    }
+
+    pub fn with_options(liveness: LivenessConfig, internet_enabled: bool) -> Self {
         Self {
             state: Mutex::new(None),
             host: Mutex::new(None),
             guest: Mutex::new(None),
             peers: Mutex::new(HashMap::new()),
+            last_seen: Mutex::new(HashMap::new()),
+            session_gen: AtomicU64::new(0),
+            liveness,
+            internet_enabled,
         }
+    }
+
+    /// Starts a new session generation and returns it.
+    pub(crate) fn begin_session(&self) -> u64 {
+        self.session_gen.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
+    pub(crate) fn is_current_session(&self, generation: u64) -> bool {
+        self.session_gen.load(Ordering::SeqCst) == generation
     }
 
     pub fn get_room_state(&self) -> Option<RoomState> {
@@ -257,6 +339,7 @@ impl SyncRoomManager {
         if room.members.len() >= MAX_MEMBERS {
             return Err("Room is full");
         }
+        self.last_seen.lock().insert(member_id.clone(), Instant::now());
         room.members.push(RoomMember {
             id: member_id,
             nickname,
@@ -266,11 +349,54 @@ impl SyncRoomManager {
         Ok(room.clone())
     }
 
+    /// Whether `member_id` is currently in the room. The internet transport
+    /// uses it to treat a re-sent `Join` (guests retry until they hear back)
+    /// as the same member instead of adding a duplicate.
+    pub(crate) fn has_member(&self, member_id: &str) -> bool {
+        self.state
+            .lock()
+            .as_ref()
+            .is_some_and(|r| r.members.iter().any(|m| m.id == member_id))
+    }
+
+    /// Returns the updated room only if `member_id` was actually a member, so
+    /// a departure noticed twice (e.g. eviction, then the TCP task ending)
+    /// is announced once.
     pub(crate) fn remove_member(&self, member_id: &str) -> Option<RoomState> {
         let mut guard = self.state.lock();
         let room = guard.as_mut()?;
+        let before = room.members.len();
         room.members.retain(|m| m.id != member_id);
-        Some(room.clone())
+        self.last_seen.lock().remove(member_id);
+        (room.members.len() != before).then(|| room.clone())
+    }
+
+    /// Records a sign of life from a current member. Ignored for ids that
+    /// aren't members (e.g. already evicted).
+    pub(crate) fn touch_member(&self, member_id: &str) {
+        if let Some(seen) = self.last_seen.lock().get_mut(member_id) {
+            *seen = Instant::now();
+        }
+    }
+
+    /// Removes every member silent for longer than the liveness timeout and
+    /// returns the updated room if anyone was removed.
+    pub(crate) fn evict_stale_members(&self) -> Option<RoomState> {
+        let stale = {
+            let guard = self.state.lock();
+            let room = guard.as_ref()?;
+            stale_members(room, &self.last_seen.lock(), Instant::now(), self.liveness.timeout)
+        };
+        let mut updated = None;
+        for id in stale {
+            log::info!("Listen Together: evicting silent member {id}");
+            // Dropping the sender ends that guest's TCP connection too.
+            self.unregister_peer(&id);
+            if let Some(room) = self.remove_member(&id) {
+                updated = Some(room);
+            }
+        }
+        updated
     }
 
     /// `pub(crate)`: `p2p_sync.rs`'s host loop registers each joined libp2p
@@ -318,7 +444,7 @@ impl SyncRoomManager {
     ) {
         *self.guest.lock() = Some(GuestSession {
             reader_task,
-            _write_half: None,
+            heartbeat_task: None,
             shutdown: Some(shutdown),
         });
     }
@@ -332,26 +458,52 @@ impl SyncRoomManager {
     /// returns the resulting local view, mirroring the TCP
     /// `guest_reader_loop`'s handling of `WireMessage::State`. Also used for
     /// the initial state handed back in the `Join` response, since the
-    /// semantics (store + return the local view) are identical.
-    pub(crate) fn apply_remote_room_update(&self, wire: RoomStateWire, current_user_id: &str) -> RoomState {
+    /// semantics (store + return the local view) are identical. `None` (and
+    /// nothing stored) if `generation` is no longer the current session.
+    pub(crate) fn apply_remote_room_update(
+        &self,
+        wire: RoomStateWire,
+        current_user_id: &str,
+        generation: u64,
+    ) -> Option<RoomState> {
+        let mut guard = self.state.lock();
+        if !self.is_current_session(generation) {
+            return None;
+        }
         let local = wire.into_local_view(false, current_user_id.to_string());
-        *self.state.lock() = Some(local.clone());
-        local
+        *guard = Some(local.clone());
+        Some(local)
     }
 
-    /// Applies a `Playback` push received from the host (guest side),
-    /// mirroring the TCP `guest_reader_loop`'s handling of
-    /// `WireMessage::Playback`.
-    pub(crate) fn apply_remote_playback(&self, state: SyncPlaybackState) {
-        if let Some(r) = self.state.lock().as_mut() {
+    /// Applies a `Playback` push received from the host (guest side).
+    /// Returns false (and stores nothing) for a stale session.
+    pub(crate) fn apply_remote_playback(&self, state: SyncPlaybackState, generation: u64) -> bool {
+        let mut guard = self.state.lock();
+        if !self.is_current_session(generation) {
+            return false;
+        }
+        if let Some(r) = guard.as_mut() {
             r.playback_state = Some(state);
         }
+        true
     }
 
-    /// Clears guest-side state after the connection to the host drops.
-    pub(crate) fn clear_guest(&self) {
-        *self.state.lock() = None;
-        *self.guest.lock() = None;
+    /// Clears guest-side state after the connection to the host is lost, but
+    /// only if `generation` is still the current session. Returns whether it
+    /// did, i.e. whether the caller should tell the frontend the room is gone.
+    pub(crate) fn clear_guest_if_current(&self, generation: u64) -> bool {
+        let mut state = self.state.lock();
+        if !self.is_current_session(generation) {
+            return false;
+        }
+        *state = None;
+        self.session_gen.fetch_add(1, Ordering::SeqCst);
+        if let Some(guest) = self.guest.lock().take() {
+            if let Some(task) = guest.heartbeat_task {
+                task.abort();
+            }
+        }
+        true
     }
 }
 
@@ -421,8 +573,10 @@ pub async fn create_room(
         members: vec![host_member],
         playback_state: None,
     };
+    let generation = manager.begin_session();
     *manager.state.lock() = Some(room.clone());
     manager.peers.lock().clear(); // defensive: leave_room already clears this, but never start with stale entries
+    manager.last_seen.lock().clear();
 
     let accept_manager = manager.clone();
     let accept_sink = sink.clone();
@@ -430,22 +584,27 @@ pub async fn create_room(
 
     let beacon_task = tauri::async_runtime::spawn(beacon_loop(room_code.clone(), nickname, tcp_port));
 
+    let liveness_task =
+        tauri::async_runtime::spawn(host_liveness_loop(manager.clone(), sink.clone(), generation));
+
     *manager.host.lock() = Some(HostSession {
         accept_task,
         beacon_task,
         p2p_task: None,
         p2p_shutdown: None,
+        liveness_task,
         port: tcp_port,
     });
 
-    // Announce in the public DHT alongside the LAN beacon (not instead of
-    // it) so a same-network guest still gets the near-instant UDP path,
+    // Announce on a public MQTT broker alongside the LAN beacon (not instead
+    // of it) so a same-network guest still gets the near-instant UDP path,
     // while a guest on a different network can still find this room. Best
-    // effort: if the P2P swarm can't start (e.g. no usable transport on
-    // this platform), LAN hosting still works fine without it.
-    match crate::p2p_sync::host_provide(manager.clone(), sink.clone(), room_code).await {
-        Ok((task, shutdown)) => manager.attach_p2p_host_task(task, shutdown),
-        Err(e) => log::warn!("Listen Together: internet (P2P) hosting unavailable: {e}"),
+    // effort: if no broker is reachable, LAN hosting still works without it.
+    if manager.internet_enabled {
+        match crate::p2p_sync::host_provide(manager.clone(), sink.clone(), room_code).await {
+            Ok((task, shutdown)) => manager.attach_p2p_host_task(task, shutdown),
+            Err(e) => log::warn!("Listen Together: internet (P2P) hosting unavailable: {e}"),
+        }
     }
 
     // Every window (the injected YTM page in particular, whose sync plugin
@@ -502,12 +661,11 @@ async fn peer_task(stream: TcpStream, manager: Arc<SyncRoomManager>, sink: Arc<d
             read_res = read_line_capped(&mut reader, &mut line) => {
                 match read_res {
                     Ok(0) | Err(_) => break,
-                    // Guests don't send further protocol messages today
-                    // (only the host is a playback source); anything they
-                    // send here is silently ignored rather than erroring,
-                    // so a future guest-originated message type can be
-                    // added without breaking older peers.
-                    Ok(_) => {}
+                    // Any line (today: `Heartbeat`) proves the guest is
+                    // alive; its content is otherwise ignored, so a future
+                    // guest-originated message type can be added without
+                    // breaking older hosts.
+                    Ok(_) => manager.touch_member(&member_id),
                 }
             }
             msg = rx.recv() => {
@@ -532,6 +690,30 @@ async fn peer_task(stream: TcpStream, manager: Arc<SyncRoomManager>, sink: Arc<d
         manager.broadcast_to_peers(&WireMessage::State {
             room: RoomStateWire::from(&room),
         });
+    }
+}
+
+/// Host side: every heartbeat interval, pings every guest (so they know the
+/// host is alive) and evicts members silent past the liveness timeout (so a
+/// guest that crashed or lost its network doesn't linger in the list).
+async fn host_liveness_loop(manager: Arc<SyncRoomManager>, sink: Arc<dyn SyncEventSink>, generation: u64) {
+    let mut ticker = tokio::time::interval(manager.liveness.heartbeat_interval);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        ticker.tick().await;
+        if !manager.is_current_session(generation) {
+            return;
+        }
+        let Some(host_id) = manager.state.lock().as_ref().map(|r| r.current_user_id.clone()) else {
+            return;
+        };
+        manager.broadcast_to_peers(&WireMessage::Heartbeat { user_id: host_id });
+        if let Some(room) = manager.evict_stale_members() {
+            sink.room_updated(&room);
+            manager.broadcast_to_peers(&WireMessage::State {
+                room: RoomStateWire::from(&room),
+            });
+        }
     }
 }
 
@@ -651,8 +833,10 @@ async fn connect_to_host(
         _ => return Err("Unexpected response from host.".to_string()),
     };
 
-    let local_room = initial_wire.into_local_view(false, user_id.clone());
-    *manager.state.lock() = Some(local_room.clone());
+    let generation = manager.begin_session();
+    let Some(local_room) = manager.apply_remote_room_update(initial_wire, &user_id, generation) else {
+        return Err("Left the room while joining.".to_string());
+    };
 
     // The guest's injected YTM page only applies remote playback while it
     // knows it's in a room; the initial state arrives as this handshake
@@ -661,18 +845,43 @@ async fn connect_to_host(
 
     let m = manager.clone();
     let s = sink.clone();
-    let uid = user_id;
+    let uid = user_id.clone();
     let reader_task = tauri::async_runtime::spawn(async move {
-        guest_reader_loop(reader, m, s, uid).await;
+        guest_reader_loop(reader, m, s, uid, generation).await;
     });
+    let heartbeat_task = tauri::async_runtime::spawn(guest_heartbeat_loop(
+        write_half,
+        user_id,
+        manager.liveness.heartbeat_interval,
+    ));
 
     *manager.guest.lock() = Some(GuestSession {
         reader_task,
-        _write_half: Some(write_half),
+        heartbeat_task: Some(heartbeat_task),
         shutdown: None,
     });
 
     Ok(local_room)
+}
+
+/// TCP guest side: pings the host every interval. Owns the write half, so
+/// when this task ends (aborted on leave, or a write fails) the connection's
+/// sending side closes and the host sees the guest go.
+async fn guest_heartbeat_loop(
+    mut write_half: tokio::net::tcp::OwnedWriteHalf,
+    user_id: String,
+    interval: Duration,
+) {
+    let Ok(mut line) = serde_json::to_string(&WireMessage::Heartbeat { user_id }) else {
+        return;
+    };
+    line.push('\n');
+    loop {
+        tokio::time::sleep(interval).await;
+        if write_half.write_all(line.as_bytes()).await.is_err() {
+            return;
+        }
+    }
 }
 
 async fn guest_reader_loop(
@@ -680,28 +889,39 @@ async fn guest_reader_loop(
     manager: Arc<SyncRoomManager>,
     sink: Arc<dyn SyncEventSink>,
     my_id: String,
+    generation: u64,
 ) {
+    let silence_limit = manager.liveness.timeout;
     let mut line = String::new();
     loop {
         line.clear();
-        match read_line_capped(&mut reader, &mut line).await {
-            Ok(0) | Err(_) => break,
-            Ok(_) => {
+        // The host pings every heartbeat interval, so a read that waits past
+        // the liveness timeout means the host is gone even though TCP never
+        // saw a FIN (host machine asleep, network dropped, process frozen).
+        match tokio::time::timeout(silence_limit, read_line_capped(&mut reader, &mut line)).await {
+            Err(_) => {
+                log::info!("Listen Together: host silent for {silence_limit:?}, leaving room");
+                break;
+            }
+            Ok(Ok(0)) | Ok(Err(_)) => break,
+            Ok(Ok(_)) => {
                 let Ok(msg) = serde_json::from_str::<WireMessage>(line.trim()) else {
                     continue;
                 };
                 match msg {
                     WireMessage::State { room } => {
-                        let local = room.into_local_view(false, my_id.clone());
-                        *manager.state.lock() = Some(local.clone());
-                        sink.room_updated(&local);
+                        match manager.apply_remote_room_update(room, &my_id, generation) {
+                            Some(local) => sink.room_updated(&local),
+                            None => return, // a newer session owns the state now
+                        }
                     }
                     WireMessage::Playback { state } => {
-                        if let Some(r) = manager.state.lock().as_mut() {
-                            r.playback_state = Some(state.clone());
+                        if !manager.apply_remote_playback(state.clone(), generation) {
+                            return;
                         }
                         sink.playback_updated(&state);
                     }
+                    WireMessage::Heartbeat { .. } => {} // only proves liveness; the read above already counted it
                     WireMessage::Join { .. } | WireMessage::Leave { .. } => {} // guests never receive Join / Leave
                     WireMessage::Ack => {} // Ack only exists on the internet transport
                 }
@@ -709,9 +929,9 @@ async fn guest_reader_loop(
         }
     }
 
-    *manager.state.lock() = None;
-    *manager.guest.lock() = None;
-    sink.room_left();
+    if manager.clear_guest_if_current(generation) {
+        sink.room_left();
+    }
 }
 
 async fn discover_host(room_code: &str) -> Result<SocketAddr, String> {
@@ -769,9 +989,13 @@ async fn discover_host_on_port(
 // ---------------------------------------------------------------------
 
 pub fn leave_room(manager: &Arc<SyncRoomManager>) {
+    // Retire the session first so any background loop still mid-message
+    // stops touching shared state from here on.
+    manager.begin_session();
     if let Some(host) = manager.host.lock().take() {
         host.accept_task.abort();
         host.beacon_task.abort();
+        host.liveness_task.abort();
         match (host.p2p_shutdown, host.p2p_task) {
             // The loop publishes its farewell and exits on its own.
             (Some(shutdown), Some(task)) => {
@@ -790,6 +1014,9 @@ pub fn leave_room(manager: &Arc<SyncRoomManager>) {
         manager.peers.lock().clear();
     }
     if let Some(guest) = manager.guest.lock().take() {
+        if let Some(task) = guest.heartbeat_task {
+            task.abort();
+        }
         match guest.shutdown {
             Some(shutdown) => {
                 if shutdown.send(()).is_err() {
@@ -799,6 +1026,7 @@ pub fn leave_room(manager: &Arc<SyncRoomManager>) {
             None => guest.reader_task.abort(),
         }
     }
+    manager.last_seen.lock().clear();
     *manager.state.lock() = None;
 }
 
@@ -816,6 +1044,12 @@ mod tests {
 
     fn noop_sink() -> Arc<dyn SyncEventSink> {
         Arc::new(NoopSink)
+    }
+
+    /// Default liveness, LAN only: loopback tests must not depend on
+    /// reaching a public MQTT broker.
+    fn local_manager() -> Arc<SyncRoomManager> {
+        Arc::new(SyncRoomManager::with_options(LivenessConfig::default(), false))
     }
 
     async fn wait_until<F: Fn() -> bool>(cond: F, timeout: Duration) -> bool {
@@ -907,6 +1141,56 @@ mod tests {
         let updated = manager.remove_member("guest-1").unwrap();
         assert_eq!(updated.members.len(), 1);
         assert_eq!(updated.members[0].id, "host");
+
+        // A departure noticed twice (eviction, then the TCP task ending) is
+        // only announced once.
+        assert!(manager.remove_member("guest-1").is_none());
+    }
+
+    fn room_with(members: &[(&str, bool)]) -> RoomState {
+        RoomState {
+            room_code: "YTMD-TEST03".to_string(),
+            is_host: true,
+            current_user_id: "host".to_string(),
+            members: members
+                .iter()
+                .map(|(id, is_host)| RoomMember {
+                    id: id.to_string(),
+                    nickname: id.to_string(),
+                    is_host: *is_host,
+                    joined_at_ms: 0,
+                })
+                .collect(),
+            playback_state: None,
+        }
+    }
+
+    #[test]
+    fn test_stale_members_skips_host_and_recent() {
+        let room = room_with(&[("host", true), ("fresh", false), ("silent", false), ("untracked", false)]);
+        let now = Instant::now() + Duration::from_secs(60);
+        let mut seen = HashMap::new();
+        seen.insert("host".to_string(), now - Duration::from_secs(50));
+        seen.insert("fresh".to_string(), now - Duration::from_secs(2));
+        seen.insert("silent".to_string(), now - Duration::from_secs(20));
+        assert_eq!(stale_members(&room, &seen, now, Duration::from_secs(15)), vec!["silent".to_string()]);
+    }
+
+    #[test]
+    fn test_stale_session_cannot_touch_newer_state() {
+        let manager = local_manager();
+        let old = manager.begin_session();
+        let current = manager.begin_session();
+        manager.set_local_room(room_with(&[("host", true)]));
+        let wire = RoomStateWire::from(&room_with(&[("host", true), ("x", false)]));
+
+        assert!(manager.apply_remote_room_update(wire.clone(), "x", old).is_none());
+        assert!(!manager.clear_guest_if_current(old));
+        assert_eq!(manager.get_room_state().unwrap().members.len(), 1, "stale loop must not overwrite");
+
+        assert!(manager.apply_remote_room_update(wire, "x", current).is_some());
+        assert!(manager.clear_guest_if_current(current));
+        assert!(manager.get_room_state().is_none());
     }
 
     #[tokio::test]
@@ -944,8 +1228,8 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_end_to_end_host_and_guest_over_loopback() {
-        let host_manager = Arc::new(SyncRoomManager::new());
-        let guest_manager = Arc::new(SyncRoomManager::new());
+        let host_manager = local_manager();
+        let guest_manager = local_manager();
 
         let host_room = create_room(&host_manager, noop_sink(), "Host".to_string())
             .await
@@ -1012,6 +1296,7 @@ mod tests {
     struct RecordingSink {
         room_updates: Mutex<Vec<RoomState>>,
         playback_updates: Mutex<Vec<SyncPlaybackState>>,
+        left: std::sync::atomic::AtomicUsize,
     }
     impl SyncEventSink for RecordingSink {
         fn room_updated(&self, room: &RoomState) {
@@ -1020,7 +1305,121 @@ mod tests {
         fn playback_updated(&self, state: &SyncPlaybackState) {
             self.playback_updates.lock().push(state.clone());
         }
-        fn room_left(&self) {}
+        fn room_left(&self) {
+            self.left.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    /// Millisecond-scale liveness so eviction/silence tests finish fast.
+    const FAST_LIVENESS: LivenessConfig = LivenessConfig {
+        heartbeat_interval: Duration::from_millis(50),
+        timeout: Duration::from_millis(250),
+    };
+
+    fn fast_manager() -> Arc<SyncRoomManager> {
+        Arc::new(SyncRoomManager::with_options(FAST_LIVENESS, false))
+    }
+
+    async fn write_line(stream: &mut TcpStream, msg: &WireMessage) {
+        let mut json = serde_json::to_string(msg).unwrap();
+        json.push('\n');
+        stream.write_all(json.as_bytes()).await.unwrap();
+    }
+
+    /// A guest that goes quiet (crash, sleep, cable pulled — no FIN) is
+    /// dropped from the room, announced, and disconnected.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_host_evicts_guest_that_stops_heartbeating() {
+        let host_manager = fast_manager();
+        let host_sink = Arc::new(RecordingSink::default());
+        create_room(&host_manager, host_sink.clone(), "Host".to_string()).await.unwrap();
+        let port = host_manager.host_port().unwrap();
+
+        // Raw client: joins, then never sends another byte.
+        let mut raw = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).await.unwrap();
+        write_line(&mut raw, &WireMessage::Join { user_id: "user-silent".into(), nickname: "Ghost".into() }).await;
+        let joined = wait_until(
+            || host_manager.get_room_state().map(|r| r.members.len()).unwrap_or(0) == 2,
+            Duration::from_secs(2),
+        )
+        .await;
+        assert!(joined);
+
+        let evicted = wait_until(
+            || host_manager.get_room_state().map(|r| r.members.len()).unwrap_or(0) == 1,
+            Duration::from_secs(2),
+        )
+        .await;
+        assert!(evicted, "silent guest should be evicted");
+        assert_eq!(host_sink.room_updates.lock().last().unwrap().members.len(), 1);
+
+        // Its connection is closed: reading drains host lines, then EOF.
+        let mut reader = BufReader::new(raw);
+        let closed = tokio::time::timeout(Duration::from_secs(2), async {
+            let mut line = String::new();
+            loop {
+                line.clear();
+                if reader.read_line(&mut line).await.unwrap_or(0) == 0 {
+                    return;
+                }
+            }
+        })
+        .await;
+        assert!(closed.is_ok(), "evicted guest's socket should be closed by the host");
+
+        leave_room(&host_manager);
+    }
+
+    /// Heartbeats keep a healthy guest in the room well past the timeout.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_heartbeats_keep_idle_guest_in_room() {
+        let host_manager = fast_manager();
+        let guest_manager = fast_manager();
+        let guest_sink = Arc::new(RecordingSink::default());
+        create_room(&host_manager, noop_sink(), "Host".to_string()).await.unwrap();
+        let addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), host_manager.host_port().unwrap());
+        connect_to_host(&guest_manager, guest_sink.clone(), addr, "Guest".to_string()).await.unwrap();
+
+        // No playback traffic at all for 4× the timeout.
+        tokio::time::sleep(FAST_LIVENESS.timeout * 4).await;
+
+        assert_eq!(host_manager.get_room_state().unwrap().members.len(), 2);
+        assert!(guest_manager.get_room_state().is_some());
+        assert_eq!(guest_sink.left.load(Ordering::SeqCst), 0);
+
+        leave_room(&guest_manager);
+        leave_room(&host_manager);
+    }
+
+    /// A host that goes quiet without closing the socket (frozen, asleep,
+    /// network gone) makes the guest leave instead of hanging forever.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_guest_leaves_when_host_goes_silent() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let fake_host = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let (read_half, mut write_half) = stream.into_split();
+            let mut reader = BufReader::new(read_half);
+            let mut line = String::new();
+            reader.read_line(&mut line).await.unwrap();
+            let room = room_with(&[("host", true), ("guest", false)]);
+            let mut reply = serde_json::to_string(&WireMessage::State { room: RoomStateWire::from(&room) }).unwrap();
+            reply.push('\n');
+            write_half.write_all(reply.as_bytes()).await.unwrap();
+            // Then silence, with the connection held open.
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            drop((reader, write_half));
+        });
+
+        let guest_manager = fast_manager();
+        let guest_sink = Arc::new(RecordingSink::default());
+        connect_to_host(&guest_manager, guest_sink.clone(), addr, "Guest".to_string()).await.unwrap();
+
+        let left = wait_until(|| guest_sink.left.load(Ordering::SeqCst) == 1, Duration::from_secs(2)).await;
+        assert!(left, "guest should give up on a silent host");
+        assert!(guest_manager.get_room_state().is_none());
+        fake_host.abort();
     }
 
     /// Regression: the injected YTM page gates sync on `sync-room-updated`.
@@ -1028,8 +1427,8 @@ mod tests {
     /// it, so a 1:1 room never synced anything.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_create_and_join_notify_frontend_of_room_state() {
-        let host_manager = Arc::new(SyncRoomManager::new());
-        let guest_manager = Arc::new(SyncRoomManager::new());
+        let host_manager = local_manager();
+        let guest_manager = local_manager();
         let host_sink = Arc::new(RecordingSink::default());
         let guest_sink = Arc::new(RecordingSink::default());
 

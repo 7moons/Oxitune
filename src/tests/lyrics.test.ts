@@ -1,5 +1,13 @@
 import { describe, expect, test } from 'bun:test';
-import { parseLrc, isCurrentSongKey, isLyricsTabUnlocked } from '../plugins/lyrics';
+import {
+  parseLrc,
+  isCurrentSongKey,
+  isLyricsTabUnlocked,
+  loadOffsets,
+  storeOffset,
+  formatOffset,
+  MAX_STORED_OFFSETS
+} from '../plugins/lyrics';
 
 describe('parseLrc', () => {
   test('parses standard [mm:ss.xx] timestamps in order', () => {
@@ -59,5 +67,69 @@ describe('isLyricsTabUnlocked', () => {
     expect(isLyricsTabUnlocked(tab({ disabled: '' }, ['ytmd-lyrics-tab-unlocked']))).toBe(false);
     expect(isLyricsTabUnlocked(tab({ 'aria-disabled': 'true' }, ['ytmd-lyrics-tab-unlocked']))).toBe(false);
     expect(isLyricsTabUnlocked(tab({}, ['ytmd-lyrics-tab-unlocked'], true))).toBe(false);
+  });
+});
+
+describe('parseLrc global offset', () => {
+  test('[offset:+500] shifts every line 0.5s earlier', () => {
+    const lines = parseLrc('[offset:500]\n[00:10.00]First\n[00:20.00]Second');
+    expect(lines.map((l) => l.timeSecs)).toEqual([9.5, 19.5]);
+  });
+});
+
+describe('lyrics timing offsets persist across restarts', () => {
+  const memoryStorage = () => {
+    const data = new Map<string, string>();
+    return {
+      getItem: (k: string) => data.get(k) ?? null,
+      setItem: (k: string, v: string) => void data.set(k, v)
+    };
+  };
+
+  test('round-trips through storage', () => {
+    const storage = memoryStorage();
+    const map = loadOffsets(storage);
+    storeOffset(map, 'Song - Artist', 1.5, storage);
+    expect(loadOffsets(storage).get('Song - Artist')).toBe(1.5);
+  });
+
+  test('zero offset is removed, not stored', () => {
+    const storage = memoryStorage();
+    const map = loadOffsets(storage);
+    storeOffset(map, 'a', 1, storage);
+    storeOffset(map, 'a', 0, storage);
+    expect(loadOffsets(storage).has('a')).toBe(false);
+  });
+
+  test('keeps only the most recent entries', () => {
+    const storage = memoryStorage();
+    const map = loadOffsets(storage);
+    for (let i = 0; i < MAX_STORED_OFFSETS + 5; i++) storeOffset(map, `s${i}`, 0.5, storage);
+    const loaded = loadOffsets(storage);
+    expect(loaded.size).toBe(MAX_STORED_OFFSETS);
+    expect(loaded.has('s0')).toBe(false);
+    expect(loaded.has(`s${MAX_STORED_OFFSETS + 4}`)).toBe(true);
+  });
+
+  test('corrupt or blocked storage never throws', () => {
+    expect(loadOffsets({ getItem: () => '{not json', setItem: () => {} }).size).toBe(0);
+    expect(loadOffsets({ getItem: () => '[["ok", 1], ["bad", "x"], 3]', setItem: () => {} })).toEqual(new Map([['ok', 1]]));
+    const throwing = {
+      getItem: () => {
+        throw new Error('blocked');
+      },
+      setItem: () => {
+        throw new Error('blocked');
+      }
+    };
+    expect(loadOffsets(throwing).size).toBe(0);
+    expect(() => storeOffset(new Map(), 'a', 1, throwing)).not.toThrow();
+    expect(loadOffsets(null).size).toBe(0);
+  });
+
+  test('offset label', () => {
+    expect(formatOffset(0)).toBe('0.0 s');
+    expect(formatOffset(1.5)).toBe('+1.5 s');
+    expect(formatOffset(-0.5)).toBe('−0.5 s');
   });
 });

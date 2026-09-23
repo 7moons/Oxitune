@@ -1,4 +1,5 @@
 import { initAmbientBackdrop } from './ambient';
+import { formatDuration, filterTracks as matchTracks } from './format';
 
 interface LocalTrack {
   id: string;
@@ -17,13 +18,6 @@ let currentTrackIndex = -1;
 let lastVolume = 1;
 
 const audioElement = document.getElementById('local-audio-element') as HTMLAudioElement;
-
-function formatDuration(secs: number): string {
-  if (isNaN(secs) || secs <= 0) return '0:00';
-  const m = Math.floor(secs / 60);
-  const s = Math.floor(secs % 60);
-  return `${m}:${s < 10 ? '0' : ''}${s}`;
-}
 
 function updatePlayPauseIcons(isPlaying: boolean) {
   const playIcon = document.getElementById('play-icon');
@@ -253,13 +247,7 @@ document.addEventListener('DOMContentLoaded', () => {
       renderTable(allTracks);
       return;
     }
-    const filtered = allTracks.filter(
-      (t) =>
-        t.title.toLowerCase().includes(query) ||
-        t.artist.toLowerCase().includes(query) ||
-        (t.album && t.album.toLowerCase().includes(query))
-    );
-    renderTable(filtered);
+    renderTable(matchTracks(allTracks, query));
   };
 
   if (searchInput) {

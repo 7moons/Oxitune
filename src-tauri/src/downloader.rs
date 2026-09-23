@@ -25,6 +25,36 @@ pub struct DownloadProgress {
     pub percent: f64,
     pub status: String,
     pub output_path: Option<String>,
+    /// Set only on the final event of a failed download (with `status`
+    /// "Download failed"); `null` on every normal progress/success event.
+    /// The frontend drives its download UI purely from these events, since
+    /// the bridge call returns long before a download finishes.
+    pub error: Option<String>,
+}
+
+const FAILED_STATUS: &str = "Download failed";
+/// Longest stderr excerpt surfaced in an error message.
+const MAX_ERROR_DETAIL_CHARS: usize = 200;
+
+/// Message for yt-dlp failing to even start.
+fn spawn_error_message(err: &std::io::Error) -> String {
+    if err.kind() == std::io::ErrorKind::NotFound {
+        "yt-dlp is not installed".to_string()
+    } else {
+        format!("Couldn't start yt-dlp: {err}")
+    }
+}
+
+/// Message for yt-dlp exiting non-zero, from the last non-empty line it
+/// wrote to stderr (yt-dlp prints its `ERROR: ...` summary last).
+fn exit_error_message(stderr_tail: Option<&str>) -> String {
+    match stderr_tail.map(str::trim).filter(|l| !l.is_empty()) {
+        Some(line) => {
+            let detail: String = line.chars().take(MAX_ERROR_DETAIL_CHARS).collect();
+            format!("Download failed: {detail}")
+        }
+        None => "Download failed: yt-dlp exited with an error".to_string(),
+    }
 }
 
 pub async fn execute_download(
@@ -50,16 +80,26 @@ pub async fn execute_download(
 
     let yt_url = format!("https://music.youtube.com/watch?v={}", request.video_id);
 
-    let _ = app_handle.emit(
-        "download-progress",
-        DownloadProgress {
-            video_id: request.video_id.clone(),
-            title: request.title.clone(),
-            percent: 10.0,
-            status: "Starting download stream...".to_string(),
-            output_path: None,
-        },
-    );
+    let emit_progress = |percent: f64, status: &str, output_path: Option<String>, error: Option<String>| {
+        let _ = app_handle.emit(
+            "download-progress",
+            DownloadProgress {
+                video_id: request.video_id.clone(),
+                title: request.title.clone(),
+                percent,
+                status: status.to_string(),
+                output_path,
+                error,
+            },
+        );
+    };
+    // Failure keeps the bar where it was instead of jumping to 100%.
+    let fail = |percent: f64, message: String| -> Result<String, String> {
+        emit_progress(percent, FAILED_STATUS, None, Some(message.clone()));
+        Err(message)
+    };
+
+    emit_progress(10.0, "Starting download stream...", None, None);
 
     // Run yt-dlp to download and convert to target format
     let mut cmd = Command::new("yt-dlp");
@@ -76,25 +116,18 @@ pub async fn execute_download(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
-    let _ = app_handle.emit(
-        "download-progress",
-        DownloadProgress {
-            video_id: request.video_id.clone(),
-            title: request.title.clone(),
-            percent: 50.0,
-            status: "Extracting high quality audio...".to_string(),
-            output_path: None,
-        },
-    );
+    emit_progress(50.0, "Extracting high quality audio...", None, None);
 
     // Spawn (not `.status()`) and drain stdout/stderr concurrently: yt-dlp writes
     // frequent progress output, and once the OS pipe buffer (~64KB) fills without
     // a reader, the child blocks on write() and the download hangs forever.
-    let child = cmd.spawn().map_err(|e| e.to_string())?;
-    let status = drain_and_wait(child).await;
+    let child = match cmd.spawn() {
+        Ok(child) => child,
+        Err(e) => return fail(50.0, spawn_error_message(&e)),
+    };
 
-    match status {
-        Ok(s) if s.success() => {
+    match drain_and_wait(child).await {
+        Ok((s, _)) if s.success() => {
             // Embed ID3 tags and lyrics if MP3
             if format_ext == "mp3" && output_file_path.exists() {
                 let _ = embed_id3_metadata(
@@ -106,34 +139,11 @@ pub async fn execute_download(
                 ).await;
             }
 
-            let _ = app_handle.emit(
-                "download-progress",
-                DownloadProgress {
-                    video_id: request.video_id.clone(),
-                    title: request.title.clone(),
-                    percent: 100.0,
-                    status: "Download completed!".to_string(),
-                    output_path: Some(output_str.clone()),
-                },
-            );
-
+            emit_progress(100.0, "Download completed!", Some(output_str.clone()), None);
             Ok(output_str)
         }
-        Ok(_) | Err(_) => {
-            // If yt-dlp is not installed on system, generate high-quality placeholder audio stream file
-            let _ = fs::write(&output_file_path, b"YTMD Audio Export");
-            let _ = app_handle.emit(
-                "download-progress",
-                DownloadProgress {
-                    video_id: request.video_id.clone(),
-                    title: request.title.clone(),
-                    percent: 100.0,
-                    status: "Completed (saved to Music folder)".to_string(),
-                    output_path: Some(output_str.clone()),
-                },
-            );
-            Ok(output_str)
-        }
+        Ok((_, stderr_tail)) => fail(50.0, exit_error_message(stderr_tail.as_deref())),
+        Err(e) => fail(50.0, format!("Download failed: {e}")),
     }
 }
 
@@ -141,8 +151,11 @@ pub async fn execute_download(
 /// for it to exit. Split out from `execute_download` so the deadlock this
 /// prevents can be reproduced directly in a test: `.wait()` alone would
 /// block forever once the child writes more than the OS pipe buffer
-/// (~64KB) to a stream nothing is reading.
-async fn drain_and_wait(mut child: tokio::process::Child) -> std::io::Result<std::process::ExitStatus> {
+/// (~64KB) to a stream nothing is reading. Also returns the last non-empty
+/// stderr line, for the error message when the child fails.
+async fn drain_and_wait(
+    mut child: tokio::process::Child,
+) -> std::io::Result<(std::process::ExitStatus, Option<String>)> {
     let child_stdout = child.stdout.take();
     let child_stderr = child.stderr.take();
 
@@ -153,16 +166,22 @@ async fn drain_and_wait(mut child: tokio::process::Child) -> std::io::Result<std
         }
     });
     let stderr_drain = tokio::spawn(async move {
+        let mut last_line: Option<String> = None;
         if let Some(err) = child_stderr {
             let mut lines = tokio::io::BufReader::new(err).lines();
-            while let Ok(Some(_line)) = lines.next_line().await {}
+            while let Ok(Some(line)) = lines.next_line().await {
+                if !line.trim().is_empty() {
+                    last_line = Some(line);
+                }
+            }
         }
+        last_line
     });
 
-    let status = child.wait().await;
+    let status = child.wait().await?;
     let _ = stdout_drain.await;
-    let _ = stderr_drain.await;
-    status
+    let stderr_tail = stderr_drain.await.unwrap_or(None);
+    Ok((status, stderr_tail))
 }
 
 async fn embed_id3_metadata(
@@ -276,8 +295,56 @@ mod tests {
             result.is_ok(),
             "drain_and_wait must not hang when the child writes more than the OS pipe buffer"
         );
-        let status = result.unwrap().expect("child process should exit cleanly");
+        let (status, _) = result.unwrap().expect("child process should exit cleanly");
         assert!(status.success());
+    }
+
+    #[tokio::test]
+    async fn test_drain_and_wait_returns_last_nonempty_stderr_line() {
+        let mut cmd = Command::new("sh");
+        cmd.arg("-c")
+            .arg("echo 'WARNING: noise' >&2; echo 'ERROR: Video unavailable' >&2; echo '' >&2; exit 1")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let (status, tail) = drain_and_wait(cmd.spawn().expect("spawn sh")).await.expect("wait");
+        assert!(!status.success());
+        assert_eq!(tail.as_deref(), Some("ERROR: Video unavailable"));
+    }
+
+    /// Regression: a missing yt-dlp or a failed download used to write a
+    /// fake "YTMD Audio Export" file and report success.
+    #[test]
+    fn test_download_error_messages() {
+        let not_found = std::io::Error::new(std::io::ErrorKind::NotFound, "no such file");
+        assert_eq!(spawn_error_message(&not_found), "yt-dlp is not installed");
+
+        let denied = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied");
+        assert!(spawn_error_message(&denied).starts_with("Couldn't start yt-dlp:"));
+
+        assert_eq!(
+            exit_error_message(Some("  ERROR: [youtube] x: Video unavailable  ")),
+            "Download failed: ERROR: [youtube] x: Video unavailable"
+        );
+        assert_eq!(exit_error_message(None), "Download failed: yt-dlp exited with an error");
+        assert_eq!(exit_error_message(Some("   ")), "Download failed: yt-dlp exited with an error");
+
+        let long = "é".repeat(500);
+        let msg = exit_error_message(Some(&long));
+        assert_eq!(msg.chars().count(), "Download failed: ".len() + MAX_ERROR_DETAIL_CHARS);
+    }
+
+    #[test]
+    fn test_progress_serializes_error_field() {
+        let p = DownloadProgress {
+            video_id: "v".into(),
+            title: "t".into(),
+            percent: 10.0,
+            status: "s".into(),
+            output_path: None,
+            error: None,
+        };
+        let json = serde_json::to_value(&p).unwrap();
+        assert!(json.get("error").expect("error key always present").is_null());
     }
 
     #[tokio::test]

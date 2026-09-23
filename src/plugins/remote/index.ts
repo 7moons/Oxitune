@@ -1,5 +1,7 @@
 import { YTMDPlugin, PluginContext } from '../types';
 import { createEl } from '../../utils/dom';
+import { openDialog } from '../../preload/ui/kit';
+import { t } from '../../preload/ui/i18n';
 
 interface RemoteInfo {
   ip: string;
@@ -25,138 +27,71 @@ export const RemotePlugin: YTMDPlugin = {
   }
 };
 
-/**
- * The modal is a full-viewport position:fixed overlay at max z-index, which is
- * exactly the shape of element most prone to Chromium/WebView2 compositor bugs
- * around backdrop-filter — a stuck layer can silently eat clicks across the
- * whole app while the window itself stays perfectly responsive (draggable,
- * resizable). To make that class of bug impossible rather than just unlikely,
- * this never toggles display on a cached element: it removes the overlay from
- * the DOM entirely on close and rebuilds it fresh on open, and skips
- * backdrop-filter altogether (a plain translucent background reads fine here).
- */
+const QR_CSS = `
+  .ytmd-qr-frame {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 212px;
+    height: 212px;
+    margin: 20px auto 12px;
+    padding: 16px;
+    box-sizing: border-box;
+    border-radius: 12px;
+    background: #fff;
+    color: #606060;
+    font-size: 12px;
+    text-align: center;
+  }
+  .ytmd-qr-frame img { display: block; width: 180px; height: 180px; }
+  .ytmd-qr-url {
+    text-align: center;
+    font-size: 14px;
+    color: var(--ytmd-text);
+    word-break: break-all;
+    user-select: all;
+  }
+`;
+
+function ensureQrStyles() {
+  if (document.getElementById('ytmd-qr-styles')) return;
+  const style = document.createElement('style');
+  style.id = 'ytmd-qr-styles';
+  style.textContent = QR_CSS;
+  document.head.appendChild(style);
+}
+
+/** Phone-remote pairing dialog: QR code + URL for the remote server. */
 export async function showQrModal(ctx: PluginContext) {
-  document.getElementById('ytmd-remote-modal')?.remove();
+  ensureQrStyles();
+  const intro = createEl('p', { text: t().remoteBody, style: 'margin: 0;' });
+  const qrFrame = createEl('div', { className: 'ytmd-qr-frame', text: t().remoteLoading });
+  const url = createEl('div', { className: 'ytmd-qr-url' });
 
-  const modal = createEl('div', {
+  const dialog = openDialog({
     id: 'ytmd-remote-modal',
-    style: `
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100vw;
-      height: 100vh;
-      background: rgba(0,0,0,0.85);
-      z-index: 2147483647;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    `
+    title: t().remoteTitle,
+    body: [intro, qrFrame, url],
+    actions: [{ label: t().close }]
   });
-
-  const closeModal = () => {
-    document.removeEventListener('keydown', onKeydown);
-    modal.remove();
-  };
-
-  const onKeydown = (e: KeyboardEvent) => {
-    if (e.key === 'Escape') closeModal();
-  };
-  document.addEventListener('keydown', onKeydown);
-
-  const card = createEl('div', {
-    style: `
-      background: #18181b;
-      border: 1px solid #27272a;
-      border-radius: 14px;
-      padding: 24px;
-      max-width: 360px;
-      width: 90%;
-      text-align: center;
-      color: #fafafa;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      box-shadow: 0 24px 48px rgba(0,0,0,0.85);
-    `
-  });
-
-  const title = createEl('h3', {
-    text: 'Mobile Web Remote',
-    style: 'margin: 0 0 6px 0; font-size: 18px; font-weight: 700;'
-  });
-
-  const desc = createEl('p', {
-    text: 'Scan with your phone camera on the same Wi-Fi network:',
-    style: 'font-size: 13px; color: #a1a1aa; margin: 0 0 16px 0;'
-  });
-
-  const qrContainer = createEl('div', {
-    id: 'ytmd-qr-container',
-    style: `
-      background: #ffffff;
-      padding: 14px;
-      border-radius: 10px;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      margin-bottom: 14px;
-      min-width: 180px;
-      min-height: 180px;
-    `
-  });
-
-  const loadingText = createEl('span', {
-    text: 'Generating QR code...',
-    style: 'color: #52525b; font-size: 12px; font-weight: 500;'
-  });
-  qrContainer.appendChild(loadingText);
-
-  const urlContainer = createEl('div', {
-    id: 'ytmd-remote-url',
-    style: 'font-family: monospace; font-size: 13px; color: #38bdf8; margin-bottom: 20px; word-break: break-all; font-weight: 600;'
-  });
-
-  const closeBtn = createEl('button', {
-    id: 'ytmd-remote-close-btn',
-    text: 'Close',
-    style: 'background: #27272a; color: #fff; border: 1px solid #3f3f46; border-radius: 8px; padding: 8px 24px; font-weight: 600; cursor: pointer; font-size: 13px;'
-  });
-  closeBtn.addEventListener('click', closeModal);
-
-  modal.addEventListener('click', (e) => {
-    if (e.target === modal) closeModal();
-  });
-
-  card.appendChild(title);
-  card.appendChild(desc);
-  card.appendChild(qrContainer);
-  card.appendChild(urlContainer);
-  card.appendChild(closeBtn);
-  modal.appendChild(card);
-  document.body.appendChild(modal);
 
   try {
     const info = (await ctx.invoke('get_remote_info')) as RemoteInfo | null;
-    // The modal may have been closed while this was in flight — don't resurrect it.
-    if (!modal.isConnected) return;
+    // The dialog may have been closed while this was in flight.
+    if (!qrFrame.isConnected) return;
 
-    if (info && info.qr_svg) {
+    if (info?.qr_svg) {
       const img = createEl('img');
       img.src = `data:image/svg+xml;utf8,${encodeURIComponent(info.qr_svg)}`;
-      img.width = 180;
-      img.height = 180;
-      img.style.display = 'block';
-      img.alt = 'Mobile Remote QR Code';
-      qrContainer.replaceChildren(img);
+      img.alt = t().remoteTitle;
+      qrFrame.replaceChildren(img);
     } else {
-      qrContainer.replaceChildren(
-        createEl('span', { text: 'Remote server starting...', style: 'color: #71717a; font-size: 12px;' })
-      );
+      qrFrame.textContent = t().remoteUnavailable;
     }
-
-    if (info && info.url) {
-      urlContainer.textContent = info.url;
-    }
+    if (info?.url) url.textContent = info.url;
   } catch (e) {
     console.error('[YTMD Remote] Error fetching remote info:', e);
+    if (qrFrame.isConnected) qrFrame.textContent = t().remoteUnavailable;
   }
+  return dialog;
 }

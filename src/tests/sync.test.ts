@@ -67,10 +67,11 @@ describe('computeSyncAction', () => {
 });
 
 // The injected page can't call #[tauri::command]s directly; every command
-// it invokes needs a match arm in lib.rs's `ytmd-invoke` bridge, or the call
-// silently resolves to null after a 4s timeout. `broadcast_sync_state` and
-// `set_inhibit_sleep` were missing, which broke Listen Together and the
-// sleep inhibitor outright.
+// it invokes must be declared in the `bridge_commands!` table in
+// src-tauri/src/bridge.rs (which generates both BRIDGE_COMMANDS and the
+// dispatch match from that one list), or the backend answers "Unknown
+// bridge command". `broadcast_sync_state` and `set_inhibit_sleep` were once
+// missing, which broke Listen Together and the sleep inhibitor outright.
 describe('injected-page IPC bridge', () => {
   const root = join(import.meta.dir, '..', '..');
 
@@ -80,16 +81,25 @@ describe('injected-page IPC bridge', () => {
       return statSync(p).isDirectory() ? walk(p) : p.endsWith('.ts') ? [p] : [];
     });
 
-  test('every command invoked from src/preload + src/plugins has a bridge arm', () => {
+  /** Command names declared in the `bridge_commands! { ... }` invocation. */
+  const bridgeCommands = (): Set<string> => {
+    const src = readFileSync(join(root, 'src-tauri/src/bridge.rs'), 'utf8');
+    const start = src.indexOf('bridge_commands! {');
+    expect(start).toBeGreaterThan(-1);
+    const table = src.slice(start, src.indexOf('\n}\n', start));
+    return new Set([...table.matchAll(/^\s+"([a-z_]+)" => \|/gm)].map((m) => m[1]));
+  };
+
+  test('every command invoked from src/preload + src/plugins is in the bridge table', () => {
     const invoked = new Set<string>();
     for (const file of [...walk(join(root, 'src/preload')), ...walk(join(root, 'src/plugins'))]) {
-      for (const m of readFileSync(file, 'utf8').matchAll(/(?:invoke|invokeBackend)\(\s*'([a-z_]+)'/g)) {
+      for (const m of readFileSync(file, 'utf8').matchAll(/(?:invoke|invokeBackend|runAction)\(\s*'([a-z_]+)'/g)) {
         invoked.add(m[1]);
       }
     }
-    const libRs = readFileSync(join(root, 'src-tauri/src/lib.rs'), 'utf8');
-    const handled = new Set([...libRs.matchAll(/^\s+"([a-z_]+)" =>/gm)].map((m) => m[1]));
+    const handled = bridgeCommands();
 
+    expect(handled.size).toBeGreaterThan(10);
     expect(invoked.size).toBeGreaterThan(5);
     expect([...invoked].filter((cmd) => !handled.has(cmd))).toEqual([]);
   });

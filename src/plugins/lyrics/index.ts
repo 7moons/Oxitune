@@ -1,5 +1,7 @@
 import { YTMDPlugin, PluginContext, TrackInfo } from '../types';
 import { createEl } from '../../utils/dom';
+import { ensureKitStyles } from '../../preload/ui/kit';
+import { t } from '../../preload/ui/i18n';
 
 export interface LrcLine {
   timeSecs: number;
@@ -47,7 +49,7 @@ export const LyricsPlugin: YTMDPlugin = {
       .ytmd-lyrics-tab-unlocked[disabled],
       .ytmd-lyrics-tab-unlocked[aria-disabled="true"] {
         opacity: 1 !important;
-        color: #d4d4d8 !important;
+        color: var(--ytmd-text, #fff) !important;
       }
 
       /* Hide default un-synced text, spinners and unavailable messages inside lyrics tab ONLY */
@@ -63,12 +65,11 @@ export const LyricsPlugin: YTMDPlugin = {
       #ytmd-native-lyrics-wrapper {
         display: none !important;
         flex-direction: column;
-        gap: 14px;
-        padding: 40px 24px 160px 24px;
+        gap: 8px;
+        padding: 24px 0 160px;
         max-width: 760px;
         margin: 0 auto;
         box-sizing: border-box;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
         width: 100%;
       }
 
@@ -85,86 +86,47 @@ export const LyricsPlugin: YTMDPlugin = {
       ytmusic-player-page ytmusic-tab-renderer:not(.iron-selected) #ytmd-native-lyrics-wrapper {
         display: none !important;
       }
+      /* Same treatment as YTM's own timed lyrics: large display type,
+         upcoming/past lines dimmed, the current line full white. Size and
+         weight never change between states, so the text doesn't reflow
+         as the active line moves. */
       .ytmd-native-lyric-line {
-        font-size: 22px;
-        font-weight: 700;
-        line-height: 1.45;
-        color: rgba(255, 255, 255, 0.32);
+        font: 700 24px/32px var(--ytmd-font-display, "YouTube Sans", Roboto, Arial, sans-serif);
+        color: rgba(255, 255, 255, 0.4);
         cursor: pointer;
-        padding: 6px 12px;
-        border-radius: 8px;
-        transition: color 0.2s cubic-bezier(0.16, 1, 0.3, 1), transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), font-size 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        padding: 4px 0;
         user-select: none;
         word-break: break-word;
-        letter-spacing: -0.2px;
+        transition: color 0.2s ease;
       }
-      .ytmd-native-lyric-line:hover {
-        color: rgba(255, 255, 255, 0.8);
-        background: rgba(255, 255, 255, 0.04);
-      }
-      .ytmd-native-lyric-line.active {
-        color: #ffffff !important;
-        font-size: 25px !important;
-        font-weight: 800 !important;
-        transform: scale(1.02);
-        transform-origin: left center;
-        opacity: 1 !important;
+      .ytmd-native-lyric-line:hover { color: rgba(255, 255, 255, 0.7); }
+      .ytmd-native-lyric-line.active { color: #fff; }
+      .ytmd-native-lyric-line.ytmd-plain { cursor: default; color: #fff; }
+      .ytmd-native-lyrics-status {
+        padding: 48px 0;
+        text-align: center;
+        font: 400 16px/24px var(--ytmd-font, Roboto, Arial, sans-serif);
+        color: var(--ytmd-text-secondary, rgba(255, 255, 255, 0.7));
       }
       .ytmd-native-lyrics-footer {
-        margin-top: 48px;
-        padding: 16px 12px;
-        border-top: 1px solid rgba(255, 255, 255, 0.08);
-        font-size: 11px;
-        color: #71717a;
-        text-transform: uppercase;
-        letter-spacing: 0.8px;
-        font-weight: 600;
-      }
-      .ytmd-native-lyrics-sync-bar {
         display: flex;
+        flex-wrap: wrap;
         align-items: center;
-        justify-content: center;
         gap: 8px;
-        margin-top: 24px;
-        padding: 10px 16px;
-        background: rgba(255, 255, 255, 0.04);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        border-radius: 20px;
-        width: fit-content;
-        margin-left: auto;
-        margin-right: auto;
+        margin-top: 32px;
+        font: 400 12px/16px var(--ytmd-font, Roboto, Arial, sans-serif);
+        color: var(--ytmd-text-secondary, rgba(255, 255, 255, 0.7));
       }
-      .ytmd-sync-label {
-        font-size: 11px;
-        color: #a1a1aa;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-      }
-      .ytmd-sync-btn {
-        background: #27272a;
-        color: #f4f4f5;
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        padding: 3px 8px;
-        border-radius: 12px;
-        font-size: 11px;
-        font-weight: 600;
-        cursor: pointer;
-        transition: background 0.15s ease, transform 0.1s ease;
-      }
-      .ytmd-sync-btn:hover {
-        background: #3f3f46;
-        transform: scale(1.05);
-      }
-      .ytmd-sync-val {
-        font-size: 12px;
-        font-weight: 700;
-        color: #38bdf8;
-        min-width: 42px;
+      .ytmd-native-lyrics-footer .ytmd-lyrics-source { flex: 1; min-width: 120px; }
+      .ytmd-lyrics-offset-value {
+        min-width: 56px;
         text-align: center;
+        font-variant-numeric: tabular-nums;
+        color: var(--ytmd-text, #fff);
       }
     `;
     document.head.appendChild(style);
+    ensureKitStyles();
 
     const checkTab = () => {
       unlockLyricsTabHeader();
@@ -212,7 +174,7 @@ export const LyricsPlugin: YTMDPlugin = {
     const wrapper = document.getElementById('ytmd-native-lyrics-wrapper');
     if (wrapper) {
       wrapper.replaceChildren(
-        createEl('div', { className: 'ytmd-native-lyrics-status', text: 'Loading synchronized lyrics...' })
+        createEl('div', { className: 'ytmd-native-lyrics-status', text: t().lyricsLoading })
       );
     }
 
@@ -244,7 +206,7 @@ export const LyricsPlugin: YTMDPlugin = {
       const staleWrapper = document.getElementById('ytmd-native-lyrics-wrapper');
       if (staleWrapper) {
         staleWrapper.replaceChildren(
-          createEl('div', { className: 'ytmd-native-lyrics-status', text: 'No lyrics available for this track.' })
+          createEl('div', { className: 'ytmd-native-lyrics-status', text: t().lyricsNone })
         );
       }
     } finally {
@@ -303,14 +265,71 @@ export const LyricsPlugin: YTMDPlugin = {
   }
 };
 
-const syncOffsetMap = new Map<string, number>();
+/** Per-song lyrics timing corrections, kept across restarts. */
+const OFFSETS_STORAGE_KEY = 'ytmd-lyrics-offsets';
+/** Oldest entries are dropped past this, so the store can't grow forever. */
+export const MAX_STORED_OFFSETS = 500;
+
+type StorageLike = Pick<Storage, 'getItem' | 'setItem'>;
+
+function safeStorage(): StorageLike | null {
+  try {
+    return typeof localStorage !== 'undefined' ? localStorage : null;
+  } catch {
+    return null; // access can throw when site data is blocked
+  }
+}
+
+export function loadOffsets(storage: StorageLike | null): Map<string, number> {
+  try {
+    const raw = storage?.getItem(OFFSETS_STORAGE_KEY);
+    if (!raw) return new Map();
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return new Map();
+    return new Map(
+      parsed.filter(
+        (e): e is [string, number] => Array.isArray(e) && typeof e[0] === 'string' && typeof e[1] === 'number'
+      )
+    );
+  } catch {
+    return new Map();
+  }
+}
+
+/** Updates `map` (insertion order = recency) and persists it. A zero offset
+ * is the default, so it's removed rather than stored. */
+export function storeOffset(map: Map<string, number>, key: string, offsetSecs: number, storage: StorageLike | null): void {
+  map.delete(key);
+  if (offsetSecs !== 0) map.set(key, offsetSecs);
+  while (map.size > MAX_STORED_OFFSETS) {
+    const oldest = map.keys().next().value;
+    if (oldest === undefined) break;
+    map.delete(oldest);
+  }
+  try {
+    storage?.setItem(OFFSETS_STORAGE_KEY, JSON.stringify([...map]));
+  } catch {
+    // quota/blocked storage: the offset still applies for this session
+  }
+}
+
+let syncOffsetMap: Map<string, number> | null = null;
+function offsets(): Map<string, number> {
+  if (!syncOffsetMap) syncOffsetMap = loadOffsets(safeStorage());
+  return syncOffsetMap;
+}
 
 function getTrackSyncOffset(songKey: string): number {
-  return syncOffsetMap.get(songKey) || 0;
+  return offsets().get(songKey) || 0;
 }
 
 function setTrackSyncOffset(songKey: string, offsetSecs: number): void {
-  syncOffsetMap.set(songKey, offsetSecs);
+  storeOffset(offsets(), songKey, offsetSecs, safeStorage());
+}
+
+export function formatOffset(offsetSecs: number): string {
+  const sign = offsetSecs > 0 ? '+' : offsetSecs < 0 ? '−' : '';
+  return `${sign}${Math.abs(offsetSecs).toFixed(1)} s`;
 }
 
 function isElementVisible(el: HTMLElement): boolean {
@@ -450,38 +469,31 @@ function renderCurrentLyrics(ctx: PluginContext): void {
   if (pluginLines && pluginLines.length > 0) {
     const currentOffset = getTrackSyncOffset(currentSongKey);
 
-    const syncBar = createEl('div', { className: 'ytmd-native-lyrics-sync-bar' });
-    const label = createEl('span', { className: 'ytmd-sync-label', text: 'Sync:' });
-    const minusBtn = createEl('button', { className: 'ytmd-sync-btn', text: '-0.5s', title: 'Shift lyrics 0.5s earlier' });
-    const valDisplay = createEl('span', {
-      className: 'ytmd-sync-val',
-      text: `${currentOffset >= 0 ? '+' : ''}${currentOffset.toFixed(1)}s`
-    });
-    const plusBtn = createEl('button', { className: 'ytmd-sync-btn', text: '+0.5s', title: 'Shift lyrics 0.5s later' });
-    const resetBtn = createEl('button', { className: 'ytmd-sync-btn', text: 'Reset', title: 'Reset offset to 0.0s' });
+    const valDisplay = createEl('span', { className: 'ytmd-lyrics-offset-value', text: formatOffset(currentOffset) });
+    const shift = (delta: number | null) => {
+      const next = delta === null ? 0 : Math.round((getTrackSyncOffset(currentSongKey) + delta) * 10) / 10;
+      setTrackSyncOffset(currentSongKey, next);
+      valDisplay.textContent = formatOffset(next);
+    };
+    const chip = (text: string, tooltip: string, onClick: () => void) => {
+      const btn = createEl('button', { className: 'ytmd-chip', text });
+      btn.type = 'button';
+      btn.dataset.ytmdTooltip = tooltip;
+      btn.setAttribute('aria-label', tooltip);
+      btn.addEventListener('click', onClick);
+      return btn;
+    };
 
-    minusBtn.addEventListener('click', () => {
-      const newOff = Math.round((getTrackSyncOffset(currentSongKey) - 0.5) * 10) / 10;
-      setTrackSyncOffset(currentSongKey, newOff);
-      valDisplay.textContent = `${newOff >= 0 ? '+' : ''}${newOff.toFixed(1)}s`;
-    });
-
-    plusBtn.addEventListener('click', () => {
-      const newOff = Math.round((getTrackSyncOffset(currentSongKey) + 0.5) * 10) / 10;
-      setTrackSyncOffset(currentSongKey, newOff);
-      valDisplay.textContent = `${newOff >= 0 ? '+' : ''}${newOff.toFixed(1)}s`;
-    });
-
-    resetBtn.addEventListener('click', () => {
-      setTrackSyncOffset(currentSongKey, 0);
-      valDisplay.textContent = '+0.0s';
-    });
-
-    syncBar.appendChild(label);
-    syncBar.appendChild(minusBtn);
-    syncBar.appendChild(valDisplay);
-    syncBar.appendChild(plusBtn);
-    syncBar.appendChild(resetBtn);
+    // Positive offset = lyrics run ahead of the audio (see onTick).
+    const footer = createEl('div', { className: 'ytmd-native-lyrics-footer' });
+    footer.append(
+      createEl('span', { className: 'ytmd-lyrics-source', text: t().lyricsSource }),
+      createEl('span', { text: t().lyricsOffset }),
+      chip('−0.5 s', t().lyricsLater, () => shift(-0.5)),
+      valDisplay,
+      chip('+0.5 s', t().lyricsEarlier, () => shift(0.5)),
+      chip(t().lyricsReset, t().lyricsReset, () => shift(null))
+    );
 
     wrapper.replaceChildren(
       ...pluginLines.map((line, idx) => {
@@ -498,28 +510,21 @@ function renderCurrentLyrics(ctx: PluginContext): void {
         });
         return el;
       }),
-      syncBar,
-      createEl('div', {
-        className: 'ytmd-native-lyrics-footer',
-        text: 'Lyrics provided by LRCLIB'
-      })
+      footer
     );
   } else if (cachedLyricsData?.plainLyrics) {
     const plainLines = cachedLyricsData.plainLyrics.split('\n');
     wrapper.replaceChildren(
       ...plainLines.map((line: string) =>
-        createEl('div', { className: 'ytmd-native-lyric-line active', text: line, style: 'cursor: default;' })
+        createEl('div', { className: 'ytmd-native-lyric-line ytmd-plain', text: line })
       ),
-      createEl('div', {
-        className: 'ytmd-native-lyrics-footer',
-        text: 'Lyrics provided by LRCLIB'
-      })
+      createEl('div', { className: 'ytmd-native-lyrics-footer', text: t().lyricsSource })
     );
   } else {
     wrapper.replaceChildren(
       createEl('div', {
         className: 'ytmd-native-lyrics-status',
-        text: 'Synced lyrics unavailable for this track.'
+        text: t().lyricsNone
       })
     );
   }

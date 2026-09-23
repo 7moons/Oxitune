@@ -1,8 +1,117 @@
 import { YTMDPlugin, PluginContext, TrackInfo } from '../types';
-import { createEl, createSvg } from '../../utils/dom';
+import { createIconButton, setButtonProgress, setIconButtonIcon, showToast, ICONS } from '../../preload/ui/kit';
+import { t } from '../../preload/ui/i18n';
 
-let setCurrentTrack: ((t: TrackInfo) => void) | null = null;
+/** Payload of the backend's `download-progress` event (downloader.rs). */
+export interface DownloadProgress {
+  video_id: string;
+  title: string;
+  percent: number;
+  status: string;
+  output_path: string | null;
+  error?: string | null;
+}
+
+export type DownloadPhase = 'progress' | 'done' | 'failed';
+
+/** Pure classification of a progress event, unit-tested. */
+export function downloadPhase(p: DownloadProgress): DownloadPhase {
+  if (p.error) return 'failed';
+  if (p.output_path && p.percent >= 100) return 'done';
+  return 'progress';
+}
+
+interface ActiveDownload {
+  title: string;
+  fraction: number;
+}
+
+const BUTTON_ID = 'ytmd-download-btn';
+const DONE_ICON_MS = 3000;
+
+const active = new Map<string, ActiveDownload>();
+const recentlyDone = new Set<string>();
+let currentTrack: TrackInfo | null = null;
 let cleanup: (() => void) | null = null;
+
+function renderButton() {
+  const btn = document.getElementById(BUTTON_ID);
+  if (!btn) return;
+  const id = currentTrack?.videoId;
+  const job = id ? active.get(id) : undefined;
+  setButtonProgress(btn, job ? Math.max(0.05, job.fraction) : null);
+  setIconButtonIcon(btn, id && recentlyDone.has(id) ? ICONS.check : ICONS.download);
+  btn.setAttribute('aria-disabled', id ? 'false' : 'true');
+  const label = job ? t().downloadInProgress : t().downloadButton;
+  btn.setAttribute('aria-label', label);
+  btn.dataset.ytmdTooltip = label;
+}
+
+function finish(videoId: string, outcome: { ok: true } | { ok: false; reason: string }) {
+  const job = active.get(videoId);
+  if (!job) return; // already finished (e.g. a late event after an invoke error)
+  active.delete(videoId);
+  if (outcome.ok) {
+    recentlyDone.add(videoId);
+    setTimeout(() => {
+      recentlyDone.delete(videoId);
+      renderButton();
+    }, DONE_ICON_MS);
+    showToast(t().downloadDone(job.title), { id: `download-${videoId}` });
+  } else {
+    showToast(t().downloadFailed(outcome.reason), { id: `download-${videoId}`, durationMs: 8000 });
+  }
+  renderButton();
+}
+
+function onProgress(p: DownloadProgress) {
+  const job = active.get(p.video_id);
+  if (!job) return;
+  const phase = downloadPhase(p);
+  if (phase === 'failed') finish(p.video_id, { ok: false, reason: p.error || p.status });
+  else if (phase === 'done') finish(p.video_id, { ok: true });
+  else {
+    job.fraction = p.percent / 100;
+    renderButton();
+  }
+}
+
+/** Starts downloading `track`, driving the player-bar button and toasts.
+ * Shared by the player-bar button and the YTMD menu entry. */
+export function startDownload(ctx: PluginContext, track: TrackInfo | null): void {
+  const videoId = track?.videoId;
+  if (!track || !videoId) {
+    showToast(t().downloadNoTrack);
+    return;
+  }
+  if (active.has(videoId)) {
+    showToast(t().downloadInProgress);
+    return;
+  }
+
+  active.set(videoId, { title: track.title, fraction: 0 });
+  renderButton();
+  showToast(t().downloadStarted(track.title), { id: `download-${videoId}` });
+
+  // The bridge replies as soon as the download is queued; progress,
+  // completion and failure arrive only as `download-progress` events.
+  ctx
+    .invoke('download_track', {
+      request: {
+        video_id: videoId,
+        title: track.title,
+        artist: track.artist,
+        album: track.album || undefined,
+        cover_url: track.coverUrl || undefined,
+        format: (ctx.config.download_format as string) || 'mp3',
+        embed_lyrics: ctx.config.embed_lyrics !== false
+      }
+    })
+    .catch((e: unknown) => {
+      console.error('[YTMD Downloader] Download failed:', e);
+      finish(videoId, { ok: false, reason: e instanceof Error ? e.message : String(e) });
+    });
+}
 
 export const DownloaderPlugin: YTMDPlugin = {
   id: 'downloader',
@@ -11,112 +120,41 @@ export const DownloaderPlugin: YTMDPlugin = {
   defaultEnabled: true,
 
   onInit(ctx: PluginContext) {
-    let currentTrack: TrackInfo | null = null;
-    let isDownloading = false;
+    currentTrack = ctx.track;
 
-    const injectDownloadButton = () => {
-      if (document.getElementById('ytmd-download-btn')) return;
-
-      const playerBarMiddle = document.querySelector(
+    const mountButton = () => {
+      if (document.getElementById(BUTTON_ID)) return;
+      // Next to YTM's own like/dislike/menu buttons.
+      const container = document.querySelector(
         'ytmusic-player-bar .middle-controls-buttons, ytmusic-player-bar .right-controls-buttons'
       );
-
-      if (playerBarMiddle) {
-        const downloadBtn = createEl('button', {
-          id: 'ytmd-download-btn',
-          title: 'Download Track (MP3/FLAC with ID3 Tags & Lyrics)',
-          style: 'background:none; border:none; color:#a1a1aa; cursor:pointer; padding:6px; border-radius:6px; display:flex; align-items:center; justify-content:center; margin:0 4px; transition:color 0.15s ease, background-color 0.15s ease;'
-        });
-
-        const downloadIcon = createSvg('M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z', 20, 20);
-        downloadBtn.appendChild(downloadIcon);
-        downloadBtn.style.cssText = `
-          background: none;
-          border: none;
-          color: #a1a1aa;
-          cursor: pointer;
-          padding: 6px;
-          border-radius: 6px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          margin: 0 4px;
-          transition: color 0.15s ease, background-color 0.15s ease;
-        `;
-        downloadBtn.addEventListener('mouseenter', () => {
-          if (!isDownloading) {
-            downloadBtn.style.color = '#fafafa';
-            downloadBtn.style.backgroundColor = '#27272a';
-          }
-        });
-        downloadBtn.addEventListener('mouseleave', () => {
-          if (!isDownloading) {
-            downloadBtn.style.color = '#a1a1aa';
-            downloadBtn.style.backgroundColor = 'transparent';
-          }
-        });
-
-        downloadBtn.addEventListener('click', async () => {
-          if (!currentTrack || !currentTrack.videoId || isDownloading) return;
-
-          isDownloading = true;
-          downloadBtn.style.color = '#38bdf8';
-          downloadBtn.title = 'Downloading...';
-
-          try {
-            const format = (ctx.config.download_format as string) || 'mp3';
-            const embedLyrics = ctx.config.embed_lyrics !== false;
-
-            await ctx.invoke('download_track', {
-              request: {
-                video_id: currentTrack.videoId,
-                title: currentTrack.title,
-                artist: currentTrack.artist,
-                album: currentTrack.album || undefined,
-                cover_url: currentTrack.coverUrl || undefined,
-                format,
-                embed_lyrics: embedLyrics
-              }
-            });
-
-            downloadBtn.style.color = '#22c55e';
-            downloadBtn.title = 'Downloaded!';
-            setTimeout(() => {
-              isDownloading = false;
-              downloadBtn.style.color = '#a1a1aa';
-              downloadBtn.title = 'Download Track';
-            }, 3000);
-          } catch (e) {
-            console.error('[YTMD Downloader] Download failed:', e);
-            downloadBtn.style.color = '#ef4444';
-            setTimeout(() => {
-              isDownloading = false;
-              downloadBtn.style.color = '#a1a1aa';
-              downloadBtn.title = 'Download Track';
-            }, 3000);
-          }
-        });
-
-        playerBarMiddle.appendChild(downloadBtn);
-      }
+      if (!container) return;
+      const btn = createIconButton({ id: BUTTON_ID, label: t().downloadButton, iconPath: ICONS.download });
+      btn.addEventListener('click', () => {
+        if (btn.getAttribute('aria-disabled') === 'true') return;
+        startDownload(ctx, currentTrack);
+      });
+      container.appendChild(btn);
+      renderButton();
     };
 
-    const pollInterval = window.setInterval(injectDownloadButton, 1000);
-    injectDownloadButton();
+    const pollInterval = window.setInterval(mountButton, 1000);
+    mountButton();
 
-    setCurrentTrack = (t: TrackInfo) => {
-      currentTrack = t;
-    };
+    const unlisten = window.__TAURI__?.event
+      ? window.__TAURI__.event.listen<DownloadProgress>('download-progress', (e) => onProgress(e.payload))
+      : null;
 
     cleanup = () => {
       clearInterval(pollInterval);
-      document.getElementById('ytmd-download-btn')?.remove();
-      setCurrentTrack = null;
+      unlisten?.then((fn) => fn());
+      document.getElementById(BUTTON_ID)?.remove();
     };
   },
 
   onTrackChange(track: TrackInfo) {
-    setCurrentTrack?.(track);
+    currentTrack = track;
+    renderButton();
   },
 
   onDestroy() {

@@ -84,7 +84,9 @@ export const AmbientLightingPlugin: YTMDPlugin = {
           setIntensity?.(e.payload);
         }),
         window.__TAURI__.event.listen<boolean>('set-ambient-enabled', (e) => {
-          setIntensity?.(e.payload ? 0.6 : 0);
+          // Re-enabling restores the user's chosen intensity, not a default.
+          const configured = typeof ctx.config.ambient_intensity === 'number' ? ctx.config.ambient_intensity : 0.6;
+          setIntensity?.(e.payload ? configured : 0);
         })
       );
     }

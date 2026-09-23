@@ -1,4 +1,5 @@
 import { initAmbientBackdrop } from './ambient';
+import { getInitials } from './format';
 
 interface RoomMember {
   id: string;
@@ -15,14 +16,6 @@ interface RoomState {
 }
 
 let activeRoom: RoomState | null = null;
-
-function getInitials(name: string): string {
-  const parts = name.trim().split(/\s+/);
-  if (parts.length >= 2) {
-    return (parts[0][0] + parts[1][0]).toUpperCase();
-  }
-  return name.slice(0, 2).toUpperCase() || 'U';
-}
 
 function renderRoomView(room: RoomState | null) {
   const setupView = document.getElementById('setup-view');

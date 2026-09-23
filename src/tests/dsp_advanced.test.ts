@@ -1,5 +1,5 @@
 import { SkipSilenceController } from '../plugins/audio-dsp/skip-silence';
-import { AudioEngine } from '../plugins/audio-dsp/engine';
+import { AudioEngine, rmsToDb, clampPlaybackRate } from '../plugins/audio-dsp/engine';
 import { needsAudioGraph } from '../plugins/audio-dsp';
 import { describe, expect, test, spyOn } from 'bun:test';
 import { CrossfadeController } from '../plugins/audio-dsp/crossfade';
@@ -84,47 +84,43 @@ describe('CrossfadeController: auto-advance timer is tracked and cancellable', (
 
 describe('Advanced DSP: Crossfade, Skip Silence & Speed/Pitch', () => {
   test('crossfade timing clamps between 0s and 12s', () => {
-    const clampCrossfade = (secs: number) => Math.max(0, Math.min(12, secs));
-    expect(clampCrossfade(0)).toBe(0);
-    expect(clampCrossfade(5.5)).toBe(5.5);
-    expect(clampCrossfade(12)).toBe(12);
-    expect(clampCrossfade(25)).toBe(12);
-    expect(clampCrossfade(-5)).toBe(0);
+    const cf = new CrossfadeController();
+    for (const [input, expected] of [[0, 0], [5.5, 5.5], [12, 12], [25, 12], [-5, 0]]) {
+      cf.setCrossfadeSeconds(input);
+      expect(cf.getCrossfadeSeconds()).toBe(expected);
+    }
   });
 
-  test('calculates crossfade trigger boundary correctly', () => {
-    const duration = 210; // 3:30 song
-    const crossfadeSecs = 5.0;
-
-    const isCrossfadeTriggered = (current: number) => {
-      const remaining = duration - current;
-      return remaining <= crossfadeSecs && remaining > 0;
-    };
-
-    expect(isCrossfadeTriggered(100)).toBe(false);
-    expect(isCrossfadeTriggered(200)).toBe(false);
-    expect(isCrossfadeTriggered(205)).toBe(true);
-    expect(isCrossfadeTriggered(208.5)).toBe(true);
+  test('fade-out triggers only inside the last crossfade window', () => {
+    const cf = new CrossfadeController();
+    cf.setCrossfadeSeconds(5);
+    const track = makeTrack({ durationSecs: 210 });
+    cf.onTrackChange(track);
+    const fadeOut = spyOn(AudioEngine.getInstance(), 'fadeOut');
+    cf.onTick(100, track);
+    cf.onTick(204.9, track);
+    expect(fadeOut).not.toHaveBeenCalled();
+    cf.onTick(205, track);
+    expect(fadeOut).toHaveBeenCalledTimes(1);
+    cf.onTick(208.5, track); // already fading: no second trigger
+    expect(fadeOut).toHaveBeenCalledTimes(1);
+    cf.destroy();
+    fadeOut.mockRestore();
   });
 
-  test('RMS audio power dB calculation handles silence and full scale', () => {
-    const computeDb = (rms: number) => {
-      if (rms <= 0.00001) return -100;
-      return 20 * Math.log10(rms);
-    };
-
-    expect(computeDb(0)).toBe(-100);
-    expect(computeDb(1.0)).toBeCloseTo(0, 5); // 0 dB (full scale)
-    expect(computeDb(0.1)).toBeCloseTo(-20, 5); // -20 dB
-    expect(computeDb(0.001)).toBeCloseTo(-60, 5); // -60 dB (detected as silence under -50dB)
+  test('rmsToDb handles silence and full scale', () => {
+    expect(rmsToDb(new Float32Array(256))).toBe(-100);
+    expect(rmsToDb([])).toBe(-100);
+    expect(rmsToDb(new Float32Array(256).fill(1))).toBeCloseTo(0, 5);
+    expect(rmsToDb(new Float32Array(256).fill(0.1))).toBeCloseTo(-20, 4);
+    expect(rmsToDb(new Float32Array(256).fill(-0.001))).toBeCloseTo(-60, 3);
   });
 
   test('playback speed clamps strictly between 0.5x and 2.0x', () => {
-    const clampSpeed = (rate: number) => Math.max(0.5, Math.min(2.0, rate));
-    expect(clampSpeed(1.0)).toBe(1.0);
-    expect(clampSpeed(0.25)).toBe(0.5);
-    expect(clampSpeed(4.0)).toBe(2.0);
-    expect(clampSpeed(1.25)).toBe(1.25);
+    expect(clampPlaybackRate(1.0)).toBe(1.0);
+    expect(clampPlaybackRate(0.25)).toBe(0.5);
+    expect(clampPlaybackRate(4.0)).toBe(2.0);
+    expect(clampPlaybackRate(1.25)).toBe(1.25);
   });
 });
 
