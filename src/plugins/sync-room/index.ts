@@ -5,6 +5,7 @@ import { showReaction, showToast } from '../../preload/ui/kit';
 import { t } from '../../preload/ui/i18n';
 import { setSyncGuest } from '../../preload/syncRole';
 import { canControl, MemberRole, roleOf, votesNeeded } from '../../preload/syncRoles';
+import { hideQueuePanel, queueAddFromMenuData, showQueuePanel, syncQueuePanel } from './queuePanel';
 
 export interface SyncPlaybackPayload {
   video_id: string;
@@ -609,6 +610,62 @@ let invokeRef: PluginContext['invoke'] | null = null;
 let cleanup: (() => void) | null = null;
 /** Last room snapshot seen, to announce joins/leaves; null when not in a room. */
 let lastRoom: RoomStatePayload | null = null;
+/** The song this page has loaded, for the queue panel's "Now playing". */
+let currentTrack: TrackInfo | null = null;
+const QUEUE_PANEL_POLL_MS = 1000;
+
+/** In a room, YTM's "Up next" tab shows the shared queue instead. */
+function refreshQueuePanel() {
+  const room = lastRoom;
+  const invoke = invokeRef;
+  if (!room || !invoke) {
+    hideQueuePanel();
+    return;
+  }
+  const track = currentTrack;
+  const act = (cmd: string) => (itemId: string) => {
+    invoke(cmd, { itemId }).catch((e) => {
+      console.error(`[YTMD Room Sync] ${cmd} failed:`, e);
+      showToast(t().actionFailed);
+    });
+  };
+  showQueuePanel(
+    {
+      queue: room.queue ?? [],
+      nowPlaying:
+        track?.videoId && VIDEO_ID_RE.test(track.videoId)
+          ? { videoId: track.videoId, title: track.title, artist: track.artist }
+          : null,
+      myId: room.current_user_id,
+      myRole: ownRole(room)
+    },
+    { play: act('sync_queue_play'), remove: act('sync_queue_remove') }
+  );
+}
+
+/** Closes the YTM menu a redirected item was picked from, the way a user
+ * would: Escape (its overlay listens for it). */
+function closeYtmMenu() {
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
+}
+
+/** A song picked with YTM's "Add to queue" / "Play next" while in a room. */
+function addToSharedQueue(add: { videoId: string | null; next: boolean }, invoke: PluginContext['invoke']) {
+  if (!lastRoom || !canControl(ownRole(lastRoom))) {
+    showToast(t().syncQueueListenerNo);
+    return;
+  }
+  if (!add.videoId) {
+    showToast(t().syncQueueSongsOnly);
+    return;
+  }
+  invoke('sync_queue_add', { input: add.videoId, next: add.next })
+    .then(() => showToast(add.next ? t().syncQueuedNext : t().syncQueued))
+    .catch((e) => {
+      console.error('[YTMD Room Sync] adding to the shared queue failed:', e);
+      showToast(t().actionFailed);
+    });
+}
 
 /** Guest: media keys, tray, mini player and phone remote act for the room
  * (through the host) instead of on the local player, which the next sync
@@ -630,6 +687,7 @@ function applyRoomUi(room: RoomStatePayload | null, announce: boolean, leaveReas
   const prev = lastRoom;
   lastRoom = room;
   setSyncStatus(room ? { roomCode: room.room_code, listeners: room.members.length, isHost: room.is_host } : null);
+  refreshQueuePanel();
   if (!announce) return;
 
   if (!room) {
@@ -705,12 +763,28 @@ export const SyncRoomPlugin: YTMDPlugin = {
       );
     }
 
-    // A guest's own clicks on next/previous/play-pause go to the host
-    // instead. Capture phase on window runs before YTM's handlers, and only
-    // real clicks are taken: our own PlayerBridge clicks are untrusted.
+    // Capture phase on window runs before YTM's own handlers.
     const onClick = (e: MouseEvent) => {
-      if (!e.isTrusted || !controller.isGuest() || !(e.target instanceof Element)) return;
+      if (!(e.target instanceof Element)) return;
       const target = e.target;
+      if (target.closest('ytmusic-player-page tp-yt-paper-tab')) setTimeout(syncQueuePanel, 0);
+
+      // In a room, YTM's "Add to queue" / "Play next" fill the shared queue.
+      if (controller.isInRoom()) {
+        const menuItem = target.closest<HTMLElement & { data?: unknown }>('ytmusic-menu-service-item-renderer');
+        const add = menuItem ? queueAddFromMenuData(menuItem.data) : null;
+        if (add) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          closeYtmMenu();
+          addToSharedQueue(add, ctx.invoke);
+          return;
+        }
+      }
+
+      // A guest's own clicks on next/previous/play-pause go to the host
+      // instead. Only real clicks: our own PlayerBridge clicks are untrusted.
+      if (!e.isTrusted || !controller.isGuest()) return;
       const hit = CONTROL_BUTTONS.find(([selector]) => target.closest(selector));
       if (!hit) return;
       const video = ctx.getVideoElement();
@@ -721,6 +795,9 @@ export const SyncRoomPlugin: YTMDPlugin = {
       controller.requestControl(action, ctx.invoke);
     };
     window.addEventListener('click', onClick, true);
+    // YTM re-renders the player page on some navigations; put the queue
+    // panel back and keep it in step with the selected tab.
+    const panelPoll = setInterval(syncQueuePanel, QUEUE_PANEL_POLL_MS);
 
     // The page can (re)load while already in a room: app start after a
     // crash, or a fallback full-page track switch. Pick the room back up
@@ -741,17 +818,22 @@ export const SyncRoomPlugin: YTMDPlugin = {
     cleanup = () => {
       unlistenPromises.forEach((p) => p.then((unlisten) => unlisten()));
       window.removeEventListener('click', onClick, true);
+      clearInterval(panelPoll);
       controller.setRoomState(false, false);
       controllerRef = null;
       invokeRef = null;
       lastRoom = null;
+      currentTrack = null;
       setSyncStatus(null);
+      hideQueuePanel();
     };
   },
 
   onTrackChange(track: TrackInfo, ctx: PluginContext) {
     const controller = controllerRef;
     if (!controller) return;
+    currentTrack = track;
+    refreshQueuePanel();
     controller.broadcastLocalState(track, ctx.getVideoElement(), ctx.invoke, true);
     const request = controller.handleLocalTrackChange(track.videoId);
     if (request) controller.requestControl(request, ctx.invoke);

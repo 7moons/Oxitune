@@ -28,6 +28,7 @@ use crate::sync_room::{
 };
 use rumqttc::{AsyncClient, ConnectReturnCode, Event, EventLoop, MqttOptions, Packet, QoS, Transport};
 use serde::Serialize;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot, watch};
@@ -265,12 +266,22 @@ async fn run_host_loop(
 ) {
     let host_topic = room_topic_host(cipher.topic_id());
     let broadcast_topic = room_topic_broadcast(cipher.topic_id());
+    // Publishes the broker hasn't acknowledged yet. On stop, the loop waits
+    // for all of them: the room's final `Leave` or `HostHandoff` is often
+    // published by the regular outbox branch just before the stop signal,
+    // and disconnecting right away dropped it, so guests of an ended room
+    // took it for a vanished host and one of them took it over.
+    let unacked = AtomicUsize::new(0);
     // `try_publish`, not `publish().await`: the request queue is drained by
     // `eventloop.poll()` in this same loop, so awaiting room in a full queue
     // here could never make progress.
-    let publish = |topic: &str, msg: &WireMessage| match cipher.seal_msg(msg) {
-        Some(payload) => client.try_publish(topic, QoS::AtLeastOnce, false, payload).is_ok(),
-        None => false,
+    let publish = |topic: &str, msg: &WireMessage| {
+        let queued = cipher
+            .seal_msg(msg)
+            .is_some_and(|payload| client.try_publish(topic, QoS::AtLeastOnce, false, payload).is_ok());
+        if queued {
+            unacked.fetch_add(1, Ordering::SeqCst);
+        }
     };
     let reply = |user_id: &str, msg: &WireMessage| {
         publish(&room_topic_guest(cipher.topic_id(), user_id), msg);
@@ -279,15 +290,10 @@ async fn run_host_loop(
     loop {
         tokio::select! {
             _ = stopped(&mut shutdown) => {
-                // Whatever was broadcast just before stopping (the room's
-                // `Leave`, or a `HostHandoff`) must still go out.
-                let mut sent = 0;
                 while let Ok(msg) = outbox_rx.try_recv() {
-                    if publish(&broadcast_topic, &msg) {
-                        sent += 1;
-                    }
+                    publish(&broadcast_topic, &msg);
                 }
-                flush_and_disconnect(&client, &mut eventloop, sent).await;
+                flush_and_disconnect(&client, &mut eventloop, unacked.load(Ordering::SeqCst)).await;
                 return;
             }
             Some(msg) = outbox_rx.recv() => {
@@ -344,6 +350,9 @@ async fn run_host_loop(
                                 }
                             }
                         }
+                    }
+                    Ok(Event::Incoming(Packet::PubAck(_))) => {
+                        let _ = unacked.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1));
                     }
                     Ok(_) => {}
                     Err(e) => {

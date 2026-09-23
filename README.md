@@ -40,7 +40,7 @@ YTMD provides native operating system integration, minimal memory overhead (<100
 - Roles: the host makes people moderators, DJs (control playback) or listeners (listen only) and picks the role newcomers get.
 - The host and moderators can remove people; a removed install can't rejoin that session until the host lets it back in.
 - Optional join approval: newcomers wait until the host lets them in.
-- Shared queue: DJs paste YouTube Music links; the songs play in order after the current one. Everyone can react with emoji and vote to skip (a majority skips).
+- Shared queue: in a session, YouTube Music's "Up next" tab becomes "Queue" and shows the room's shared queue; "Add to queue" and "Play next" from any song's menu (or a pasted link in the sync window) add to it, and the host plays from it as each song ends. Everyone can react with emoji and vote to skip (a majority skips).
 - The host can hand the session to someone else; if the host leaves or vanishes, the next person in line takes over under the same code and everyone reconnects on their own.
 - End-to-end encrypted with a key derived from the room code: the public brokers and the local network only see opaque bytes.
 - "Check connection" tells whether the current network can reach the sync servers.

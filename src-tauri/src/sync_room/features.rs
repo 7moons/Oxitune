@@ -225,13 +225,14 @@ impl SyncRoomManager {
     // --- Shared queue --------------------------------------------------
 
     /// DJs and up add songs; the host's page plays them in order as each
-    /// song ends.
+    /// song ends. `next` puts the song first, like YTM's "Play next".
     pub(crate) fn queue_add(
         &self,
         member_id: &str,
         video_id: &str,
         title: &str,
         artist: &str,
+        next: bool,
         sink: &Arc<dyn SyncEventSink>,
     ) -> Result<(), String> {
         if !is_video_id(video_id) {
@@ -258,7 +259,11 @@ impl SyncRoomManager {
                 added_by: adder.nickname.clone(),
                 added_by_id: member_id.to_string(),
             };
-            room.queue.push(item);
+            if next {
+                room.queue.insert(0, item);
+            } else {
+                room.queue.push(item);
+            }
             Ok(())
         })
     }

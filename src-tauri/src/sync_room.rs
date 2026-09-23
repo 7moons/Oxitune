@@ -388,8 +388,16 @@ pub(crate) enum WireMessage {
     Reaction { user_id: String, emoji: String },
     /// Host -> room: show a reaction.
     ReactionShown { from: String, emoji: String },
-    /// Guest -> host: shared queue edits.
-    QueueAdd { user_id: String, video_id: String, title: String, artist: String },
+    /// Guest -> host: shared queue edits. `next` puts the song first (YTM's
+    /// "Play next"), otherwise it goes to the end ("Add to queue").
+    QueueAdd {
+        user_id: String,
+        video_id: String,
+        title: String,
+        artist: String,
+        #[serde(default)]
+        next: bool,
+    },
     QueueRemove { user_id: String, item_id: String },
     QueuePlay { user_id: String, item_id: String },
     /// Host -> room: the host is leaving and `new_host_id` takes over the
@@ -891,8 +899,8 @@ impl SyncRoomManager {
             }
             WireMessage::VoteSkip { .. } => self.vote_skip(member_id, sink),
             WireMessage::Reaction { emoji, .. } => self.react(member_id, &emoji, sink),
-            WireMessage::QueueAdd { video_id, title, artist, .. } => {
-                self.queue_add(member_id, &video_id, &title, &artist, sink)
+            WireMessage::QueueAdd { video_id, title, artist, next, .. } => {
+                self.queue_add(member_id, &video_id, &title, &artist, next, sink)
             }
             WireMessage::QueueRemove { item_id, .. } => self.queue_remove(member_id, &item_id, sink),
             WireMessage::QueuePlay { item_id, .. } => self.queue_play(member_id, &item_id, sink),
@@ -1881,15 +1889,17 @@ pub fn queue_add(
     video_id: &str,
     title: &str,
     artist: &str,
+    next: bool,
 ) -> Result<(), String> {
     act_or_ask(
         manager,
-        |me| manager.queue_add(me, video_id, title, artist, sink),
+        |me| manager.queue_add(me, video_id, title, artist, next, sink),
         |user_id| WireMessage::QueueAdd {
             user_id,
             video_id: video_id.to_string(),
             title: title.to_string(),
             artist: artist.to_string(),
+            next,
         },
     )
 }
@@ -2500,11 +2510,11 @@ mod tests {
         manager.set_member_role("mod", MemberRole::Moderator, &dyn_sink).unwrap();
         manager.set_member_role("quiet", MemberRole::Listener, &dyn_sink).unwrap();
 
-        manager.queue_add("dj", "aaaaaaaaaaa", "  First ", "Artist", &dyn_sink).unwrap();
-        manager.queue_add("dj2", "bbbbbbbbbbb", "", "", &dyn_sink).unwrap();
-        manager.queue_add("dj", "ccccccccccc", "Third", "", &dyn_sink).unwrap();
-        assert!(manager.queue_add("quiet", "ddddddddddd", "x", "", &dyn_sink).is_err(), "listeners only listen");
-        assert!(manager.queue_add("dj", "javascript:", "x", "", &dyn_sink).is_err());
+        manager.queue_add("dj", "aaaaaaaaaaa", "  First ", "Artist", false, &dyn_sink).unwrap();
+        manager.queue_add("dj2", "bbbbbbbbbbb", "", "", false, &dyn_sink).unwrap();
+        manager.queue_add("dj", "ccccccccccc", "Third", "", false, &dyn_sink).unwrap();
+        assert!(manager.queue_add("quiet", "ddddddddddd", "x", "", false, &dyn_sink).is_err(), "listeners only listen");
+        assert!(manager.queue_add("dj", "javascript:", "x", "", false, &dyn_sink).is_err());
 
         let queue = manager.get_room_state().unwrap().queue;
         assert_eq!(queue.iter().map(|i| i.title.as_str()).collect::<Vec<_>>(), vec!["First", "bbbbbbbbbbb", "Third"]);
@@ -2521,6 +2531,27 @@ mod tests {
 
         assert_eq!(manager.queue_take_next(&dyn_sink).map(|i| i.video_id).as_deref(), Some("aaaaaaaaaaa"));
         assert!(manager.queue_take_next(&dyn_sink).is_none());
+    }
+
+    /// YTM's "Play next" lands at the front of the shared queue, "Add to
+    /// queue" at the end, and the host takes from the front.
+    #[test]
+    fn test_play_next_goes_first() {
+        let manager = hosting(&[("host", true), ("dj", false)]);
+        let sink = noop_sink();
+        manager.queue_add("dj", "aaaaaaaaaaa", "End", "", false, &sink).unwrap();
+        manager.queue_add("dj", "bbbbbbbbbbb", "Next", "", true, &sink).unwrap();
+        manager.queue_add("host", "ccccccccccc", "Last", "", false, &sink).unwrap();
+        let order: Vec<_> = std::iter::from_fn(|| manager.queue_take_next(&sink)).map(|i| i.title).collect();
+        assert_eq!(order, vec!["Next", "End", "Last"]);
+    }
+
+    #[test]
+    fn test_play_next_flag_is_optional_on_the_wire() {
+        let old: WireMessage =
+            serde_json::from_str(r#"{"type":"QueueAdd","user_id":"u","video_id":"aaaaaaaaaaa","title":"t","artist":"a"}"#)
+                .unwrap();
+        assert!(matches!(old, WireMessage::QueueAdd { next: false, .. }));
     }
 
     #[test]
@@ -2560,7 +2591,7 @@ mod tests {
         admit(&old_host, "banned", "install-banned");
         old_host.kick("host", "banned", &sink).unwrap();
         old_host.set_require_approval(true, &sink).unwrap();
-        old_host.queue_add("heir", "aaaaaaaaaaa", "Song", "", &sink).unwrap();
+        old_host.queue_add("heir", "aaaaaaaaaaa", "Song", "", false, &sink).unwrap();
         {
             let mut guard = old_host.state.lock();
             let room = guard.as_mut().unwrap();
@@ -2776,7 +2807,7 @@ mod tests {
         assert!(send_control(&guest, SyncControl::PlayVideo { video_id: "javascript:x".into() }).is_err());
         send_reaction(&guest, &guest_dyn, "😂").unwrap();
         assert!(send_reaction(&guest, &guest_dyn, "free text").is_err());
-        queue_add(&guest, &guest_dyn, "aaaaaaaaaaa", "Song", "Artist").unwrap();
+        queue_add(&guest, &guest_dyn, "aaaaaaaaaaa", "Song", "Artist", false).unwrap();
 
         assert!(wait_until(|| host_sink.controls.lock().len() == 2, Duration::from_secs(2)).await);
         assert!(host_sink.controls.lock().iter().all(|c| c.from == "Ola"));

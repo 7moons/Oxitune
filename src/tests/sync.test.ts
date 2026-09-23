@@ -15,6 +15,7 @@ import {
 import { isSyncGuest } from '../preload/syncRole';
 import { canControl, canKick, roleOf, SYNC_REACTIONS, votesNeeded } from '../preload/syncRoles';
 import { describeProbes } from '../ui/syncProbe';
+import { queueAddFromMenuData } from '../plugins/sync-room/queuePanel';
 import { setCompanionLocale } from '../ui/i18n';
 
 const payload = (over: Partial<SyncPlaybackPayload> = {}): SyncPlaybackPayload => ({
@@ -401,6 +402,34 @@ describe('Listen Together shared constants mirror the backend', () => {
   test('a skip needs more than half the room', () => {
     expect(features).toContain('members / 2 + 1');
     expect([1, 2, 3, 4, 5].map(votesNeeded)).toEqual([1, 2, 2, 3, 3]);
+  });
+});
+
+describe('YTM queue menu items in a room', () => {
+  // Shapes read from a live YTM menu (`ytmusic-menu-service-item-renderer.data`).
+  const item = (queueAddEndpoint: unknown) => ({ text: {}, serviceEndpoint: { clickTrackingParams: 'x', queueAddEndpoint } });
+
+  test('"Add to queue" and "Play next" become shared-queue adds', () => {
+    expect(
+      queueAddFromMenuData(item({ queueTarget: { videoId: 'dQw4w9WgXcQ' }, queueInsertPosition: 'INSERT_AT_END' }))
+    ).toEqual({ videoId: 'dQw4w9WgXcQ', next: false });
+    expect(
+      queueAddFromMenuData(item({ queueTarget: { videoId: 'dQw4w9WgXcQ' }, queueInsertPosition: 'INSERT_AFTER_CURRENT_VIDEO' }))
+    ).toEqual({ videoId: 'dQw4w9WgXcQ', next: true });
+  });
+
+  test('an album or playlist is recognized but has no single song', () => {
+    expect(queueAddFromMenuData(item({ queueTarget: { playlistId: 'OLAK5uy_x' }, queueInsertPosition: 'INSERT_AT_END' }))).toEqual({
+      videoId: null,
+      next: false
+    });
+  });
+
+  test('every other menu item is left to YTM', () => {
+    expect(queueAddFromMenuData({ serviceEndpoint: { removeFromQueueEndpoint: { videoId: 'dQw4w9WgXcQ' } } })).toBeNull();
+    expect(queueAddFromMenuData({ navigationEndpoint: {} })).toBeNull();
+    expect(queueAddFromMenuData(undefined)).toBeNull();
+    expect(queueAddFromMenuData(item({ queueTarget: { videoId: 'javascript:' } }))).toEqual({ videoId: null, next: false });
   });
 });
 

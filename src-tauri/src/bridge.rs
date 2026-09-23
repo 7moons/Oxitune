@@ -82,6 +82,19 @@ struct SyncControlArgs {
 }
 
 #[derive(Deserialize)]
+struct QueueAddArgs {
+    input: String,
+    #[serde(default)]
+    next: bool,
+}
+
+#[derive(Deserialize)]
+struct QueueItemArgs {
+    #[serde(rename = "itemId")]
+    item_id: String,
+}
+
+#[derive(Deserialize)]
 struct ReactionArgs {
     emoji: String,
 }
@@ -197,6 +210,22 @@ bridge_commands! {
         sync_room::send_reaction(&state.sync_room, &sink, &p.emoji)?;
         Ok(Value::Null)
     }
+    // The shared queue panel and YTM's own queue menu items, in a room.
+    "sync_queue_add" => |h, state, args| {
+        let p: QueueAddArgs = parse_args("sync_queue_add", args)?;
+        commands::add_to_sync_queue(h.clone(), state, &p.input, p.next).await?;
+        Ok(Value::Null)
+    }
+    "sync_queue_remove" => |h, state, args| {
+        let p: QueueItemArgs = parse_args("sync_queue_remove", args)?;
+        sync_room::queue_remove(&state.sync_room, &commands::sync_sink(h.clone()), &p.item_id)?;
+        Ok(Value::Null)
+    }
+    "sync_queue_play" => |h, state, args| {
+        let p: QueueItemArgs = parse_args("sync_queue_play", args)?;
+        sync_room::queue_play(&state.sync_room, &commands::sync_sink(h.clone()), &p.item_id)?;
+        Ok(Value::Null)
+    }
     // Host page, as its song ends: the next song from the shared queue.
     "sync_queue_take_next" => |h, state, args| {
         let sink: Arc<dyn sync_room::SyncEventSink> = Arc::new(h.clone());
@@ -288,6 +317,9 @@ mod tests {
             "vote_sync_skip",
             "send_sync_reaction",
             "sync_queue_take_next",
+            "sync_queue_add",
+            "sync_queue_remove",
+            "sync_queue_play",
             "save_config",
         ] {
             assert!(set.contains(cmd), "`{cmd}` missing from BRIDGE_COMMANDS");
