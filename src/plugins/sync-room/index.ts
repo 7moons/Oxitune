@@ -59,6 +59,8 @@ export interface LocalPlayback {
   videoId: string | null;
   paused: boolean;
   currentTime: number;
+  /** Length of the loaded song (NaN while unknown). */
+  duration: number;
   /** Whether a speed catch-up is already running (it then runs until
    * nearly exact, instead of stopping at the threshold that started it). */
   correcting: boolean;
@@ -107,10 +109,23 @@ const OWN_NAV_MEMORY_MS = 15_000;
  * is YTM's autoplay, not the user. */
 const NEAR_END_SECS = 3;
 const AUTOPLAY_WINDOW_MS = 4000;
+/** Guest: a seek never lands closer than this to the end of the song. At
+ * the very end the video ends and YTM autoplays the guest's own next song,
+ * not the host's. */
+const END_GUARD_SECS = 1;
+/** Guest: after finishing a song ahead of the host, how long to wait for
+ * the host to finish it too (it's within HOST_FINISHING_SECS of the end)
+ * instead of going back to it. */
+const HOST_NEXT_WAIT_MS = 10_000;
+const HOST_FINISHING_SECS = 5;
 /** A payload older than the newest one seen, by less than this, was
  * reordered or redelivered (MQTT QoS 1) and is dropped; a bigger step back
  * is the host's clock being reset, and is accepted. */
 const REORDER_WINDOW_MS = 10_000;
+
+function clampBeforeEnd(target: number, duration: number): number {
+  return Number.isFinite(duration) && duration > END_GUARD_SECS ? Math.min(target, duration - END_GUARD_SECS) : target;
+}
 
 export function computeSyncAction(payload: SyncPlaybackPayload, local: LocalPlayback, transitSecs: number): SyncAction {
   const action: SyncAction = { navigateTo: null, setPlaying: null, seekTo: null, playbackRate: 1 };
@@ -126,7 +141,7 @@ export function computeSyncAction(payload: SyncPlaybackPayload, local: LocalPlay
 
   if (!payload.is_playing) {
     if (Math.abs(local.currentTime - payload.current_time_secs) > PAUSED_DRIFT_SECS) {
-      action.seekTo = payload.current_time_secs;
+      action.seekTo = clampBeforeEnd(payload.current_time_secs, local.duration);
     }
     return action;
   }
@@ -134,7 +149,7 @@ export function computeSyncAction(payload: SyncPlaybackPayload, local: LocalPlay
   const target = payload.current_time_secs + Math.min(MAX_TRANSIT_SECS, Math.max(0, transitSecs));
   const drift = target - local.currentTime;
   if (Math.abs(drift) > SEEK_DRIFT_SECS) {
-    action.seekTo = target;
+    action.seekTo = clampBeforeEnd(target, local.duration);
   } else if (Math.abs(drift) > (local.correcting ? END_CATCH_UP_SECS : START_CATCH_UP_SECS)) {
     action.playbackRate = 1 + Math.max(-MAX_RATE_DELTA, Math.min(MAX_RATE_DELTA, drift / CATCH_UP_OVER_SECS));
   }
@@ -201,6 +216,28 @@ function currentVideoId(): string | null {
   return new URLSearchParams(window.location.search).get('v');
 }
 
+/** The subset of YouTube's player API (`#movie_player`) read here. */
+type MoviePlayerElement = HTMLElement & {
+  getVideoData?: () => { video_id?: string } | undefined;
+  getCurrentTime?: () => number;
+};
+
+/** The song the player has actually loaded, and its position in it. Around
+ * a track change the URL's `v` and the video element's time don't switch
+ * at the same moment, so pairing them sent (and compared) the old song's
+ * last seconds under the new song's id, or the new song's 0:00 under the
+ * old id: guests jumped to the end of the next song or restarted the old
+ * one. The player API reports both from one state. */
+function loadedPlayback(video: HTMLVideoElement | null): { videoId: string | null; currentTime: number } {
+  const player = document.getElementById('movie_player') as MoviePlayerElement | null;
+  const videoId = player?.getVideoData?.()?.video_id;
+  const currentTime = player?.getCurrentTime?.();
+  if (videoId && VIDEO_ID_RE.test(videoId) && typeof currentTime === 'number' && Number.isFinite(currentTime)) {
+    return { videoId, currentTime };
+  }
+  return { videoId: currentVideoId(), currentTime: video ? video.currentTime : 0 };
+}
+
 function isAdPlaying(): boolean {
   const player = document.getElementById('movie_player');
   return !!player && (player.classList.contains('ad-showing') || player.classList.contains('ad-interrupting'));
@@ -227,7 +264,8 @@ function navigateToVideo(videoId: string) {
 export class RoomSyncController {
   private isHost = false;
   private inRoom = false;
-  private lastBroadcast: { atMs: number; position: number; rate: number; playing: boolean } | null = null;
+  private lastBroadcast: { atMs: number; videoId: string; position: number; rate: number; playing: boolean } | null =
+    null;
   private pendingNav: { videoId: string; atMs: number; attempts: number } | null = null;
   private readonly transit = new TransitEstimator();
   private newestPayloadMs: number | null = null;
@@ -238,6 +276,8 @@ export class RoomSyncController {
   /** Guest: a song we asked the host to play, not confirmed yet. */
   private requestedVideo: { videoId: string; atMs: number } | null = null;
   private nearEndAtMs = Number.NEGATIVE_INFINITY;
+  /** Guest: the song we last played to (nearly) the end. */
+  private finished: { videoId: string; duration: number; atMs: number } | null = null;
   /** Guest: speed catch-up in progress, and what to restore after it. */
   private rateCorrection: { video: HTMLVideoElement; rate: number; preservesPitch: boolean } | null = null;
 
@@ -255,6 +295,7 @@ export class RoomSyncController {
     this.ownNavs.clear();
     this.requestedVideo = null;
     this.nearEndAtMs = Number.NEGATIVE_INFINITY;
+    this.finished = null;
     this.endRateCorrection();
   }
 
@@ -283,10 +324,18 @@ export class RoomSyncController {
       this.requestedVideo = null;
     }
 
+    const loaded = loadedPlayback(video);
+    if (this.waitingForHostsNext(payload, loaded.videoId, video, now)) {
+      this.endRateCorrection();
+      PlayerBridge.pause();
+      return;
+    }
+
     const local: LocalPlayback = {
-      videoId: currentVideoId(),
+      videoId: loaded.videoId,
       paused: video ? video.paused : true,
-      currentTime: video ? video.currentTime : 0,
+      currentTime: loaded.currentTime,
+      duration: video ? video.duration : NaN,
       correcting: this.rateCorrection !== null
     };
     const action = computeSyncAction(payload, local, transitSecs);
@@ -298,6 +347,9 @@ export class RoomSyncController {
       const attempts = pending && pending.videoId === action.navigateTo ? pending.attempts + 1 : 1;
       this.pendingNav = { videoId: action.navigateTo, atMs: now, attempts };
       this.rememberOwnNav(action.navigateTo, now);
+      // The old song keeps playing while the new one loads; if it ends
+      // first, YTM autoplays its own next song over our navigation.
+      PlayerBridge.pause();
       if (attempts > 1) {
         // SPA navigation didn't take; a full load always does.
         window.location.href = `https://music.youtube.com/watch?v=${action.navigateTo}`;
@@ -318,6 +370,27 @@ export class RoomSyncController {
     } else {
       this.setCatchUpRate(video, action.playbackRate);
     }
+  }
+
+  /** Guest: we finished the host's song first and YTM moved on to its own
+   * next song (or stopped). Going back would replay the last seconds and
+   * autoplay again, flipping between songs; the host is about to switch, so
+   * stay paused until it does. A host that restarted the song ("previous")
+   * is far from the end and is followed as usual. */
+  private waitingForHostsNext(
+    payload: SyncPlaybackPayload,
+    localVideoId: string | null,
+    video: HTMLVideoElement | null,
+    now: number
+  ): boolean {
+    const f = this.finished;
+    return (
+      !!f &&
+      payload.video_id === f.videoId &&
+      now - f.atMs < HOST_NEXT_WAIT_MS &&
+      f.duration - payload.current_time_secs < HOST_FINISHING_SECS &&
+      (localVideoId !== f.videoId || !!video?.ended)
+    );
   }
 
   private rememberOwnNav(videoId: string, now: number) {
@@ -355,6 +428,8 @@ export class RoomSyncController {
     if (!this.isGuest() || !video) return;
     if (Number.isFinite(video.duration) && video.duration > 0 && video.duration - video.currentTime < NEAR_END_SECS) {
       this.nearEndAtMs = now;
+      const { videoId } = loadedPlayback(video);
+      if (videoId) this.finished = { videoId, duration: video.duration, atMs: now };
     }
   }
 
@@ -418,21 +493,27 @@ export class RoomSyncController {
     invoke: PluginContext['invoke'],
     force = false
   ) {
-    if (!this.inRoom || !this.isHost || !track || !track.videoId || !video || isAdPlaying()) return;
+    if (!this.inRoom || !this.isHost || !track || !video || isAdPlaying()) return;
+    // Between songs: the position is the old song's end, and the "paused"
+    // that comes with it would pause guests at the end, where they autoplay.
+    if (video.ended) return;
+    const { videoId, currentTime } = loadedPlayback(video);
+    if (!videoId) return;
 
     const now = Date.now();
     const last = this.lastBroadcast;
     const expected = last ? last.position + ((now - last.atMs) / 1000) * last.rate : 0;
-    const jumped = !!last && last.playing && !video.paused && Math.abs(video.currentTime - expected) > HOST_SEEK_JUMP_SECS;
-    if (!force && !jumped && last && now - last.atMs < HOST_BROADCAST_INTERVAL_MS) return;
-    this.lastBroadcast = { atMs: now, position: video.currentTime, rate: video.playbackRate, playing: !video.paused };
+    const jumped = !!last && last.playing && !video.paused && Math.abs(currentTime - expected) > HOST_SEEK_JUMP_SECS;
+    const newSong = !!last && last.videoId !== videoId;
+    if (!force && !jumped && !newSong && last && now - last.atMs < HOST_BROADCAST_INTERVAL_MS) return;
+    this.lastBroadcast = { atMs: now, videoId, position: currentTime, rate: video.playbackRate, playing: !video.paused };
 
     invoke('broadcast_sync_state', {
       playback: {
-        video_id: track.videoId,
+        video_id: videoId,
         title: track.title,
         artist: track.artist,
-        current_time_secs: video.currentTime,
+        current_time_secs: currentTime,
         is_playing: !video.paused,
         timestamp_ms: now
       }

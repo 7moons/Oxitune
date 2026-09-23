@@ -26,6 +26,7 @@ const local = (over: Partial<LocalPlayback> = {}): LocalPlayback => ({
   videoId: 'dQw4w9WgXcQ',
   paused: false,
   currentTime: 50,
+  duration: 200,
   correcting: false,
   ...over
 });
@@ -97,6 +98,18 @@ describe('computeSyncAction', () => {
     expect(a.seekTo).toBe(50);
     expect(a.playbackRate).toBe(1);
     expect(computeSyncAction(payload({ is_playing: false }), local({ paused: true, currentTime: 49.8 }), 0).seekTo).toBeNull();
+  });
+
+  // Regression: a seek onto the last frame ended the guest's song and YTM
+  // autoplayed the guest's own next song instead of the host's.
+  test('never seeks into the last second of the song', () => {
+    expect(computeSyncAction(payload({ current_time_secs: 199.8 }), local({ currentTime: 150 }), 0.5).seekTo).toBe(199);
+    expect(
+      computeSyncAction(payload({ current_time_secs: 200, is_playing: false }), local({ paused: true, currentTime: 150 }), 0)
+        .seekTo
+    ).toBe(199);
+    // unknown duration: nothing to clamp against
+    expect(computeSyncAction(payload(), local({ currentTime: 40, duration: NaN }), 0).seekTo).toBe(50);
   });
 });
 
@@ -232,6 +245,82 @@ describe('RoomSyncController (guest)', () => {
     d.handleRemotePlayback(payload({ timestamp_ms: 1_000 }), fakeVideo(), 1_000);
     d.noteLocalTick(fakeVideo({ currentTime: 198.5, duration: 200 }), 5_000);
     expect(d.handleLocalTrackChange('eeeeeeeeeee', 6_000)).toBeNull();
+  });
+
+  // Regression: at the end of a song a guest that finished first autoplayed
+  // its own next song, got pulled back to the host's old one, finished it
+  // again, autoplayed again... flipping between songs until the host moved.
+  test('a guest that finished the song first waits for the host instead of going back', () => {
+    const c = guest();
+    c.handleRemotePlayback(payload({ timestamp_ms: 1_000, current_time_secs: 190 }), fakeVideo({ currentTime: 190 }), 1_000);
+    c.noteLocalTick(fakeVideo({ currentTime: 198.5 }), 9_000);
+    location.search = '?v=eeeeeeeeeee'; // YTM autoplayed the guest's own next song
+    expect(c.handleLocalTrackChange('eeeeeeeeeee', 9_600)).toBeNull();
+
+    c.handleRemotePlayback(payload({ timestamp_ms: 10_000, current_time_secs: 197.5 }), fakeVideo(), 10_000);
+    expect(location.href).toBe(''); // stayed put
+
+    c.handleRemotePlayback(payload({ timestamp_ms: 11_000, video_id: 'ccccccccccc', current_time_secs: 0 }), fakeVideo(), 11_000);
+    expect(location.href).toContain('ccccccccccc'); // followed the host's next song
+  });
+
+  test('a host restarting the song it just finished is still followed', () => {
+    const c = guest();
+    c.handleRemotePlayback(payload({ timestamp_ms: 1_000, current_time_secs: 190 }), fakeVideo({ currentTime: 190 }), 1_000);
+    c.noteLocalTick(fakeVideo({ currentTime: 198.5 }), 9_000);
+    location.search = '?v=eeeeeeeeeee';
+    c.handleRemotePlayback(payload({ timestamp_ms: 10_000, current_time_secs: 0.5 }), fakeVideo(), 10_000);
+    expect(location.href).toContain('dQw4w9WgXcQ');
+  });
+
+  test('stops the old song before switching, so it cannot end and autoplay mid-switch', () => {
+    const video = fakeVideo({ currentTime: 198 });
+    let pauses = 0;
+    video.pause = () => {
+      pauses++;
+    };
+    g.document = { getElementById: () => null, querySelector: (sel: string) => (sel === 'video' ? video : null) };
+    const c = guest();
+    location.search = '?v=aaaaaaaaaaa';
+    c.handleRemotePlayback(payload({ timestamp_ms: 1_000, current_time_secs: 1 }), video, 1_000);
+    expect(pauses).toBe(1);
+  });
+
+  test('a host that is between songs says nothing', () => {
+    const c = new RoomSyncController();
+    c.setRoomState(true, true);
+    const sent: unknown[] = [];
+    const invoke = async (_cmd: string, args?: Record<string, unknown>) => {
+      sent.push(args);
+      return null;
+    };
+    const track = { title: 'T', artist: 'A', durationSecs: 200, currentTimeSecs: 200, isPlaying: false, videoId: 'dQw4w9WgXcQ' };
+    c.broadcastLocalState(track, fakeVideo({ currentTime: 200, paused: true, ended: true }), invoke, true);
+    expect(sent).toHaveLength(0);
+  });
+
+  // Regression: around a track change the URL already named the next song
+  // while the video still reported the old song's end (or the reverse), and
+  // guests seeked the next song to its end or restarted the old one.
+  test('a host broadcasts the song the player has loaded, with its own position', () => {
+    g.document = {
+      getElementById: (id: string) =>
+        id === 'movie_player'
+          ? { classList: { contains: () => false }, getVideoData: () => ({ video_id: 'ccccccccccc' }), getCurrentTime: () => 0.3 }
+          : null,
+      querySelector: () => null
+    };
+    const c = new RoomSyncController();
+    c.setRoomState(true, true);
+    const sent: { playback: SyncPlaybackPayload }[] = [];
+    const invoke = async (_cmd: string, args?: Record<string, unknown>) => {
+      sent.push(args as { playback: SyncPlaybackPayload });
+      return null;
+    };
+    const track = { title: 'T', artist: 'A', durationSecs: 200, currentTimeSecs: 199, isPlaying: true, videoId: 'dQw4w9WgXcQ' };
+    c.broadcastLocalState(track, fakeVideo({ currentTime: 199.7 }), invoke, true);
+    expect(sent[0].playback.video_id).toBe('ccccccccccc');
+    expect(sent[0].playback.current_time_secs).toBe(0.3);
   });
 
   test('a host never turns its own track changes into requests', () => {
