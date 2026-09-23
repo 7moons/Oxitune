@@ -359,9 +359,9 @@ function renderRoomView(room: RoomState | null) {
   if (voteBtn) voteBtn.disabled = voted || !!room.reconnecting;
 
   const queue = room.queue ?? [];
-  show($('queue-add-row'), canControl(myRole));
+  // Songs are added from YTM's own ⋮ menu (redirected by the sync plugin).
+  show($('queue-how'), canControl(myRole));
   show($('queue-listener-hint'), !canControl(myRole));
-  show($('queue-empty'), queue.length === 0);
   const queueCount = $('queue-count');
   if (queueCount) queueCount.textContent = queue.length ? tr('sync.queue.count', { count: queue.length }) : '';
   $('queue-list')?.replaceChildren(...queue.map((q) => queueRow(q, room, myRole)));
@@ -617,30 +617,6 @@ document.addEventListener('DOMContentLoaded', () => {
       renderRoomView(null);
     }
     endBtn.disabled = false;
-  });
-
-  // Shared queue: paste a link, the backend looks the title up.
-  const queueInput = $<HTMLInputElement>('queue-input');
-  const queueBtn = $<HTMLButtonElement>('queue-add-btn');
-  const queueLabel = $('queue-add-label');
-  let queueInFlight = false;
-  const handleQueueAdd = async () => {
-    const input = queueInput?.value.trim() ?? '';
-    if (queueInFlight || !input) return;
-    queueInFlight = true;
-    setButtonLoading(queueBtn, queueLabel, tr('sync.queue.adding'), tr('sync.queue.add'), [queueInput]);
-    const ok = await invokeSync('sync_queue_add', { input });
-    queueInFlight = false;
-    setButtonLoading(queueBtn, queueLabel, null, tr('sync.queue.add'), [queueInput]);
-    if (ok && queueInput) {
-      queueInput.value = '';
-      showToast(tr('sync.queue.added'));
-    }
-    queueInput?.focus();
-  };
-  queueBtn?.addEventListener('click', handleQueueAdd);
-  queueInput?.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') void handleQueueAdd();
   });
 
   // Connection test: which brokers this network reaches, and what that means.

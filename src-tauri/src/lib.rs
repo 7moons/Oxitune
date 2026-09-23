@@ -257,7 +257,6 @@ pub fn run() {
             commands::decide_sync_join,
             commands::vote_sync_skip,
             commands::send_sync_reaction,
-            commands::sync_queue_add,
             commands::sync_queue_remove,
             commands::sync_queue_play,
             commands::test_sync_connection,

@@ -661,9 +661,9 @@ async fn fetch_video_title(video_id: &str) -> Option<(String, String)> {
     Some((info.title, artist))
 }
 
-/// Adds a song to the room's shared queue from a YouTube (Music) link or id:
-/// pasted in the sync window, or picked from YTM's own "Add to queue" /
-/// "Play next" (`next`) menu items, which the sync plugin redirects here.
+/// Adds a song to the room's shared queue: YTM's own "Add to queue" /
+/// "Play next" (`next`) menu items, which the sync plugin redirects here
+/// through the bridge.
 pub async fn add_to_sync_queue(
     app_handle: AppHandle,
     state: &AppState,
@@ -673,16 +673,6 @@ pub async fn add_to_sync_queue(
     let video_id = crate::sync_room::parse_video_id(input).ok_or("sync.error.badLink")?;
     let (title, artist) = fetch_video_title(&video_id).await.unwrap_or_default();
     crate::sync_room::queue_add(&state.sync_room, &sync_sink(app_handle), &video_id, &title, &artist, next)
-}
-
-#[tauri::command]
-pub async fn sync_queue_add(
-    app_handle: AppHandle,
-    state: State<'_, Arc<AppState>>,
-    input: String,
-    next: Option<bool>,
-) -> Result<(), String> {
-    add_to_sync_queue(app_handle, &state, &input, next.unwrap_or(false)).await
 }
 
 #[tauri::command]

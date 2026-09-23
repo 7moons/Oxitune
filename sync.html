@@ -105,12 +105,8 @@
             <span data-i18n="sync.queue.title">Shared queue</span>
             <span id="queue-count" class="hint"></span>
           </div>
-          <div id="queue-add-row" class="queue-add">
-            <input type="text" id="queue-input" class="input" data-i18n-placeholder="sync.queue.placeholder" placeholder="Paste a YouTube Music song link" autocomplete="off" spellcheck="false" />
-            <button id="queue-add-btn" class="btn btn-filled"><span id="queue-add-label" data-i18n="sync.queue.add">Add</span></button>
-          </div>
-          <p id="queue-listener-hint" class="hint is-hidden" data-i18n="sync.queue.listenerHint">Listeners can’t add songs, but they can vote to skip.</p>
-          <p id="queue-empty" class="hint" data-i18n="sync.queue.empty">Songs added here play in order after the current one.</p>
+          <p id="queue-how" class="hint queue-how" data-i18n="sync.queue.how">In YouTube Music, open a song’s ⋮ menu and pick “Add to queue” or “Play next”.</p>
+          <p id="queue-listener-hint" class="hint queue-how is-hidden" data-i18n="sync.queue.listenerHint">Listeners can’t add songs, but they can vote to skip.</p>
           <div class="member-list" id="queue-list"></div>
         </div>
 

@@ -1059,13 +1059,8 @@ button {
   margin-right: 6px;
   fill: currentColor;
 }
-.queue-add {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-.queue-add .btn {
-  flex: 0 0 auto;
+.queue-how {
+  margin: 0 0 8px;
 }
 .queue-thumb {
   flex: 0 0 40px;
