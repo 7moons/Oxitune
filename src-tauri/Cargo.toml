@@ -1,6 +1,6 @@
 [package]
 name = "ytmd"
-version = "0.1.0"
+version = "0.1.1"
 description = "YTMD - desktop client for YouTube Music, powered by Tauri v2"
 authors = ["KayZed"]
 edition = "2021"
