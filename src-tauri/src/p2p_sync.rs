@@ -255,6 +255,9 @@ async fn run_host_loop(
                                         }
                                     }
                                     WireMessage::Heartbeat { user_id } => manager.touch_member(&user_id),
+                                    WireMessage::Control { user_id, action } => {
+                                        manager.handle_guest_control(&user_id, action, &sink);
+                                    }
                                     WireMessage::Leave { user_id } => {
                                         manager.unregister_peer(&user_id);
                                         if let Some(room) = manager.remove_member(&user_id) {
@@ -412,10 +415,11 @@ async fn try_join_on_broker(
                 let uid = user_id.to_string();
                 let rcode = clean_code.to_string();
                 let (shutdown_tx, shutdown_rx) = oneshot::channel();
+                let (outbox, outbox_rx) = mpsc::unbounded_channel();
                 let reader_task = tauri::async_runtime::spawn(async move {
-                    run_guest_loop(client, eventloop, m, s, uid, rcode, shutdown_rx, generation).await;
+                    run_guest_loop(client, eventloop, m, s, uid, rcode, shutdown_rx, outbox_rx, generation).await;
                 });
-                manager.set_p2p_guest_session(reader_task, shutdown_tx);
+                manager.set_p2p_guest_session(reader_task, shutdown_tx, user_id.to_string(), outbox);
                 return Some(local_room);
             }
             Ok(Ok(_)) => {}
@@ -437,6 +441,7 @@ async fn run_guest_loop(
     my_user_id: String,
     room_code: String,
     mut shutdown_rx: oneshot::Receiver<()>,
+    mut outbox_rx: mpsc::UnboundedReceiver<WireMessage>,
     generation: u64,
 ) {
     let guest_topic = room_topic_guest(&room_code, &my_user_id);
@@ -465,6 +470,12 @@ async fn run_guest_loop(
                     break;
                 }
                 let _ = client.try_publish(&host_topic, QoS::AtMostOnce, false, heartbeat.clone());
+                continue;
+            }
+            Some(msg) = outbox_rx.recv() => {
+                if let Ok(payload) = serde_json::to_vec(&msg) {
+                    let _ = client.try_publish(&host_topic, QoS::AtLeastOnce, false, payload);
+                }
                 continue;
             }
             event = eventloop.poll() => event,
@@ -514,13 +525,14 @@ async fn run_guest_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sync_room::{RoomMember, SyncPlaybackState};
+    use crate::sync_room::{RoomMember, SyncControlRequest, SyncPlaybackState};
 
     struct NoopSink;
     impl SyncEventSink for NoopSink {
         fn room_updated(&self, _room: &RoomState) {}
         fn playback_updated(&self, _state: &SyncPlaybackState) {}
         fn room_left(&self) {}
+        fn control_requested(&self, _request: &SyncControlRequest) {}
     }
     fn noop_sink() -> Arc<dyn SyncEventSink> {
         Arc::new(NoopSink)

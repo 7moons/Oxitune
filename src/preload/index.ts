@@ -13,7 +13,7 @@ import { ThemeEnginePlugin } from '../plugins/themes';
 import { PipPlugin } from '../plugins/pip';
 import { DownloaderPlugin, startDownload } from '../plugins/downloader';
 import { LocalFilesPlugin } from '../plugins/local-files';
-import { SyncRoomPlugin } from '../plugins/sync-room';
+import { SyncRoomPlugin, routeRoomPlayerCommand } from '../plugins/sync-room';
 import { PowerPlugin } from '../plugins/power';
 import { RemotePlugin, showQrModal } from '../plugins/remote';
 import { PluginContext, TrackInfo } from '../plugins/types';
@@ -242,6 +242,7 @@ async function initYTMD() {
   });
 
   function handlePlayerCommand(command: string) {
+    if (routeRoomPlayerCommand(command)) return;
     switch (command) {
       case 'play':
         PlayerBridge.play();

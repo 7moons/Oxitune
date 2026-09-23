@@ -3,7 +3,7 @@ export const EQ_FREQUENCIES = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16
 export interface EqPreset {
   id: string;
   name: string;
-  gains: number[]; // dB values for each of the 10 bands (-12dB to +12dB)
+  gains: number[]; // dB values for each of the 10 bands, within ±EQ_MAX_DB
   preamp?: number;
 }
 
@@ -64,6 +64,9 @@ export const EQ_PRESETS: Record<string, EqPreset> = {
   }
 };
 
+/** Band and preamp range, ± this many dB. Settings sliders use it too. */
+export const EQ_MAX_DB = 24;
+
 export function clampGain(db: number): number {
-  return Math.max(-12, Math.min(12, db));
+  return Math.max(-EQ_MAX_DB, Math.min(EQ_MAX_DB, db));
 }

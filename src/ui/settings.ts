@@ -1,4 +1,4 @@
-import { EQ_FREQUENCIES, EQ_PRESETS } from '../plugins/audio-dsp/presets';
+import { EQ_FREQUENCIES, EQ_MAX_DB, EQ_PRESETS } from '../plugins/audio-dsp/presets';
 import { showToast } from '../preload/ui/kit';
 import { initAmbientBackdrop } from './ambient';
 import { formatDb, formatCrossfade } from './format';
@@ -130,8 +130,8 @@ function renderEqSliders() {
     slider.type = 'range';
     slider.className = 'range eq-v-slider';
     slider.id = `eq-slider-${idx}`;
-    slider.min = '-12';
-    slider.max = '12';
+    slider.min = String(-EQ_MAX_DB);
+    slider.max = String(EQ_MAX_DB);
     slider.step = '0.5';
     slider.value = String(val);
     slider.setAttribute('aria-label', `${formatFreq(freq)} Hz`);

@@ -77,6 +77,11 @@ struct BroadcastSyncArgs {
 }
 
 #[derive(Deserialize)]
+struct SyncControlArgs {
+    action: sync_room::SyncControl,
+}
+
+#[derive(Deserialize)]
 struct InhibitSleepArgs {
     inhibit: bool,
 }
@@ -166,6 +171,11 @@ bridge_commands! {
         sync_room::broadcast_playback(&state.sync_room, p.playback);
         Ok(Value::Null)
     }
+    "send_sync_control" => |h, state, args| {
+        let p: SyncControlArgs = parse_args("send_sync_control", args)?;
+        sync_room::send_control(&state.sync_room, p.action)?;
+        Ok(Value::Null)
+    }
     "get_sync_room_state" => |h, state, args| {
         to_data(state.sync_room.get_room_state())
     }
@@ -239,6 +249,7 @@ mod tests {
         // this against the TS sources themselves.
         for cmd in [
             "broadcast_sync_state",
+            "send_sync_control",
             "download_track",
             "fetch_lyrics",
             "get_config",
