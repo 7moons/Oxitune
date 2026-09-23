@@ -225,8 +225,33 @@ export const KIT_CSS = `
   }
   #ytmd-tooltip.ytmd-open { opacity: 1; }
 
+  #ytmd-volume-indicator {
+    position: fixed;
+    z-index: 2201;
+    visibility: hidden;
+    opacity: 0;
+    box-sizing: border-box;
+    min-width: 58px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--ytmd-surface) 82%, transparent);
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25);
+    color: var(--ytmd-text);
+    font: 700 24px/28px var(--ytmd-font-display);
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+    pointer-events: none;
+    transition: opacity 0.35s ease, visibility 0s linear 0.35s;
+  }
+  #ytmd-volume-indicator.ytmd-visible {
+    visibility: visible;
+    opacity: 1;
+    transition: opacity 0.12s ease, visibility 0s;
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .ytmd-menu, .ytmd-toast, .ytmd-toast.ytmd-leaving, .ytmd-scrim { transition: none; animation: none; }
+    #ytmd-volume-indicator { transition: none; }
   }
 `;
 

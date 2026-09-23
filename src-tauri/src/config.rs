@@ -15,6 +15,8 @@ pub struct AppConfig {
     pub lyrics_enabled: bool,
     pub miniplayer_enabled: bool,
     pub wheel_volume_step: f64,
+    #[serde(default)]
+    pub wheel_volume_on_player_page: bool,
     pub custom_css: String,
     pub custom_user_agent: String,
     pub quality: String,
@@ -68,6 +70,7 @@ impl Default for AppConfig {
             lyrics_enabled: true,
             miniplayer_enabled: true,
             wheel_volume_step: 0.05,
+            wheel_volume_on_player_page: false,
             custom_css: "".to_string(),
             custom_user_agent: "".to_string(),
             quality: "high".to_string(),
@@ -336,7 +339,22 @@ mod tests {
         assert!(config.inhibit_sleep);
         assert!(config.pause_on_lock);
         assert_eq!(config.wheel_volume_step, 0.05);
+        assert!(!config.wheel_volume_on_player_page);
         assert_eq!(config.quality, "high");
+    }
+
+    #[test]
+    fn test_old_config_without_player_page_wheel_setting_keeps_other_values() {
+        let mut saved = serde_json::to_value(AppConfig {
+            wheel_volume_step: 0.12,
+            ..AppConfig::default()
+        })
+        .expect("serialize");
+        saved.as_object_mut().expect("config object").remove("wheel_volume_on_player_page");
+
+        let loaded: AppConfig = serde_json::from_value(saved).expect("old config still loads");
+        assert!(!loaded.wheel_volume_on_player_page);
+        assert_eq!(loaded.wheel_volume_step, 0.12);
     }
 
     #[test]

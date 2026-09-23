@@ -1,3 +1,5 @@
+import { setPlayerVolumePercent } from './playerVolume';
+
 export class PlayerBridge {
   static getVideo(): HTMLVideoElement | null {
     return document.querySelector('video') || document.querySelector('.html5-main-video');
@@ -65,7 +67,7 @@ export class PlayerBridge {
   static setVolume(volume: number): void {
     const video = this.getVideo();
     if (video) {
-      video.volume = Math.max(0, Math.min(1, volume));
+      setPlayerVolumePercent(volume * 100, video);
     }
   }
 

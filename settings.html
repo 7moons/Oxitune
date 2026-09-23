@@ -95,6 +95,22 @@
             <label class="toggle"><input type="checkbox" id="loudness_normalization" /><span class="toggle-track"></span></label>
           </div>
 
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.wheelVolume.title">Scroll to change volume over the player</span>
+              <span class="setting-desc" data-i18n="settings.wheelVolume.desc">Extends mouse wheel volume control from the bottom bar to the main player panel</span>
+            </div>
+            <label class="toggle"><input type="checkbox" id="wheel_volume_on_player_page" data-i18n-label="settings.wheelVolume.title" /><span class="toggle-track"></span></label>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.wheelVolumeStep.title">Volume change per scroll</span>
+              <span class="setting-desc" data-i18n="settings.wheelVolumeStep.desc">Percentage points per wheel step, including the bottom bar</span>
+            </div>
+            <input type="number" id="wheel_volume_step_points" class="input narrow" min="1" max="100" step="1" value="5" data-i18n-label="settings.wheelVolumeStep.label" />
+          </div>
+
           <div class="setting-row stack">
             <div class="setting-row-head">
               <div class="setting-text">

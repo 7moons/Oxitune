@@ -4,7 +4,8 @@ import { resolve } from 'path';
 export default defineConfig({
   clearScreen: false,
   server: {
-    port: 1420,
+    host: '127.0.0.1',
+    port: 24681,
     strictPort: true,
     watch: {
       ignored: ['**/src-tauri/**']

@@ -23,6 +23,8 @@ interface AppConfig {
   skip_silence_enabled: boolean;
   playback_speed: number;
   preserve_pitch: boolean;
+  wheel_volume_on_player_page: boolean;
+  wheel_volume_step: number;
   ambient_lighting_enabled: boolean;
   ambient_intensity: number;
   download_dir: string;
@@ -57,6 +59,7 @@ const TOGGLES: [keyof AppConfig & string, boolean][] = [
   ['loudness_normalization', false],
   ['skip_silence_enabled', false],
   ['preserve_pitch', true],
+  ['wheel_volume_on_player_page', false],
   ['ambient_lighting_enabled', true],
   ['embed_lyrics', true],
   ['remote_enabled', true],
@@ -225,6 +228,8 @@ async function loadSettings() {
     if (localDir) localDir.value = config.local_music_dir || '';
     const css = $<HTMLTextAreaElement>('custom_css');
     if (css) css.value = config.custom_css || '';
+    const wheelStep = $<HTMLInputElement>('wheel_volume_step_points');
+    if (wheelStep) wheelStep.value = String(Math.max(1, Math.min(100, Math.round((config.wheel_volume_step ?? 0.05) * 100))));
 
     setIntensity(config.ambient_intensity ?? 0.6);
     setPreamp(config.preamp_gain || 0);
@@ -261,6 +266,10 @@ function collectConfig(config: AppConfig): AppConfig {
   next.preamp_gain = num('preamp_gain');
   next.crossfade_seconds = num('crossfade_seconds');
   next.playback_speed = num('playback_speed');
+  const wheelStepPoints = Number($<HTMLInputElement>('wheel_volume_step_points')?.value);
+  next.wheel_volume_step = Number.isFinite(wheelStepPoints) && wheelStepPoints >= 1 && wheelStepPoints <= 100
+    ? Math.round(wheelStepPoints) / 100
+    : config.wheel_volume_step ?? 0.05;
   next.equalizer_gains = [...currentGains];
   return next;
 }

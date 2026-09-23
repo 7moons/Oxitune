@@ -36,7 +36,8 @@ const en = {
   lyricsEarlier: 'Show lyrics earlier',
   lyricsLater: 'Show lyrics later',
   lyricsReset: 'Reset',
-  actionFailed: 'Something went wrong. Try again.'
+  actionFailed: 'Something went wrong. Try again.',
+  volumeLevel: (percent: number) => `Volume: ${percent}%`
 };
 
 type Strings = typeof en;
@@ -79,7 +80,8 @@ const pl: Strings = {
   lyricsEarlier: 'Pokazuj tekst wcześniej',
   lyricsLater: 'Pokazuj tekst później',
   lyricsReset: 'Resetuj',
-  actionFailed: 'Coś poszło nie tak. Spróbuj ponownie.'
+  actionFailed: 'Coś poszło nie tak. Spróbuj ponownie.',
+  volumeLevel: (percent: number) => `Głośność: ${percent}%`
 };
 
 const LOCALES: Record<string, Strings> = { en, pl };
