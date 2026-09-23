@@ -4,6 +4,29 @@ use tauri::{
     AppHandle, Emitter, Manager,
 };
 
+/// Brings the main window back from the tray, the taskbar (minimized) or
+/// behind other windows. Used by the tray and by a second launch of the app.
+pub fn show_main_window(app: &AppHandle) {
+    if let Some(main_win) = app.get_webview_window("main") {
+        let _ = main_win.show();
+        let _ = main_win.unminimize();
+        let _ = main_win.set_focus();
+    }
+}
+
+/// Tray click / "Show / Hide": hides a visible main window, otherwise brings it back.
+fn toggle_main_window(app: &AppHandle) {
+    let Some(main_win) = app.get_webview_window("main") else {
+        return;
+    };
+    let showing = main_win.is_visible().unwrap_or(false) && !main_win.is_minimized().unwrap_or(false);
+    if showing {
+        let _ = main_win.hide();
+    } else {
+        show_main_window(app);
+    }
+}
+
 pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let play_pause_i = MenuItem::with_id(app, "play_pause", "Play / Pause", true, None::<&str>)?;
     let next_i = MenuItem::with_id(app, "next", "Next Track", true, None::<&str>)?;
@@ -70,18 +93,7 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                     let _ = settings_win.set_focus();
                 }
             }
-            "show_hide" => {
-                if let Some(main_win) = app_handle.get_webview_window("main") {
-                    if let Ok(visible) = main_win.is_visible() {
-                        if visible {
-                            let _ = main_win.hide();
-                        } else {
-                            let _ = main_win.show();
-                            let _ = main_win.set_focus();
-                        }
-                    }
-                }
-            }
+            "show_hide" => toggle_main_window(app_handle),
             "quit" => {
                 app_handle.exit(0);
             }
@@ -94,17 +106,7 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 ..
             } = event
             {
-                let app = tray.app_handle();
-                if let Some(main_win) = app.get_webview_window("main") {
-                    if let Ok(visible) = main_win.is_visible() {
-                        if visible {
-                            let _ = main_win.hide();
-                        } else {
-                            let _ = main_win.show();
-                            let _ = main_win.set_focus();
-                        }
-                    }
-                }
+                toggle_main_window(tray.app_handle());
             }
         });
 

@@ -1,4 +1,5 @@
 import { YTMDPlugin, PluginContext, TrackInfo } from '../types';
+import { isSyncGuest } from '../../preload/syncRole';
 
 interface Segment {
   category: string;
@@ -54,7 +55,7 @@ export const SponsorblockPlugin: YTMDPlugin = {
   },
 
   onTick(currentTimeSecs: number, ctx: PluginContext) {
-    if (!segments || segments.length === 0) return;
+    if (!segments || segments.length === 0 || isSyncGuest()) return;
     // Skip each segment only once. Without this, re-checking "are we inside
     // a segment" on every tick means manually seeking back into an already-
     // skipped range gets immediately overridden right back to its end —

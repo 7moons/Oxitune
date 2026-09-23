@@ -146,6 +146,43 @@ pub(crate) enum WireMessage {
     /// other as gone. Peers that predate this variant fail to parse it and
     /// skip the line, same as any other unknown message.
     Heartbeat { user_id: String },
+    /// Guest -> host: a playback request (skip, pause, pick a song) for the
+    /// whole room. Older hosts fail to parse it and skip the line.
+    Control { user_id: String, action: SyncControl },
+}
+
+/// What a guest asks the host to do. The host's page carries it out and its
+/// regular `Playback` broadcast then brings every guest along, the sender
+/// included, so a guest never acts on its own player and drifts off.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SyncControl {
+    Next,
+    Previous,
+    SetPlaying { playing: bool },
+    PlayVideo { video_id: String },
+}
+
+impl SyncControl {
+    /// The host's page navigates to `video_id`, so only YouTube's 11-char id
+    /// form gets through.
+    pub(crate) fn is_valid(&self) -> bool {
+        match self {
+            SyncControl::PlayVideo { video_id } => {
+                video_id.len() == 11
+                    && video_id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+            }
+            _ => true,
+        }
+    }
+}
+
+/// A guest's `Control` as handed to the host's page: the request and the
+/// nickname of whoever sent it (for the toast).
+#[derive(Debug, Clone, Serialize)]
+pub struct SyncControlRequest {
+    pub from: String,
+    pub action: SyncControl,
 }
 
 /// How often peers ping each other and how long silence is tolerated before
@@ -204,6 +241,7 @@ pub trait SyncEventSink: Send + Sync + 'static {
     fn room_updated(&self, room: &RoomState);
     fn playback_updated(&self, state: &SyncPlaybackState);
     fn room_left(&self);
+    fn control_requested(&self, request: &SyncControlRequest);
 }
 
 impl SyncEventSink for AppHandle {
@@ -215,6 +253,9 @@ impl SyncEventSink for AppHandle {
     }
     fn room_left(&self) {
         let _ = self.emit("sync-room-left", ());
+    }
+    fn control_requested(&self, request: &SyncControlRequest) {
+        let _ = self.emit("sync-control-remote", request);
     }
 }
 
@@ -243,15 +284,20 @@ struct HostSession {
 
 struct GuestSession {
     reader_task: tauri::async_runtime::JoinHandle<()>,
-    /// TCP only: sends this guest's heartbeats and owns the stream's write
-    /// half for the whole session. Dropping a split TCP stream's write half
+    /// Our member id, stamped on the `Control` requests we send.
+    user_id: String,
+    /// Messages for the host (today: `Control`), drained by `writer_task`
+    /// (TCP) or the guest loop (P2P).
+    outbox: mpsc::UnboundedSender<WireMessage>,
+    /// TCP only: sends this guest's heartbeats and outbox messages and owns
+    /// the stream's write half for the whole session. Dropping a split TCP stream's write half
     /// immediately shuts down that direction (sends FIN), which the host
     /// reads as a disconnect — so aborting this task on leave is also what
     /// closes the connection.
     ///
     /// `None` for a P2P session (`p2p_sync.rs`): there `reader_task` owns
     /// the MQTT client and sends heartbeats itself.
-    heartbeat_task: Option<tauri::async_runtime::JoinHandle<()>>,
+    writer_task: Option<tauri::async_runtime::JoinHandle<()>>,
     /// P2P only: asks the guest loop to publish `Leave` to the host and
     /// exit on its own (instead of being aborted mid-flight), so the host
     /// drops this member from the room right away.
@@ -441,12 +487,41 @@ impl SyncRoomManager {
         &self,
         reader_task: tauri::async_runtime::JoinHandle<()>,
         shutdown: oneshot::Sender<()>,
+        user_id: String,
+        outbox: mpsc::UnboundedSender<WireMessage>,
     ) {
         *self.guest.lock() = Some(GuestSession {
             reader_task,
-            heartbeat_task: None,
+            user_id,
+            outbox,
+            writer_task: None,
             shutdown: Some(shutdown),
         });
+    }
+
+    /// Host side: a guest's `Control` arrived. `member_id` is whoever the
+    /// transport says sent it; non-members and invalid requests are dropped.
+    pub(crate) fn handle_guest_control(
+        &self,
+        member_id: &str,
+        action: SyncControl,
+        sink: &Arc<dyn SyncEventSink>,
+    ) {
+        if !action.is_valid() {
+            return;
+        }
+        let from = {
+            let guard = self.state.lock();
+            let Some(room) = guard.as_ref().filter(|r| r.is_host) else {
+                return;
+            };
+            match room.members.iter().find(|m| m.id == member_id) {
+                Some(m) => m.nickname.clone(),
+                None => return,
+            }
+        };
+        self.touch_member(member_id);
+        sink.control_requested(&SyncControlRequest { from, action });
     }
 
     #[cfg(test)]
@@ -499,7 +574,7 @@ impl SyncRoomManager {
         *state = None;
         self.session_gen.fetch_add(1, Ordering::SeqCst);
         if let Some(guest) = self.guest.lock().take() {
-            if let Some(task) = guest.heartbeat_task {
+            if let Some(task) = guest.writer_task {
                 task.abort();
             }
         }
@@ -661,11 +736,15 @@ async fn peer_task(stream: TcpStream, manager: Arc<SyncRoomManager>, sink: Arc<d
             read_res = read_line_capped(&mut reader, &mut line) => {
                 match read_res {
                     Ok(0) | Err(_) => break,
-                    // Any line (today: `Heartbeat`) proves the guest is
-                    // alive; its content is otherwise ignored, so a future
-                    // guest-originated message type can be added without
-                    // breaking older hosts.
-                    Ok(_) => manager.touch_member(&member_id),
+                    // Any line proves the guest is alive. Only `Control`
+                    // carries anything more; unknown lines are ignored so
+                    // newer guests don't break this host.
+                    Ok(_) => {
+                        manager.touch_member(&member_id);
+                        if let Ok(WireMessage::Control { action, .. }) = serde_json::from_str::<WireMessage>(line.trim()) {
+                            manager.handle_guest_control(&member_id, action, &sink);
+                        }
+                    }
                 }
             }
             msg = rx.recv() => {
@@ -849,35 +928,50 @@ async fn connect_to_host(
     let reader_task = tauri::async_runtime::spawn(async move {
         guest_reader_loop(reader, m, s, uid, generation).await;
     });
-    let heartbeat_task = tauri::async_runtime::spawn(guest_heartbeat_loop(
+    let (outbox, outbox_rx) = mpsc::unbounded_channel();
+    let writer_task = tauri::async_runtime::spawn(guest_writer_loop(
         write_half,
-        user_id,
+        user_id.clone(),
         manager.liveness.heartbeat_interval,
+        outbox_rx,
     ));
 
     *manager.guest.lock() = Some(GuestSession {
         reader_task,
-        heartbeat_task: Some(heartbeat_task),
+        user_id,
+        outbox,
+        writer_task: Some(writer_task),
         shutdown: None,
     });
 
     Ok(local_room)
 }
 
-/// TCP guest side: pings the host every interval. Owns the write half, so
-/// when this task ends (aborted on leave, or a write fails) the connection's
-/// sending side closes and the host sees the guest go.
-async fn guest_heartbeat_loop(
+/// TCP guest side: pings the host every interval and forwards the outbox
+/// (`Control` requests). Owns the write half, so when this task ends
+/// (aborted on leave, or a write fails) the connection's sending side closes
+/// and the host sees the guest go.
+async fn guest_writer_loop(
     mut write_half: tokio::net::tcp::OwnedWriteHalf,
     user_id: String,
     interval: Duration,
+    mut outbox: mpsc::UnboundedReceiver<WireMessage>,
 ) {
-    let Ok(mut line) = serde_json::to_string(&WireMessage::Heartbeat { user_id }) else {
-        return;
-    };
-    line.push('\n');
+    let mut ticker = tokio::time::interval(interval);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    ticker.tick().await; // immediate; the Join just proved we're alive
     loop {
-        tokio::time::sleep(interval).await;
+        let msg = tokio::select! {
+            _ = ticker.tick() => WireMessage::Heartbeat { user_id: user_id.clone() },
+            next = outbox.recv() => match next {
+                Some(msg) => msg,
+                None => return,
+            },
+        };
+        let Ok(mut line) = serde_json::to_string(&msg) else {
+            continue;
+        };
+        line.push('\n');
         if write_half.write_all(line.as_bytes()).await.is_err() {
             return;
         }
@@ -922,7 +1016,7 @@ async fn guest_reader_loop(
                         sink.playback_updated(&state);
                     }
                     WireMessage::Heartbeat { .. } => {} // only proves liveness; the read above already counted it
-                    WireMessage::Join { .. } | WireMessage::Leave { .. } => {} // guests never receive Join / Leave
+                    WireMessage::Join { .. } | WireMessage::Leave { .. } | WireMessage::Control { .. } => {} // host-bound only
                     WireMessage::Ack => {} // Ack only exists on the internet transport
                 }
             }
@@ -984,6 +1078,19 @@ async fn discover_host_on_port(
     }
 }
 
+/// Guest side: asks the host to carry out `action` for the whole room.
+pub fn send_control(manager: &Arc<SyncRoomManager>, action: SyncControl) -> Result<(), String> {
+    if !action.is_valid() {
+        return Err("Invalid playback request.".to_string());
+    }
+    let guard = manager.guest.lock();
+    let guest = guard.as_ref().ok_or("Not listening together as a guest.")?;
+    guest
+        .outbox
+        .send(WireMessage::Control { user_id: guest.user_id.clone(), action })
+        .map_err(|_| "Connection to the host is closed.".to_string())
+}
+
 // ---------------------------------------------------------------------
 // Leaving
 // ---------------------------------------------------------------------
@@ -1014,7 +1121,7 @@ pub fn leave_room(manager: &Arc<SyncRoomManager>) {
         manager.peers.lock().clear();
     }
     if let Some(guest) = manager.guest.lock().take() {
-        if let Some(task) = guest.heartbeat_task {
+        if let Some(task) = guest.writer_task {
             task.abort();
         }
         match guest.shutdown {
@@ -1040,6 +1147,7 @@ mod tests {
         fn room_updated(&self, _room: &RoomState) {}
         fn playback_updated(&self, _state: &SyncPlaybackState) {}
         fn room_left(&self) {}
+        fn control_requested(&self, _request: &SyncControlRequest) {}
     }
 
     fn noop_sink() -> Arc<dyn SyncEventSink> {
@@ -1296,6 +1404,7 @@ mod tests {
     struct RecordingSink {
         room_updates: Mutex<Vec<RoomState>>,
         playback_updates: Mutex<Vec<SyncPlaybackState>>,
+        controls: Mutex<Vec<(String, SyncControl)>>,
         left: std::sync::atomic::AtomicUsize,
     }
     impl SyncEventSink for RecordingSink {
@@ -1308,6 +1417,79 @@ mod tests {
         fn room_left(&self) {
             self.left.fetch_add(1, Ordering::SeqCst);
         }
+        fn control_requested(&self, request: &SyncControlRequest) {
+            self.controls.lock().push((request.from.clone(), request.action.clone()));
+        }
+    }
+
+    /// Guests used to have no way to act for the room: a skip on a guest
+    /// just got undone by the next host broadcast. Now it travels to the
+    /// host, tagged with the guest's nickname.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_guest_control_reaches_host_page() {
+        let host_manager = local_manager();
+        let guest_manager = local_manager();
+        let host_sink = Arc::new(RecordingSink::default());
+        create_room(&host_manager, host_sink.clone(), "Host".to_string()).await.unwrap();
+
+        assert!(send_control(&guest_manager, SyncControl::Next).is_err(), "not in a room yet");
+
+        let port = host_manager.host_port().unwrap();
+        let addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port);
+        connect_to_host(&guest_manager, noop_sink(), addr, "Ola".to_string()).await.unwrap();
+
+        send_control(&guest_manager, SyncControl::Next).unwrap();
+        send_control(&guest_manager, SyncControl::SetPlaying { playing: false }).unwrap();
+        send_control(&guest_manager, SyncControl::PlayVideo { video_id: "dQw4w9WgXcQ".into() }).unwrap();
+        assert!(
+            send_control(&guest_manager, SyncControl::PlayVideo { video_id: "javascript:x".into() }).is_err(),
+            "malformed ids never leave the guest"
+        );
+
+        let got_all = wait_until(|| host_sink.controls.lock().len() == 3, Duration::from_secs(2)).await;
+        assert!(got_all, "host should receive every control");
+        let controls = host_sink.controls.lock().clone();
+        assert_eq!(
+            controls,
+            vec![
+                ("Ola".to_string(), SyncControl::Next),
+                ("Ola".to_string(), SyncControl::SetPlaying { playing: false }),
+                ("Ola".to_string(), SyncControl::PlayVideo { video_id: "dQw4w9WgXcQ".into() }),
+            ]
+        );
+
+        leave_room(&guest_manager);
+        leave_room(&host_manager);
+    }
+
+    #[test]
+    fn test_host_ignores_control_from_non_members_and_bad_ids() {
+        let manager = local_manager();
+        manager.set_local_room(room_with(&[("host", true), ("g1", false)]));
+        let sink = Arc::new(RecordingSink::default());
+        let dyn_sink: Arc<dyn SyncEventSink> = sink.clone();
+
+        manager.handle_guest_control("stranger", SyncControl::Next, &dyn_sink);
+        manager.handle_guest_control("g1", SyncControl::PlayVideo { video_id: "../../etc".into() }, &dyn_sink);
+        assert!(sink.controls.lock().is_empty());
+
+        manager.handle_guest_control("g1", SyncControl::Previous, &dyn_sink);
+        assert_eq!(sink.controls.lock().len(), 1);
+    }
+
+    #[test]
+    fn test_control_wire_format() {
+        let msg = WireMessage::Control {
+            user_id: "user-1".into(),
+            action: SyncControl::SetPlaying { playing: true },
+        };
+        let json = serde_json::to_value(&msg).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({ "type": "Control", "user_id": "user-1", "action": { "kind": "set_playing", "playing": true } })
+        );
+        let back: WireMessage = serde_json::from_value(json).unwrap();
+        assert!(matches!(back, WireMessage::Control { action: SyncControl::SetPlaying { playing: true }, .. }));
     }
 
     /// Millisecond-scale liveness so eviction/silence tests finish fast.

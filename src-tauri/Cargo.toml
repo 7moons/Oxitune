@@ -37,6 +37,7 @@ rand = "0.9"
 rumqttc = { version = "0.25.1", default-features = false, features = ["use-rustls"] }
 lofty = "0.25.1"
 tauri-plugin-updater = "2.0.0"
+tauri-plugin-single-instance = "2.0.0"
 rustls = { version = "0.23", features = ["ring"] }
 
 # Screen-lock detection (src/screen_lock.rs). zbus is already in the tree via

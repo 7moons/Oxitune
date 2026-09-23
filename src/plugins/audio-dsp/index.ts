@@ -2,6 +2,7 @@ import { YTMDPlugin, PluginContext, TrackInfo } from '../types';
 import { AudioEngine } from './engine';
 import { CrossfadeController } from './crossfade';
 import { SkipSilenceController } from './skip-silence';
+import { isSyncGuest } from '../../preload/syncRole';
 
 let crossfadeRef: CrossfadeController | null = null;
 let skipSilenceRef: SkipSilenceController | null = null;
@@ -157,6 +158,8 @@ export const AudioDspPlugin: YTMDPlugin = {
   },
 
   onTick(currentTimeSecs: number, ctx: PluginContext) {
+    // Both move the player (early skip, silence jumps); a guest follows the host instead.
+    if (isSyncGuest()) return;
     if (crossfadeRef) crossfadeRef.onTick(currentTimeSecs, ctx.track);
     if (skipSilenceRef) skipSilenceRef.onTick(currentTimeSecs, ctx.track, ctx.getVideoElement());
   },

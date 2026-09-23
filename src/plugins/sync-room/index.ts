@@ -3,6 +3,7 @@ import { PlayerBridge } from '../../preload/bridge';
 import { setSyncStatus } from '../../preload/ui/navMenu';
 import { showToast } from '../../preload/ui/kit';
 import { t } from '../../preload/ui/i18n';
+import { setSyncGuest } from '../../preload/syncRole';
 
 export interface SyncPlaybackPayload {
   video_id: string;
@@ -27,6 +28,19 @@ interface RoomStatePayload {
   playback_state: SyncPlaybackPayload | null;
 }
 
+/** A guest's request for the whole room, carried out by the host's page
+ * (mirrors `SyncControl` in sync_room.rs). */
+export type SyncControl =
+  | { kind: 'next' }
+  | { kind: 'previous' }
+  | { kind: 'set_playing'; playing: boolean }
+  | { kind: 'play_video'; video_id: string };
+
+interface SyncControlRequest {
+  from: string;
+  action: SyncControl;
+}
+
 /** Who arrived/left between two room snapshots, excluding ourselves. */
 export function diffMembers(
   prev: RoomMemberPayload[],
@@ -45,27 +59,61 @@ export interface LocalPlayback {
   videoId: string | null;
   paused: boolean;
   currentTime: number;
+  /** Whether a speed catch-up is already running (it then runs until
+   * nearly exact, instead of stopping at the threshold that started it). */
+  correcting: boolean;
 }
 
 export interface SyncAction {
   navigateTo: string | null;
   setPlaying: boolean | null;
   seekTo: number | null;
+  /** Speed to play at to close the gap; 1 = in sync, normal speed. */
+  playbackRate: number;
 }
 
 const VIDEO_ID_RE = /^[A-Za-z0-9_-]{11}$/;
-const DRIFT_TOLERANCE_SECS = 1.5;
-/** Host and guest clocks are never perfectly in sync, so the host's
- * `timestamp_ms` can't be trusted for more than a rough transit estimate.
- * Capping it keeps a skewed clock from pushing the guest seconds ahead. */
+/** Past this the guest jumps. Below it, it catches up by playing a little
+ * faster or slower, which is inaudible, unlike a seek: that is a gap plus a
+ * rebuffer, and the rebuffer itself leaves the guest behind again. */
+const SEEK_DRIFT_SECS = 2.0;
+/** Drift that starts a catch-up, and drift at which it ends. The gap keeps
+ * measurement noise from toggling it. */
+const START_CATCH_UP_SECS = 0.25;
+const END_CATCH_UP_SECS = 0.05;
+/** Aim to close the gap over about this long, never more than
+ * MAX_RATE_DELTA off normal speed. */
+const CATCH_UP_OVER_SECS = 3;
+const MAX_RATE_DELTA = 0.1;
+/** A paused guest only needs to be near the host's paused position. */
+const PAUSED_DRIFT_SECS = 0.5;
+/** Upper bound on the transit time credited to a message, whatever the
+ * estimate says, so a bad estimate can never push the guest far ahead. */
 const MAX_TRANSIT_SECS = 1.0;
 const HOST_BROADCAST_INTERVAL_MS = 1000;
+/** Host: a position this far from where steady playback would put it is a
+ * seek (or a restart via "previous"), sent right away. */
+const HOST_SEEK_JUMP_SECS = 1.0;
 /** How long after asking YTM to switch tracks we trust that switch to be in
  * flight before issuing it again (or falling back to a full page load). */
 const NAVIGATION_GRACE_MS = 5000;
+/** Guest: after asking the host to play a song, how long to stay on it
+ * rather than following the host's previous song back. */
+const CONTROL_GRACE_MS = 4000;
+/** Guest: a track change to a song we navigated to this recently is that
+ * navigation landing, not the user picking something. */
+const OWN_NAV_MEMORY_MS = 15_000;
+/** Guest: a track change this soon after being near the end of the last one
+ * is YTM's autoplay, not the user. */
+const NEAR_END_SECS = 3;
+const AUTOPLAY_WINDOW_MS = 4000;
+/** A payload older than the newest one seen, by less than this, was
+ * reordered or redelivered (MQTT QoS 1) and is dropped; a bigger step back
+ * is the host's clock being reset, and is accepted. */
+const REORDER_WINDOW_MS = 10_000;
 
-export function computeSyncAction(payload: SyncPlaybackPayload, local: LocalPlayback, nowMs: number): SyncAction {
-  const action: SyncAction = { navigateTo: null, setPlaying: null, seekTo: null };
+export function computeSyncAction(payload: SyncPlaybackPayload, local: LocalPlayback, transitSecs: number): SyncAction {
+  const action: SyncAction = { navigateTo: null, setPlaying: null, seekTo: null, playbackRate: 1 };
 
   if (VIDEO_ID_RE.test(payload.video_id) && local.videoId !== payload.video_id) {
     action.navigateTo = payload.video_id;
@@ -76,13 +124,78 @@ export function computeSyncAction(payload: SyncPlaybackPayload, local: LocalPlay
     action.setPlaying = payload.is_playing;
   }
 
-  const transit = Math.min(MAX_TRANSIT_SECS, Math.max(0, (nowMs - payload.timestamp_ms) / 1000));
-  const target = payload.is_playing ? payload.current_time_secs + transit : payload.current_time_secs;
-  if (Math.abs(local.currentTime - target) > DRIFT_TOLERANCE_SECS) {
+  if (!payload.is_playing) {
+    if (Math.abs(local.currentTime - payload.current_time_secs) > PAUSED_DRIFT_SECS) {
+      action.seekTo = payload.current_time_secs;
+    }
+    return action;
+  }
+
+  const target = payload.current_time_secs + Math.min(MAX_TRANSIT_SECS, Math.max(0, transitSecs));
+  const drift = target - local.currentTime;
+  if (Math.abs(drift) > SEEK_DRIFT_SECS) {
     action.seekTo = target;
+  } else if (Math.abs(drift) > (local.correcting ? END_CATCH_UP_SECS : START_CATCH_UP_SECS)) {
+    action.playbackRate = 1 + Math.max(-MAX_RATE_DELTA, Math.min(MAX_RATE_DELTA, drift / CATCH_UP_OVER_SECS));
   }
   return action;
 }
+
+/**
+ * How long a host message spent getting here. Host and guest wall clocks
+ * differ (by seconds, on some machines), so `now - timestamp_ms` is clock
+ * skew plus delivery time. The smallest value seen lately is the skew plus
+ * the fastest delivery; subtracting it leaves how much slower than the
+ * fastest this message was. What it can't see is the fastest delivery
+ * itself: a few ms on a LAN, tens over MQTT, well under the catch-up
+ * threshold. Trusting the host's clock directly put guests up to a second
+ * off whenever the clocks disagreed.
+ */
+export class TransitEstimator {
+  private samples: number[] = [];
+
+  constructor(private readonly windowSize = 30) {}
+
+  public transitSecs(hostTimestampMs: number, localNowMs: number): number {
+    const delta = localNowMs - hostTimestampMs;
+    this.samples.push(delta);
+    if (this.samples.length > this.windowSize) this.samples.shift();
+    return (delta - Math.min(...this.samples)) / 1000;
+  }
+
+  public reset(): void {
+    this.samples = [];
+  }
+}
+
+export function isStalePayload(timestampMs: number, newestMs: number | null): boolean {
+  return newestMs !== null && timestampMs < newestMs && newestMs - timestampMs < REORDER_WINDOW_MS;
+}
+
+/** What a guest's media key / tray / mini player command asks of the room. */
+export function controlForCommand(command: string, localPaused: boolean): SyncControl | null {
+  switch (command) {
+    case 'next':
+      return { kind: 'next' };
+    case 'previous':
+      return { kind: 'previous' };
+    case 'play':
+      return { kind: 'set_playing', playing: true };
+    case 'pause':
+      return { kind: 'set_playing', playing: false };
+    case 'play_pause':
+      return { kind: 'set_playing', playing: localPaused };
+    default:
+      return null;
+  }
+}
+
+/** The player-bar buttons a guest's clicks are redirected from. */
+const CONTROL_BUTTONS: [selector: string, command: string][] = [
+  ['ytmusic-player-bar .next-button', 'next'],
+  ['ytmusic-player-bar .previous-button', 'previous'],
+  ['ytmusic-player-bar #play-pause-button', 'play_pause']
+];
 
 function currentVideoId(): string | null {
   return new URLSearchParams(window.location.search).get('v');
@@ -114,13 +227,35 @@ function navigateToVideo(videoId: string) {
 export class RoomSyncController {
   private isHost = false;
   private inRoom = false;
-  private lastBroadcastMs = 0;
+  private lastBroadcast: { atMs: number; position: number; rate: number; playing: boolean } | null = null;
   private pendingNav: { videoId: string; atMs: number; attempts: number } | null = null;
+  private readonly transit = new TransitEstimator();
+  private newestPayloadMs: number | null = null;
+  /** Guest: the song the host last said it's playing. */
+  private hostVideoId: string | null = null;
+  /** Guest: songs we navigated to for the sync, and when. */
+  private ownNavs = new Map<string, number>();
+  /** Guest: a song we asked the host to play, not confirmed yet. */
+  private requestedVideo: { videoId: string; atMs: number } | null = null;
+  private nearEndAtMs = Number.NEGATIVE_INFINITY;
+  /** Guest: speed catch-up in progress, and what to restore after it. */
+  private rateCorrection: { video: HTMLVideoElement; rate: number; preservesPitch: boolean } | null = null;
 
   public setRoomState(inRoom: boolean, isHost: boolean) {
+    const roleChanged = inRoom !== this.inRoom || isHost !== this.isHost;
     this.inRoom = inRoom;
     this.isHost = isHost;
-    if (!inRoom) this.pendingNav = null;
+    setSyncGuest(this.isGuest());
+    if (!roleChanged) return;
+    this.pendingNav = null;
+    this.lastBroadcast = null;
+    this.transit.reset();
+    this.newestPayloadMs = null;
+    this.hostVideoId = null;
+    this.ownNavs.clear();
+    this.requestedVideo = null;
+    this.nearEndAtMs = Number.NEGATIVE_INFINITY;
+    this.endRateCorrection();
   }
 
   public isInRoom(): boolean {
@@ -131,22 +266,38 @@ export class RoomSyncController {
     return this.isHost;
   }
 
-  public handleRemotePlayback(payload: SyncPlaybackPayload, video: HTMLVideoElement | null) {
-    if (!this.inRoom || this.isHost || isAdPlaying()) return;
+  public isGuest(): boolean {
+    return this.inRoom && !this.isHost;
+  }
 
-    const now = Date.now();
+  public handleRemotePlayback(payload: SyncPlaybackPayload, video: HTMLVideoElement | null, now = Date.now()) {
+    if (!this.isGuest() || isAdPlaying()) return;
+    if (isStalePayload(payload.timestamp_ms, this.newestPayloadMs)) return;
+    this.newestPayloadMs = payload.timestamp_ms;
+    const transitSecs = this.transit.transitSecs(payload.timestamp_ms, now);
+    if (VIDEO_ID_RE.test(payload.video_id)) this.hostVideoId = payload.video_id;
+
+    const requested = this.requestedVideo;
+    if (requested) {
+      if (payload.video_id !== requested.videoId && now - requested.atMs < CONTROL_GRACE_MS) return;
+      this.requestedVideo = null;
+    }
+
     const local: LocalPlayback = {
       videoId: currentVideoId(),
       paused: video ? video.paused : true,
-      currentTime: video ? video.currentTime : 0
+      currentTime: video ? video.currentTime : 0,
+      correcting: this.rateCorrection !== null
     };
-    const action = computeSyncAction(payload, local, now);
+    const action = computeSyncAction(payload, local, transitSecs);
 
     if (action.navigateTo) {
+      this.endRateCorrection();
       const pending = this.pendingNav;
       if (pending && pending.videoId === action.navigateTo && now - pending.atMs < NAVIGATION_GRACE_MS) return;
       const attempts = pending && pending.videoId === action.navigateTo ? pending.attempts + 1 : 1;
       this.pendingNav = { videoId: action.navigateTo, atMs: now, attempts };
+      this.rememberOwnNav(action.navigateTo, now);
       if (attempts > 1) {
         // SPA navigation didn't take; a full load always does.
         window.location.href = `https://music.youtube.com/watch?v=${action.navigateTo}`;
@@ -161,7 +312,102 @@ export class RoomSyncController {
     if (action.setPlaying === true) PlayerBridge.play();
     else if (action.setPlaying === false) PlayerBridge.pause();
 
-    if (action.seekTo !== null) PlayerBridge.seekTo(action.seekTo);
+    if (action.seekTo !== null) {
+      this.endRateCorrection();
+      PlayerBridge.seekTo(action.seekTo);
+    } else {
+      this.setCatchUpRate(video, action.playbackRate);
+    }
+  }
+
+  private rememberOwnNav(videoId: string, now: number) {
+    for (const [id, at] of this.ownNavs) {
+      if (now - at > OWN_NAV_MEMORY_MS) this.ownNavs.delete(id);
+    }
+    this.ownNavs.set(videoId, now);
+  }
+
+  private setCatchUpRate(video: HTMLVideoElement, rate: number) {
+    if (rate === 1) {
+      this.endRateCorrection();
+      return;
+    }
+    if (!this.rateCorrection || this.rateCorrection.video !== video) {
+      this.endRateCorrection();
+      this.rateCorrection = { video, rate: video.playbackRate, preservesPitch: video.preservesPitch };
+    }
+    // A pitch shift would be audible; a 10% tempo change with pitch kept isn't.
+    video.preservesPitch = true;
+    video.playbackRate = rate;
+  }
+
+  private endRateCorrection() {
+    const correction = this.rateCorrection;
+    if (!correction) return;
+    this.rateCorrection = null;
+    correction.video.playbackRate = correction.rate;
+    correction.video.preservesPitch = correction.preservesPitch;
+  }
+
+  /** Guest: remembers being near the end of a song, so the switch that
+   * follows is recognized as YTM's autoplay. */
+  public noteLocalTick(video: HTMLVideoElement | null, now = Date.now()) {
+    if (!this.isGuest() || !video) return;
+    if (Number.isFinite(video.duration) && video.duration > 0 && video.duration - video.currentTime < NEAR_END_SECS) {
+      this.nearEndAtMs = now;
+    }
+  }
+
+  /** Guest: our page switched songs. Unless that was our own sync
+   * navigation or YTM's autoplay, the user picked it, and it becomes the
+   * room's song: returns the request to send the host. */
+  public handleLocalTrackChange(videoId: string | undefined, now = Date.now()): SyncControl | null {
+    if (!this.isGuest() || !videoId || !VIDEO_ID_RE.test(videoId)) return null;
+    // No host state yet (just joined, or the page reloaded): nothing to diverge from.
+    if (this.hostVideoId === null || videoId === this.hostVideoId) return null;
+    const navAt = this.ownNavs.get(videoId);
+    if (navAt !== undefined && now - navAt < OWN_NAV_MEMORY_MS) return null;
+    if (now - this.nearEndAtMs < AUTOPLAY_WINDOW_MS) return null;
+    if (this.requestedVideo?.videoId === videoId) return null;
+    this.requestedVideo = { videoId, atMs: now };
+    return { kind: 'play_video', video_id: videoId };
+  }
+
+  public requestControl(action: SyncControl, invoke: PluginContext['invoke']) {
+    invoke('send_sync_control', { action }).catch((e) => {
+      console.error('[YTMD Room Sync] control request failed:', e);
+      showToast(t().actionFailed);
+    });
+  }
+
+  /** Host: a guest's request, carried out on this player; the broadcasts
+   * that follow bring every guest along. */
+  public applyRemoteControl(request: SyncControlRequest) {
+    if (!this.inRoom || !this.isHost) return;
+    const { from, action } = request;
+    switch (action.kind) {
+      case 'next':
+        PlayerBridge.next();
+        showToast(t().syncGuestNext(from));
+        break;
+      case 'previous':
+        PlayerBridge.previous();
+        showToast(t().syncGuestPrevious(from));
+        break;
+      case 'set_playing': {
+        const video = PlayerBridge.getVideo();
+        if (!video || video.paused !== action.playing) return;
+        if (action.playing) PlayerBridge.play();
+        else PlayerBridge.pause();
+        showToast(action.playing ? t().syncGuestResumed(from) : t().syncGuestPaused(from));
+        break;
+      }
+      case 'play_video':
+        if (!VIDEO_ID_RE.test(action.video_id) || action.video_id === currentVideoId()) return;
+        navigateToVideo(action.video_id);
+        showToast(t().syncGuestPicked(from));
+        break;
+    }
   }
 
   /** `force` skips the throttle: track and play/pause changes go out
@@ -175,8 +421,11 @@ export class RoomSyncController {
     if (!this.inRoom || !this.isHost || !track || !track.videoId || !video || isAdPlaying()) return;
 
     const now = Date.now();
-    if (!force && now - this.lastBroadcastMs < HOST_BROADCAST_INTERVAL_MS) return;
-    this.lastBroadcastMs = now;
+    const last = this.lastBroadcast;
+    const expected = last ? last.position + ((now - last.atMs) / 1000) * last.rate : 0;
+    const jumped = !!last && last.playing && !video.paused && Math.abs(video.currentTime - expected) > HOST_SEEK_JUMP_SECS;
+    if (!force && !jumped && last && now - last.atMs < HOST_BROADCAST_INTERVAL_MS) return;
+    this.lastBroadcast = { atMs: now, position: video.currentTime, rate: video.playbackRate, playing: !video.paused };
 
     invoke('broadcast_sync_state', {
       playback: {
@@ -192,9 +441,23 @@ export class RoomSyncController {
 }
 
 let controllerRef: RoomSyncController | null = null;
+let invokeRef: PluginContext['invoke'] | null = null;
 let cleanup: (() => void) | null = null;
 /** Last room snapshot seen, to announce joins/leaves; null when not in a room. */
 let lastRoom: RoomStatePayload | null = null;
+
+/** Guest: media keys, tray, mini player and phone remote act for the room
+ * (through the host) instead of on the local player, which the next sync
+ * would just undo. Returns whether the command was taken. */
+export function routeRoomPlayerCommand(command: string): boolean {
+  const controller = controllerRef;
+  if (!controller || !invokeRef || !controller.isGuest()) return false;
+  const video = PlayerBridge.getVideo();
+  const action = controlForCommand(command, video ? video.paused : true);
+  if (!action) return false;
+  controller.requestControl(action, invokeRef);
+  return true;
+}
 
 /** Mirrors room state into the nav-bar chip and announces changes the way
  * YTM announces its own events: a short toast, no dialog. `announce` is
@@ -227,6 +490,7 @@ export const SyncRoomPlugin: YTMDPlugin = {
   onInit(ctx: PluginContext) {
     const controller = new RoomSyncController();
     controllerRef = controller;
+    invokeRef = ctx.invoke;
 
     const unlistenPromises: Promise<() => void>[] = [];
     if (window.__TAURI__?.event) {
@@ -241,9 +505,29 @@ export const SyncRoomPlugin: YTMDPlugin = {
         }),
         window.__TAURI__.event.listen<SyncPlaybackPayload>('sync-playback-remote', (e) => {
           controller.handleRemotePlayback(e.payload, ctx.getVideoElement());
+        }),
+        window.__TAURI__.event.listen<SyncControlRequest>('sync-control-remote', (e) => {
+          controller.applyRemoteControl(e.payload);
         })
       );
     }
+
+    // A guest's own clicks on next/previous/play-pause go to the host
+    // instead. Capture phase on window runs before YTM's handlers, and only
+    // real clicks are taken: our own PlayerBridge clicks are untrusted.
+    const onClick = (e: MouseEvent) => {
+      if (!e.isTrusted || !controller.isGuest() || !(e.target instanceof Element)) return;
+      const target = e.target;
+      const hit = CONTROL_BUTTONS.find(([selector]) => target.closest(selector));
+      if (!hit) return;
+      const video = ctx.getVideoElement();
+      const action = controlForCommand(hit[1], video ? video.paused : true);
+      if (!action) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      controller.requestControl(action, ctx.invoke);
+    };
+    window.addEventListener('click', onClick, true);
 
     // The page can (re)load while already in a room: app start after a
     // crash, or a fallback full-page track switch. Pick the room back up
@@ -263,14 +547,21 @@ export const SyncRoomPlugin: YTMDPlugin = {
 
     cleanup = () => {
       unlistenPromises.forEach((p) => p.then((unlisten) => unlisten()));
+      window.removeEventListener('click', onClick, true);
+      controller.setRoomState(false, false);
       controllerRef = null;
+      invokeRef = null;
       lastRoom = null;
       setSyncStatus(null);
     };
   },
 
   onTrackChange(track: TrackInfo, ctx: PluginContext) {
-    controllerRef?.broadcastLocalState(track, ctx.getVideoElement(), ctx.invoke, true);
+    const controller = controllerRef;
+    if (!controller) return;
+    controller.broadcastLocalState(track, ctx.getVideoElement(), ctx.invoke, true);
+    const request = controller.handleLocalTrackChange(track.videoId);
+    if (request) controller.requestControl(request, ctx.invoke);
   },
 
   onPlaybackChange(_isPlaying: boolean, ctx: PluginContext) {
@@ -278,7 +569,9 @@ export const SyncRoomPlugin: YTMDPlugin = {
   },
 
   onTick(_currentTimeSecs: number, ctx: PluginContext) {
-    controllerRef?.broadcastLocalState(ctx.track, ctx.getVideoElement(), ctx.invoke);
+    const video = ctx.getVideoElement();
+    controllerRef?.broadcastLocalState(ctx.track, video, ctx.invoke);
+    controllerRef?.noteLocalTick(video);
   },
 
   onDestroy() {

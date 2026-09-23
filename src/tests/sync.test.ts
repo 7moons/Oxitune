@@ -1,7 +1,16 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { readFileSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
-import { computeSyncAction, LocalPlayback, SyncPlaybackPayload } from '../plugins/sync-room';
+import {
+  computeSyncAction,
+  controlForCommand,
+  isStalePayload,
+  LocalPlayback,
+  RoomSyncController,
+  SyncPlaybackPayload,
+  TransitEstimator
+} from '../plugins/sync-room';
+import { isSyncGuest } from '../preload/syncRole';
 
 const payload = (over: Partial<SyncPlaybackPayload> = {}): SyncPlaybackPayload => ({
   video_id: 'dQw4w9WgXcQ',
@@ -17,52 +26,218 @@ const local = (over: Partial<LocalPlayback> = {}): LocalPlayback => ({
   videoId: 'dQw4w9WgXcQ',
   paused: false,
   currentTime: 50,
+  correcting: false,
   ...over
 });
 
 describe('computeSyncAction', () => {
   test('different track: navigate only, no play/seek on the old video', () => {
-    const a = computeSyncAction(payload(), local({ videoId: 'aaaaaaaaaaa' }), 10_000);
-    expect(a).toEqual({ navigateTo: 'dQw4w9WgXcQ', setPlaying: null, seekTo: null });
+    const a = computeSyncAction(payload(), local({ videoId: 'aaaaaaaaaaa' }), 0);
+    expect(a).toEqual({ navigateTo: 'dQw4w9WgXcQ', setPlaying: null, seekTo: null, playbackRate: 1 });
   });
 
   test('rejects malformed video ids', () => {
-    const a = computeSyncAction(payload({ video_id: 'javascript:x' }), local({ videoId: null }), 10_000);
+    const a = computeSyncAction(payload({ video_id: 'javascript:x' }), local({ videoId: null }), 0);
     expect(a.navigateTo).toBeNull();
   });
 
   test('in sync: nothing to do', () => {
-    expect(computeSyncAction(payload(), local({ currentTime: 50.3 }), 10_250)).toEqual({
+    expect(computeSyncAction(payload(), local({ currentTime: 50.1 }), 0.2)).toEqual({
       navigateTo: null,
       setPlaying: null,
-      seekTo: null
+      seekTo: null,
+      playbackRate: 1
     });
   });
 
   test('host paused, guest playing: pause', () => {
-    expect(computeSyncAction(payload({ is_playing: false }), local(), 10_000).setPlaying).toBe(false);
+    expect(computeSyncAction(payload({ is_playing: false }), local(), 0).setPlaying).toBe(false);
   });
 
   test('host playing, guest paused: play', () => {
-    expect(computeSyncAction(payload(), local({ paused: true }), 10_000).setPlaying).toBe(true);
+    expect(computeSyncAction(payload(), local({ paused: true }), 0).setPlaying).toBe(true);
   });
 
-  test('drift beyond tolerance seeks to host position plus transit', () => {
-    const a = computeSyncAction(payload(), local({ currentTime: 40 }), 10_250);
+  test('large drift seeks to host position plus transit', () => {
+    const a = computeSyncAction(payload(), local({ currentTime: 40 }), 0.25);
     expect(a.seekTo).toBeCloseTo(50.25, 3);
+    expect(a.playbackRate).toBe(1);
   });
 
-  test('skewed guest clock cannot push the target more than 1s ahead', () => {
-    // Guest clock 30s ahead of host: naive math would seek to 80s.
-    const a = computeSyncAction(payload(), local({ currentTime: 40 }), 40_000);
-    expect(a.seekTo).toBeCloseTo(51, 3);
-    // And a small skew alone never causes a seek loop.
-    expect(computeSyncAction(payload(), local({ currentTime: 50.5 }), 40_000).seekTo).toBeNull();
+  test('transit is capped at 1s whatever the estimate says', () => {
+    expect(computeSyncAction(payload(), local({ currentTime: 40 }), 30).seekTo).toBeCloseTo(51, 3);
   });
 
-  test('paused host ignores transit time', () => {
-    const a = computeSyncAction(payload({ is_playing: false }), local({ paused: true, currentTime: 10 }), 10_900);
+  // The old 1.5s seek-only tolerance let guests sit up to 1.5s off forever
+  // and every correction was an audible jump plus a rebuffer.
+  test('small drift is closed by speed, not a seek', () => {
+    const behind = computeSyncAction(payload(), local({ currentTime: 49.4 }), 0);
+    expect(behind.seekTo).toBeNull();
+    expect(behind.playbackRate).toBeCloseTo(1.1, 5); // 0.6s behind wants +20%, capped at +10%
+
+    const slightlyBehind = computeSyncAction(payload(), local({ currentTime: 49.7 }), 0);
+    expect(slightlyBehind.playbackRate).toBeCloseTo(1.1, 5);
+    const ahead = computeSyncAction(payload(), local({ currentTime: 50.3 }), 0);
+    expect(ahead.playbackRate).toBeCloseTo(0.9, 5);
+    const barelyAhead = computeSyncAction(payload(), local({ currentTime: 50.27 }), 0);
+    expect(barelyAhead.playbackRate).toBeCloseTo(0.91, 5);
+  });
+
+  test('catch-up keeps going until nearly exact, but does not start on noise', () => {
+    expect(computeSyncAction(payload(), local({ currentTime: 49.9 }), 0).playbackRate).toBe(1);
+    expect(computeSyncAction(payload(), local({ currentTime: 49.9, correcting: true }), 0).playbackRate).toBeCloseTo(
+      1 + 0.1 / 3,
+      5
+    );
+    expect(computeSyncAction(payload(), local({ currentTime: 49.97, correcting: true }), 0).playbackRate).toBe(1);
+  });
+
+  test('paused host ignores transit time and speed', () => {
+    const a = computeSyncAction(payload({ is_playing: false }), local({ paused: true, currentTime: 10 }), 0.9);
     expect(a.seekTo).toBe(50);
+    expect(a.playbackRate).toBe(1);
+    expect(computeSyncAction(payload({ is_playing: false }), local({ paused: true, currentTime: 49.8 }), 0).seekTo).toBeNull();
+  });
+});
+
+describe('TransitEstimator', () => {
+  // Regression: the guest used to trust the host's wall clock (capped at
+  // 1s), so any clock difference became a constant sync error.
+  test('a skewed clock does not count as transit time', () => {
+    const est = new TransitEstimator();
+    const skew = 30_000; // guest clock 30s ahead
+    expect(est.transitSecs(1_000, 1_000 + skew + 40)).toBe(0);
+    expect(est.transitSecs(2_000, 2_000 + skew + 40)).toBe(0);
+    expect(est.transitSecs(3_000, 3_000 + skew + 290)).toBeCloseTo(0.25, 5);
+    // guest clock behind works the same
+    const behind = new TransitEstimator();
+    behind.transitSecs(10_000, 5_020);
+    expect(behind.transitSecs(11_000, 6_120)).toBeCloseTo(0.1, 5);
+  });
+
+  test('forgets old samples, so a clock adjustment is picked up', () => {
+    const est = new TransitEstimator(3);
+    est.transitSecs(0, 0); // fast sample under the old clock
+    est.transitSecs(1_000, 1_500);
+    est.transitSecs(2_000, 2_500);
+    expect(est.transitSecs(3_000, 3_500)).toBe(0); // old sample aged out
+  });
+});
+
+describe('isStalePayload', () => {
+  test('drops reordered/redelivered payloads', () => {
+    expect(isStalePayload(9_000, 10_000)).toBe(true);
+    expect(isStalePayload(10_000, 10_000)).toBe(false);
+    expect(isStalePayload(11_000, 10_000)).toBe(false);
+    expect(isStalePayload(5_000, null)).toBe(false);
+  });
+  test('accepts a big step back (host clock reset) instead of freezing', () => {
+    expect(isStalePayload(1_000, 60_000)).toBe(false);
+  });
+});
+
+describe('controlForCommand', () => {
+  test('maps media keys / tray / mini player commands to room requests', () => {
+    expect(controlForCommand('next', false)).toEqual({ kind: 'next' });
+    expect(controlForCommand('previous', false)).toEqual({ kind: 'previous' });
+    expect(controlForCommand('play', false)).toEqual({ kind: 'set_playing', playing: true });
+    expect(controlForCommand('pause', true)).toEqual({ kind: 'set_playing', playing: false });
+    expect(controlForCommand('play_pause', true)).toEqual({ kind: 'set_playing', playing: true });
+    expect(controlForCommand('play_pause', false)).toEqual({ kind: 'set_playing', playing: false });
+    expect(controlForCommand('like', false)).toBeNull();
+  });
+});
+
+describe('RoomSyncController (guest)', () => {
+  const g = globalThis as unknown as Record<string, unknown>;
+  let saved: Record<string, unknown>;
+  let location: { search: string; href: string };
+
+  beforeEach(() => {
+    saved = { window: g.window, document: g.document };
+    location = { search: '?v=dQw4w9WgXcQ', href: '' };
+    g.window = { location };
+    g.document = { getElementById: () => null, querySelector: () => null };
+  });
+  afterEach(() => {
+    g.window = saved.window;
+    g.document = saved.document;
+  });
+
+  const fakeVideo = (over: Partial<HTMLVideoElement> = {}) =>
+    ({ paused: false, currentTime: 50, duration: 200, playbackRate: 1, preservesPitch: false, ...over }) as HTMLVideoElement;
+
+  const guest = () => {
+    const c = new RoomSyncController();
+    c.setRoomState(true, false);
+    return c;
+  };
+
+  test('marks the page as a guest only while it is one', () => {
+    const c = guest();
+    expect(isSyncGuest()).toBe(true);
+    c.setRoomState(true, true);
+    expect(isSyncGuest()).toBe(false);
+    c.setRoomState(false, false);
+    expect(isSyncGuest()).toBe(false);
+  });
+
+  test('catches up by speed, then restores the original speed and pitch', () => {
+    const c = guest();
+    const video = fakeVideo({ currentTime: 49.4 });
+    c.handleRemotePlayback(payload({ timestamp_ms: 1_000 }), video, 1_000);
+    expect(video.playbackRate).toBeCloseTo(1.1, 5);
+    expect(video.preservesPitch).toBe(true);
+    expect(video.currentTime).toBe(49.4); // no seek
+
+    video.currentTime = 51;
+    c.handleRemotePlayback(payload({ timestamp_ms: 2_000, current_time_secs: 51 }), video, 2_000);
+    expect(video.playbackRate).toBe(1);
+    expect(video.preservesPitch).toBe(false);
+  });
+
+  test('ignores a redelivered older payload', () => {
+    const c = guest();
+    const video = fakeVideo();
+    c.handleRemotePlayback(payload({ timestamp_ms: 5_000 }), video, 5_000);
+    c.handleRemotePlayback(payload({ timestamp_ms: 4_000, video_id: 'aaaaaaaaaaa' }), video, 5_100);
+    expect(location.href).toBe(''); // did not navigate back to the old song
+  });
+
+  // Regression: a guest's skip was undone by the next host broadcast.
+  test('a song the guest picks becomes a request to the host', () => {
+    const c = guest();
+    expect(c.handleLocalTrackChange('bbbbbbbbbbb', 1_000)).toBeNull(); // no host state yet
+    c.handleRemotePlayback(payload({ timestamp_ms: 1_000 }), fakeVideo(), 1_000);
+
+    expect(c.handleLocalTrackChange('dQw4w9WgXcQ', 2_000)).toBeNull(); // the host's own song
+    expect(c.handleLocalTrackChange('bbbbbbbbbbb', 2_000)).toEqual({ kind: 'play_video', video_id: 'bbbbbbbbbbb' });
+
+    // Until the host switches, its broadcasts of the old song don't pull us back.
+    location.search = '?v=bbbbbbbbbbb';
+    c.handleRemotePlayback(payload({ timestamp_ms: 3_000 }), fakeVideo(), 3_000);
+    expect(location.href).toBe('');
+  });
+
+  test('our own sync navigation and YTM autoplay are not requests', () => {
+    const c = guest();
+    location.search = '?v=aaaaaaaaaaa';
+    c.handleRemotePlayback(payload({ timestamp_ms: 1_000 }), fakeVideo(), 1_000); // navigates to the host's song
+    expect(location.href).toContain('dQw4w9WgXcQ'); // no ytmusic-app in the stub: full-load fallback
+    // host moved on while that navigation was landing
+    c.handleRemotePlayback(payload({ timestamp_ms: 2_000, video_id: 'ccccccccccc' }), fakeVideo(), 2_000);
+    expect(c.handleLocalTrackChange('dQw4w9WgXcQ', 2_100)).toBeNull();
+
+    const d = guest();
+    d.handleRemotePlayback(payload({ timestamp_ms: 1_000 }), fakeVideo(), 1_000);
+    d.noteLocalTick(fakeVideo({ currentTime: 198.5, duration: 200 }), 5_000);
+    expect(d.handleLocalTrackChange('eeeeeeeeeee', 6_000)).toBeNull();
+  });
+
+  test('a host never turns its own track changes into requests', () => {
+    const c = new RoomSyncController();
+    c.setRoomState(true, true);
+    expect(c.handleLocalTrackChange('bbbbbbbbbbb', 1_000)).toBeNull();
   });
 });
 

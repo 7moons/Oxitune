@@ -94,6 +94,12 @@ pub fn run() {
     let remote_enabled = initial_config.remote_enabled;
 
     tauri::Builder::default()
+        // Must be the first plugin: a second launch (even while this one sits
+        // in the tray) exits right away and brings this window back instead
+        // of starting a second player, tray icon and sync host.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            tray::show_main_window(app);
+        }))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_notification::init())

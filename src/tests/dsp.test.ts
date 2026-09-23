@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { EQ_FREQUENCIES, EQ_PRESETS, clampGain } from '../plugins/audio-dsp/presets';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import { EQ_FREQUENCIES, EQ_MAX_DB, EQ_PRESETS, clampGain } from '../plugins/audio-dsp/presets';
 
 describe('Audio DSP & Equalizer Suite', () => {
   test('defines exactly 10 standard audio frequency bands', () => {
@@ -30,13 +32,26 @@ describe('Audio DSP & Equalizer Suite', () => {
     }
   });
 
-  test('clampGain restricts values strictly between -12dB and +12dB', () => {
+  test('clampGain allows the full ±24 dB range and nothing beyond', () => {
+    expect(EQ_MAX_DB).toBe(24);
     expect(clampGain(0)).toBe(0);
     expect(clampGain(5.5)).toBe(5.5);
-    expect(clampGain(-12)).toBe(-12);
-    expect(clampGain(12)).toBe(12);
-    expect(clampGain(24)).toBe(12);
-    expect(clampGain(-50)).toBe(-12);
+    expect(clampGain(-18)).toBe(-18);
+    expect(clampGain(24)).toBe(24);
+    expect(clampGain(-24)).toBe(-24);
+    expect(clampGain(30)).toBe(24);
+    expect(clampGain(-50)).toBe(-24);
+  });
+
+  test('settings sliders offer the same range the engine accepts', () => {
+    const html = readFileSync(join(import.meta.dir, '..', '..', 'settings.html'), 'utf8');
+    const preamp = html.match(/id="preamp_gain" min="(-?\d+)" max="(-?\d+)"/);
+    expect(preamp).not.toBeNull();
+    expect(Number(preamp![1])).toBe(-EQ_MAX_DB);
+    expect(Number(preamp![2])).toBe(EQ_MAX_DB);
+    const settingsTs = readFileSync(join(import.meta.dir, '..', 'ui', 'settings.ts'), 'utf8');
+    expect(settingsTs).toContain('slider.min = String(-EQ_MAX_DB)');
+    expect(settingsTs).toContain('slider.max = String(EQ_MAX_DB)');
   });
 
   test('linear gain math converts dB correctly', () => {
