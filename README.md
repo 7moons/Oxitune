@@ -191,7 +191,7 @@ The workflow needs two repository secrets (Settings > Secrets and variables > Ac
 | `TAURI_SIGNING_PRIVATE_KEY` | The updater signing private key (generate once with `bunx tauri signer generate -w /path/to/key.pem`, keep the file out of git) |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | The password you set when generating that key |
 
-The matching public key is already committed in `src-tauri/tauri.conf.json` (`plugins.updater.pubkey`) — it's what lets running copies of YTMD verify that an update actually came from you. If the private key is ever regenerated, that pubkey must be updated to match or every existing install will reject future updates.
+The matching public key is already committed in `src-tauri/tauri.conf.json` (`plugins.updater.pubkey`) — it's what lets running copies of YTMD verify that an update actually came from you. If the private key is ever regenerated, that pubkey must be updated to match or every existing install will reject future updates. The current key pair has ID `A721E1BF70C34591` (the first line of the `.pub` file, base64-decoded, ends with it) — check a key against that before assuming it's the right one.
 
 ---
 
