@@ -13,6 +13,8 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2.0.0", features = [] }
 
 [dependencies]
+# Lyrics providers (all platforms) and the Linux screen-lock D-Bus stream.
+futures-util = "0.3"
 tauri = { version = "2.0.0", features = ["tray-icon", "image-ico", "image-png", "protocol-asset"] }
 tauri-plugin-shell = "2.0.0"
 tauri-plugin-global-shortcut = "2.0.0"
@@ -61,7 +63,6 @@ rust-embed = { version = "8", features = ["mime-guess"] }
 # the process over to requiring a tokio reactor) adds no new runtime.
 [target.'cfg(target_os = "linux")'.dependencies]
 zbus = { version = "5", default-features = false, features = ["async-io"] }
-futures-util = "0.3"
 
 [target.'cfg(windows)'.dependencies]
 webview2-com = "0.38"
@@ -70,5 +71,4 @@ windows = { version = "0.61", features = ["Win32_System_Com", "Win32_System_Powe
 [dev-dependencies]
 ctor = "0.4"
 tempfile = "3.10"
-futures-util = "0.3"
 tokio-tungstenite = "0.29"
