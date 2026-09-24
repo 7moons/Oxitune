@@ -45,6 +45,12 @@ pub struct AppConfig {
     pub remote_port: u16,
     pub inhibit_sleep: bool,
     pub pause_on_lock: bool,
+    /// Reopen the last song at its position when the app starts.
+    #[serde(default = "default_true")]
+    pub resume_on_launch: bool,
+    /// Start playing it too, instead of waiting paused.
+    #[serde(default)]
+    pub resume_autoplay: bool,
     /// Equalizer presets the user saved; picked by `equalizer_preset` = id.
     #[serde(default)]
     pub equalizer_custom_presets: Vec<CustomEqPreset>,
@@ -52,6 +58,10 @@ pub struct AppConfig {
     /// an accelerator string; empty = no shortcut.
     #[serde(default = "crate::shortcuts::default_shortcuts")]
     pub shortcuts: BTreeMap<String, String>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_discord_clear_after_pause_min() -> u32 {
@@ -128,6 +138,8 @@ impl Default for AppConfig {
             remote_port: 9863,
             inhibit_sleep: true,
             pause_on_lock: true,
+            resume_on_launch: true,
+            resume_autoplay: false,
             equalizer_custom_presets: Vec::new(),
             shortcuts: crate::shortcuts::default_shortcuts(),
         }
@@ -382,6 +394,8 @@ mod tests {
         let config = AppConfig::default();
         assert!(config.discord_rpc_enabled);
         assert_eq!(config.discord_clear_after_pause_min, 5);
+        assert!(config.resume_on_launch);
+        assert!(!config.resume_autoplay);
         assert!(config.mpris_enabled);
         assert!(config.adblock_enabled);
         assert!(config.sponsorblock_enabled);

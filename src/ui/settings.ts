@@ -38,6 +38,8 @@ interface AppConfig {
   remote_port: number;
   inhibit_sleep: boolean;
   pause_on_lock: boolean;
+  resume_on_launch: boolean;
+  resume_autoplay: boolean;
   equalizer_custom_presets?: CustomEqPreset[];
   shortcuts?: Record<string, string>;
   // Every other field of the backend's AppConfig round-trips untouched.
@@ -69,7 +71,9 @@ const TOGGLES: [keyof AppConfig & string, boolean][] = [
   ['embed_lyrics', true],
   ['remote_enabled', true],
   ['inhibit_sleep', true],
-  ['pause_on_lock', true]
+  ['pause_on_lock', true],
+  ['resume_on_launch', true],
+  ['resume_autoplay', false]
 ];
 
 const SAVE_DEBOUNCE_MS = 500;
