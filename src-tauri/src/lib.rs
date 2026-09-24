@@ -1,3 +1,5 @@
+#[cfg(test)]
+mod acl_tests;
 pub mod bridge;
 pub mod commands;
 pub mod config;
