@@ -474,6 +474,17 @@ button {
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
+/* A busy button's label (spinner + text in one span): centred on the text
+   and spaced like the button's own icon, not sitting on the text baseline. */
+.btn > :has(> .spinner) {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.btn .spinner {
+  flex: 0 0 auto;
+  margin-left: -4px;
+}
 .spinner.lg {
   width: 32px;
   height: 32px;
