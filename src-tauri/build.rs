@@ -57,6 +57,8 @@ const APP_COMMANDS: &[&str] = &[
     "plugins_add_registry",
     "plugins_remove_registry",
     "plugins_restore_official",
+    "plugins_pick_media_dir",
+    "plugins_open_media_dir",
     "plugins_available",
     "plugins_install",
     "plugins_check_updates",

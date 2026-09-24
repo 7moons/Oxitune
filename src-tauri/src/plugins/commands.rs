@@ -17,6 +17,9 @@ pub struct PluginsOverview {
     pub plugins: Vec<PluginInfo>,
     pub registries: Vec<Registry>,
     pub official_hidden: bool,
+    /// Where `media:save` puts songs, shown only when a plugin uses it.
+    pub media_dir: String,
+    pub media_in_use: bool,
     pub update_interval_hours: u32,
     pub restart_needed: bool,
     pub api_version: u32,
@@ -50,6 +53,8 @@ pub fn plugins_list(plugins: Plugins<'_>) -> PluginsOverview {
         plugins: plugins.list(),
         registries: plugins.registries(),
         official_hidden: state.official_hidden,
+        media_dir: plugins.media_dir().to_string_lossy().into_owned(),
+        media_in_use: plugins.media_in_use(),
         update_interval_hours: state.update_interval_hours,
         restart_needed: plugins.reload_needed(),
         api_version: super::manifest::API_VERSION,
@@ -171,6 +176,33 @@ pub async fn plugins_add_dev(app: AppHandle, plugins: Plugins<'_>) -> Result<Opt
         return Ok(None);
     };
     plugins.add_dev(&dir).map(Some)
+}
+
+/// Lets the user pick the folder `media:save` writes to.
+#[tauri::command]
+pub async fn plugins_pick_media_dir(app: AppHandle, plugins: Plugins<'_>) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let start = plugins.media_dir();
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        let dialog = app.dialog().file();
+        let dialog = if start.is_dir() { dialog.set_directory(start) } else { dialog };
+        dialog.blocking_pick_folder()
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    let Some(dir) = picked.and_then(|p| p.into_path().ok()) else {
+        return Ok(None);
+    };
+    plugins.set_media_dir(dir.clone());
+    Ok(Some(dir.to_string_lossy().into_owned()))
+}
+
+#[tauri::command]
+pub fn plugins_open_media_dir(app: AppHandle, plugins: Plugins<'_>) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let dir = plugins.media_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    app.opener().open_path(dir.to_string_lossy(), None::<&str>).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

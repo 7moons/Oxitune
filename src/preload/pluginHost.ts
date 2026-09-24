@@ -16,6 +16,8 @@ import { isSyncGuest } from './syncRole';
 import { showToast } from './ui/kit';
 import { t } from './ui/i18n';
 import {
+  MEDIA_FORMATS,
+  MediaProgress,
   PLUGIN_API_VERSION,
   Permission,
   PluginContext,
@@ -69,6 +71,7 @@ export class ExternalPlugin implements YTMDPlugin {
   private readonly playbackListeners = new Set<(playing: boolean) => void>();
   private readonly tickListeners = new Set<(secs: number) => void>();
   private readonly settingsListeners = new Set<(values: Record<string, unknown>) => void>();
+  private readonly mediaListeners = new Set<(progress: MediaProgress) => void>();
   private readonly unloaders: (() => void)[] = [];
   private readonly styleNodes: HTMLStyleElement[] = [];
 
@@ -187,6 +190,17 @@ export class ExternalPlugin implements YTMDPlugin {
         invokeBackend('plugin_fetch', { id, url: String(url) }, { timeoutMs: 15000 }).then((body) => String(body ?? ''));
       api.net = { fetchText, fetchJson: (url) => fetchText(url).then((text) => JSON.parse(text) as unknown) };
     }
+    if (this.has('media:save')) {
+      api.media = {
+        formats: MEDIA_FORMATS,
+        save: (videoId, options) =>
+          invokeBackend('plugin_media_save', { id, videoId: String(videoId), format: String(options?.format ?? 'mp3') }).then(
+            (job) => String(job)
+          ),
+        cancel: (job) => invokeBackend('plugin_media_cancel', { id, job: String(job) }).then(() => undefined),
+        onProgress: (fn) => this.listenOn(this.mediaListeners, 'media.onProgress', fn)
+      };
+    }
     if (this.has('ui')) {
       api.ui = {
         toast: (text) => showToast(String(text).slice(0, MAX_TOAST_CHARS)),
@@ -216,6 +230,11 @@ export class ExternalPlugin implements YTMDPlugin {
     } catch (e) {
       this.report('startup', e);
     }
+  }
+
+  /** A `plugin-media-progress` event for this plugin. */
+  mediaProgress(progress: MediaProgress): void {
+    this.mediaListeners.forEach((fn) => fn({ ...progress }));
   }
 
   setSettings(values: Record<string, unknown>): void {
@@ -252,6 +271,7 @@ export class ExternalPlugin implements YTMDPlugin {
     this.playbackListeners.clear();
     this.tickListeners.clear();
     this.settingsListeners.clear();
+    this.mediaListeners.clear();
   }
 }
 

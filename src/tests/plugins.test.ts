@@ -180,6 +180,22 @@ describe('installed plugins get only the ytmd groups they were granted', () => {
     expect(Object.isFrozen(e.api)).toBe(true);
   });
 
+  test('media:save: formats, and progress only for this plugin', () => {
+    const none = external(['ui']);
+    none.plugin.start({ sendPlayerCommand: () => {}, onSwitchedOff: () => {} });
+    expect(none.api.media).toBeUndefined();
+    const e = external(['media:save']);
+    e.plugin.start({ sendPlayerCommand: () => {}, onSwitchedOff: () => {} });
+    expect(e.api.media?.formats).toEqual(['mp3', 'm4a', 'opus', 'flac']);
+    const seen: string[] = [];
+    const off = e.api.media!.onProgress((p) => seen.push(`${p.state}:${p.percent}`));
+    const progress = { plugin: 'test.ext', job: 'j', videoId: 'dQw4w9WgXcQ', state: 'downloading' as const, percent: 40, file: null, error: null };
+    e.plugin.mediaProgress(progress);
+    off();
+    e.plugin.mediaProgress({ ...progress, state: 'done', percent: 100 });
+    expect(seen).toEqual(['downloading:40']);
+  });
+
   test('player:read without control: no control methods; events arrive', () => {
     const e = external(['player:read']);
     e.plugin.start({ sendPlayerCommand: () => {}, onSwitchedOff: () => {} });
@@ -214,6 +230,18 @@ describe('installed plugins get only the ytmd groups they were granted', () => {
     e.plugin.setSettings({ accent: 'gold' });
     expect(seen).toEqual(['teal']);
     expect(unloaded).toBe(true);
+  });
+});
+
+describe('the permission set', () => {
+  test('Permission (types.ts) mirrors PERMISSIONS in plugins/manifest.rs', () => {
+    const rust = readFileSync(join(import.meta.dir, '..', '..', 'src-tauri', 'src', 'plugins', 'manifest.rs'), 'utf8');
+    const block = rust.slice(rust.indexOf('pub const PERMISSIONS'), rust.indexOf('];', rust.indexOf('pub const PERMISSIONS')));
+    const fromRust = [...block.matchAll(/\("([a-z:]+)", (true|false)\)/g)].map((m) => m[1]).sort();
+    const types = readFileSync(join(import.meta.dir, '..', 'plugins', 'types.ts'), 'utf8');
+    const union = types.slice(types.indexOf('export type Permission ='), types.indexOf(';', types.indexOf('export type Permission =')));
+    const fromTs = [...union.matchAll(/'([a-z:]+)'/g)].map((m) => m[1]).sort();
+    expect(fromTs).toEqual(fromRust);
   });
 });
 

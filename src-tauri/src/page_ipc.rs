@@ -57,6 +57,8 @@ pub const PAGE_EVENTS: &[&str] = &[
     // settings changed.
     "plugin-state-changed",
     "plugin-settings-changed",
+    // media:save progress (file names only, never the folder).
+    "plugin-media-progress",
 ];
 
 /// Config fields the page's plugins read. Paths, ports, the remote and

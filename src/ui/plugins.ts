@@ -55,6 +55,8 @@ interface Overview {
   plugins: PluginInfo[];
   registries: Registry[];
   officialHidden: boolean;
+  mediaDir: string;
+  mediaInUse: boolean;
   updateIntervalHours: number;
   restartNeeded: boolean;
 }
@@ -301,6 +303,9 @@ export async function refreshPlugins(): Promise<void> {
   $('plugins-installed-empty')?.classList.toggle('is-hidden', overview.plugins.length > 0);
   renderRegistries(overview.registries, refresh);
   $('registry-restore-btn')?.classList.toggle('is-hidden', !overview.officialHidden);
+  $('plugins-media')?.classList.toggle('is-hidden', !overview.mediaInUse);
+  const mediaDir = $('plugins-media-dir');
+  if (mediaDir) mediaDir.textContent = overview.mediaDir;
   const interval = $<HTMLSelectElement>('plugins-update-interval');
   if (interval) interval.value = String(overview.updateIntervalHours);
 }
@@ -310,6 +315,12 @@ export function initPluginsSection(): void {
   void refreshPlugins();
   $('plugins-restart-btn')?.addEventListener('click', () => void invoke('restart_app'));
   $('plugins-browse-btn')?.addEventListener('click', () => void showAvailable(refresh));
+  $('plugins-media-open')?.addEventListener('click', () => {
+    invoke('plugins_open_media_dir').catch((e) => showToast(errorText(e)));
+  });
+  $('plugins-media-pick')?.addEventListener('click', () => {
+    invoke('plugins_pick_media_dir').then(refresh).catch((e) => showToast(errorText(e)));
+  });
   $('registry-restore-btn')?.addEventListener('click', () => {
     invoke('plugins_restore_official').then(refresh).catch((e) => showToast(errorText(e)));
   });

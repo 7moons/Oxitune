@@ -25,7 +25,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 /// Longest pasted link or id the shared queue accepts.
 const MAX_QUEUE_INPUT_CHARS: usize = 300;
@@ -146,6 +146,20 @@ struct PluginIdArgs {
 struct PluginFetchArgs {
     id: String,
     url: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PluginMediaSaveArgs {
+    id: String,
+    video_id: String,
+    format: String,
+}
+
+#[derive(Deserialize)]
+struct PluginMediaCancelArgs {
+    id: String,
+    job: String,
 }
 
 #[derive(Deserialize)]
@@ -359,6 +373,19 @@ bridge_commands! {
         to_data(plugin_manager(h).fetch(&p.id, &p.url).await?)
     }
     // Returns true when this error switched the plugin off.
+    "plugin_media_save" => |h, state, args| {
+        let p: PluginMediaSaveArgs = parse_args("plugin_media_save", args)?;
+        let app = h.clone();
+        let emit: crate::plugins::media_save::Emit = Arc::new(move |progress| {
+            let _ = app.emit("plugin-media-progress", progress);
+        });
+        to_data(plugin_manager(h).media_save(&p.id, &p.video_id, &p.format, emit)?)
+    }
+    "plugin_media_cancel" => |h, state, args| {
+        let p: PluginMediaCancelArgs = parse_args("plugin_media_cancel", args)?;
+        plugin_manager(h).media_cancel(&p.id, &p.job)?;
+        Ok(Value::Null)
+    }
     "plugin_error" => |h, state, args| {
         let p: PluginErrorArgs = parse_args("plugin_error", args)?;
         to_data(plugin_manager(h).report_error(&p.id, &p.message))

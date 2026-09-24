@@ -15,7 +15,7 @@ import { LocalFilesPlugin } from '../plugins/local-files';
 import { SyncRoomPlugin, routeRoomPlayerCommand } from '../plugins/sync-room';
 import { PowerPlugin } from '../plugins/power';
 import { RemotePlugin } from '../plugins/remote';
-import { TrackInfo } from '../plugins/types';
+import { MediaProgress, TrackInfo } from '../plugins/types';
 import { configureNavMenu, mountNavMenu } from './ui/navMenu';
 import { ICONS, showToast } from './ui/kit';
 import { t } from './ui/i18n';
@@ -256,6 +256,9 @@ async function initYTMD() {
   });
   listenEvent<{ id: string; values: Record<string, unknown> }>('plugin-settings-changed', (p) => {
     if (p?.id && p.values) externalPlugin(p.id)?.setSettings(p.values);
+  });
+  listenEvent<MediaProgress>('plugin-media-progress', (p) => {
+    if (p?.plugin) externalPlugin(p.plugin)?.mediaProgress(p);
   });
 
   listenEvent<string>('player-command', (payload) => handlePlayerCommand(payload));

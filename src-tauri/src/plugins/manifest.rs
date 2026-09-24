@@ -19,6 +19,7 @@ pub const PERMISSIONS: &[(&str, bool)] = &[
     ("storage", true),
     ("network", true),
     ("ui", true),
+    ("media:save", true),
     ("internal:config", false),
     ("internal:lyrics", false),
     ("internal:sync", false),

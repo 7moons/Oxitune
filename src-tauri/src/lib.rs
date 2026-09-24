@@ -473,6 +473,8 @@ pub fn run() {
             plugins::commands::plugins_add_registry,
             plugins::commands::plugins_remove_registry,
             plugins::commands::plugins_restore_official,
+            plugins::commands::plugins_pick_media_dir,
+            plugins::commands::plugins_open_media_dir,
             plugins::commands::plugins_available,
             plugins::commands::plugins_install,
             plugins::commands::plugins_check_updates,

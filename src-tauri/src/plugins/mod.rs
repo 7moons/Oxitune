@@ -15,6 +15,7 @@
 pub mod archive;
 pub mod commands;
 pub mod manifest;
+pub mod media_save;
 pub mod registry;
 
 use archive::LoadedPlugin;
@@ -76,6 +77,10 @@ pub struct PluginState {
     /// The user removed the official registry.
     #[serde(default)]
     pub official_hidden: bool,
+    /// Where `media:save` puts songs (the user's choice; `None` = the
+    /// default, `media_dir()`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media_dir: Option<PathBuf>,
 }
 
 fn default_update_hours() -> u32 {
@@ -90,6 +95,7 @@ impl Default for PluginState {
             registries: Vec::new(),
             update_interval_hours: DEFAULT_UPDATE_HOURS,
             official_hidden: false,
+            media_dir: None,
         }
     }
 }
@@ -131,6 +137,7 @@ pub struct PluginManager {
     state: Mutex<PluginState>,
     /// Something changed that the page only picks up on reload.
     reload_needed: std::sync::atomic::AtomicBool,
+    pub media: std::sync::Arc<media_save::MediaJobs>,
 }
 
 impl PluginManager {
@@ -140,7 +147,7 @@ impl PluginManager {
             .ok()
             .and_then(|raw| serde_json::from_slice::<PluginState>(&raw).ok())
             .unwrap_or_default();
-        Self { root, state: Mutex::new(state), reload_needed: Default::default() }
+        Self { root, state: Mutex::new(state), reload_needed: Default::default(), media: Default::default() }
     }
 
     fn installed_dir(&self) -> PathBuf {
@@ -251,6 +258,9 @@ impl PluginManager {
         self.update_state(|s| {
             let inst = s.installed.get_mut(id).ok_or("plugins.error.notInstalled")?;
             inst.enabled = enabled;
+            if !enabled {
+                self.media.cancel_all(id);
+            }
             if enabled {
                 inst.auto_disabled = false;
                 inst.errors = 0;
@@ -279,6 +289,7 @@ impl PluginManager {
             s.installed.remove(id)
         });
         let inst = inst.ok_or("plugins.error.notInstalled")?;
+        self.media.cancel_all(id);
         if inst.source == Source::Registry && manifest::is_valid_id(id) {
             let _ = std::fs::remove_dir_all(self.installed_dir().join(id));
         }
@@ -297,6 +308,7 @@ impl PluginManager {
             if inst.errors >= MAX_ERRORS && !inst.auto_disabled {
                 inst.auto_disabled = true;
                 inst.enabled = false;
+                self.media.cancel_all(id);
                 log::warn!("[YTMD Plugins] {id} switched off after {MAX_ERRORS} errors");
                 return true;
             }
@@ -380,6 +392,33 @@ impl PluginManager {
             body.extend_from_slice(&chunk);
         }
         String::from_utf8(body).map_err(|_| "plugins.error.notText".to_string())
+    }
+
+    // --- Saving songs (media:save) -----------------------------------------------
+
+    /// The folder `media:save` writes to.
+    pub fn media_dir(&self) -> PathBuf {
+        self.state.lock().media_dir.clone().unwrap_or_else(default_media_dir)
+    }
+
+    pub fn set_media_dir(&self, dir: PathBuf) {
+        self.update_state(|s| s.media_dir = Some(dir));
+    }
+
+    /// Whether an installed plugin asks for `media:save` (Settings shows
+    /// the folder only then).
+    pub fn media_in_use(&self) -> bool {
+        self.state.lock().installed.values().any(|i| i.granted.iter().any(|g| g == media_save::PERMISSION))
+    }
+
+    pub fn media_save(&self, id: &str, video_id: &str, format: &str, emit: media_save::Emit) -> Result<String, String> {
+        self.check_permission(id, media_save::PERMISSION)?;
+        self.media.start(id, video_id, format, self.media_dir(), emit)
+    }
+
+    pub fn media_cancel(&self, id: &str, job: &str) -> Result<(), String> {
+        self.check_permission(id, media_save::PERMISSION)?;
+        self.media.cancel(id, job)
     }
 
     // --- Registries and installs -----------------------------------------------
@@ -590,6 +629,11 @@ impl PluginManager {
     pub fn set_update_interval(&self, hours: u32) {
         self.update_state(|s| s.update_interval_hours = hours.min(24 * 7));
     }
+}
+
+/// `~/Music/YTMD` (the system's music folder).
+pub fn default_media_dir() -> PathBuf {
+    dirs::audio_dir().unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join("Music")).join("YTMD")
 }
 
 /// The page's initialization scripts for the enabled plugins: one per
@@ -809,6 +853,21 @@ mod tests {
     }
 
     #[test]
+    fn test_media_save_needs_the_permission() {
+        let (_d, m) = manager();
+        with_installed(&m, &["ui"]);
+        let emit: media_save::Emit = std::sync::Arc::new(|_| {});
+        assert_eq!(m.media_save("com.example.theme", "dQw4w9WgXcQ", "mp3", emit.clone()).unwrap_err(), "plugins.error.notAllowed");
+        assert_eq!(m.media_save("com.example.nope", "dQw4w9WgXcQ", "mp3", emit).unwrap_err(), "plugins.error.notInstalled");
+        assert!(!m.media_in_use());
+        m.update_state(|s| s.installed.get_mut("com.example.theme").unwrap().granted.push("media:save".into()));
+        assert!(m.media_in_use());
+        assert_eq!(m.media_dir(), default_media_dir());
+        m.set_media_dir(PathBuf::from("/music/mine"));
+        assert_eq!(PluginManager::new(m.root.clone()).media_dir(), PathBuf::from("/music/mine"));
+    }
+
+    #[test]
     fn test_official_registry_is_built_in_and_can_be_hidden() {
         let (_d, m) = manager();
         let regs = m.registries();
@@ -836,6 +895,23 @@ mod tests {
         assert_eq!(regs.len(), 2);
         assert_eq!(regs[0].public_key, registry::OFFICIAL_KEY, "the official URL always uses the built-in key");
         assert!(!regs[1].official, "`official` is never read from disk");
+    }
+
+    /// The registry repo in `_plugins-export/` must stay installable by
+    /// this core: its manifests pass our checks and its key is the one
+    /// built in.
+    #[test]
+    fn test_the_official_registry_matches_this_core() {
+        let export = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../_plugins-export");
+        let key_file = std::fs::read_to_string(export.join("minisign.pub")).unwrap();
+        assert_eq!(key_file.lines().nth(1).map(str::trim), Some(registry::OFFICIAL_KEY));
+        let mut checked = 0;
+        for dir in std::fs::read_dir(export.join("plugins")).unwrap().flatten() {
+            let loaded = archive::load_dir(&dir.path()).unwrap_or_else(|e| panic!("{:?}: {e}", dir.path()));
+            assert_eq!(loaded.manifest.id, dir.file_name().to_string_lossy());
+            checked += 1;
+        }
+        assert!(checked >= 4);
     }
 
     #[test]

@@ -22,7 +22,7 @@ const baseUrl = (process.env.BASE_URL ?? 'https://example.invalid/oscilla-plugin
 
 const ID = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
-const PERMISSIONS = new Set(['player:read', 'player:control', 'page', 'storage', 'network', 'ui']);
+const PERMISSIONS = new Set(['player:read', 'player:control', 'page', 'storage', 'network', 'ui', 'media:save']);
 const FILE = /^(?!\.)[A-Za-z0-9_.-]+(?:\/(?!\.)[A-Za-z0-9_.-]+)*$/;
 
 interface Manifest {

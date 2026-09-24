@@ -79,6 +79,7 @@ A whole plugin is at most 5 MB and 200 files.
 | `storage` | `ytmd.storage`: the plugin's own key-value store (≤ 1 MB, JSON values) | Store its own data on this computer |
 | `network` | `ytmd.net`: https GET to the manifest's `hosts` only, ≤ 1 MB, 10 s, no redirects | Connect to the internet (only the sites listed) |
 | `ui` | `ytmd.ui`: toasts, styles; the manifest's `styles` | Show messages and restyle YouTube Music |
+| `media:save` | `ytmd.media`: save a song (by video id) with yt-dlp into the user's folder for saved songs | Save songs to your folder for saved songs (with yt-dlp) |
 
 `internal:*` permissions exist for YTMD's built-in plugins (config, lyrics,
 Listen Together, phone remote, power, windows, notifications) and are
@@ -127,6 +128,20 @@ interface Ytmd {
   net?: { fetchText(url): Promise<string>; fetchJson(url): Promise<unknown> };  // network
 
   ui?: { toast(text: string): void; addStyle(css: string): () => void };        // ui
+
+  media?: {                                        // media:save
+    formats: readonly ('mp3' | 'm4a' | 'opus' | 'flac')[];
+    save(videoId: string, options?: { format?: string }): Promise<string>;  // job id
+    cancel(job: string): Promise<void>;
+    onProgress(fn: (p: MediaProgress) => void): () => void;
+  };
+}
+
+interface MediaProgress {
+  job: string; videoId: string; percent: number;   // 0–100
+  state: 'queued' | 'downloading' | 'converting' | 'done' | 'failed' | 'cancelled';
+  file: string | null;    // the saved file's name (never its folder), when done
+  error: string | null;   // e.g. "plugins.error.ytdlpMissing", "plugins.error.mediaFailed:<yt-dlp's last line>"
 }
 
 interface Track {
@@ -151,6 +166,19 @@ Types: `boolean`, `number` (`min`, `max`), `string`, `select` (`options`).
 Labels and descriptions are a string or `{ "en": ..., "pl": ... }` (`en`
 required). Stored values are checked against the schema; anything invalid
 falls back to `default`.
+
+### Saving songs (`media:save`)
+
+YTMD runs yt-dlp for the plugin; the plugin never runs anything itself.
+The user installs yt-dlp (and ffmpeg) — YTMD never downloads them — and
+picks the folder in Settings → Plugins (default: the system's music folder
++ `YTMD`). The plugin supplies only an 11-character video id and a format
+from `formats`; the command line is fixed (`--ignore-config`, no shell, the
+URL is always `music.youtube.com/watch?v=<id>`, files go only into that
+folder, existing files are never overwritten). Two songs are saved at a
+time, at most 20 wait; a plugin can cancel only its own jobs, and switching
+it off or removing it cancels them. The example is
+[`app.ytmd.downloader`](../_plugins-export/plugins/app.ytmd.downloader).
 
 ## Lifecycle and errors
 

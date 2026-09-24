@@ -501,6 +501,18 @@
           "markdownDescription": "Enables the plugins_list command without any pre-configured scope."
         },
         {
+          "description": "Enables the plugins_open_media_dir command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-plugins-open-media-dir",
+          "markdownDescription": "Enables the plugins_open_media_dir command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the plugins_pick_media_dir command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-plugins-pick-media-dir",
+          "markdownDescription": "Enables the plugins_pick_media_dir command without any pre-configured scope."
+        },
+        {
           "description": "Enables the plugins_remove_registry command without any pre-configured scope.",
           "type": "string",
           "const": "allow-plugins-remove-registry",
@@ -829,6 +841,18 @@
           "type": "string",
           "const": "deny-plugins-list",
           "markdownDescription": "Denies the plugins_list command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the plugins_open_media_dir command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-plugins-open-media-dir",
+          "markdownDescription": "Denies the plugins_open_media_dir command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the plugins_pick_media_dir command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-plugins-pick-media-dir",
+          "markdownDescription": "Denies the plugins_pick_media_dir command without any pre-configured scope."
         },
         {
           "description": "Denies the plugins_remove_registry command without any pre-configured scope.",

@@ -17,6 +17,7 @@ export type Permission =
   | 'storage'
   | 'network'
   | 'ui'
+  | 'media:save'
   // Built-in plugins only.
   | 'internal:config'
   | 'internal:lyrics'
@@ -203,4 +204,29 @@ export interface YtmdApi {
   };
   net?: { fetchText(url: string): Promise<string>; fetchJson(url: string): Promise<unknown> };
   ui?: { toast(text: string): void; addStyle(css: string): Unlisten };
+  media?: {
+    /** Formats `save` accepts. */
+    readonly formats: readonly MediaFormat[];
+    /** Saves a song (by YouTube video id) to the user's folder with
+     * yt-dlp; resolves to a job id once it's queued. */
+    save(videoId: string, options?: { format?: MediaFormat }): Promise<string>;
+    cancel(job: string): Promise<void>;
+    onProgress(fn: (progress: MediaProgress) => void): Unlisten;
+  };
+}
+
+export const MEDIA_FORMATS = ['mp3', 'm4a', 'opus', 'flac'] as const;
+export type MediaFormat = (typeof MEDIA_FORMATS)[number];
+
+/** A `media:save` job's progress (`plugin-media-progress`). `file` is the
+ * saved file's name, never its folder; `error` a message key such as
+ * `plugins.error.ytdlpMissing`. */
+export interface MediaProgress {
+  plugin: string;
+  job: string;
+  videoId: string;
+  state: 'queued' | 'downloading' | 'converting' | 'done' | 'failed' | 'cancelled';
+  percent: number;
+  file: string | null;
+  error: string | null;
 }

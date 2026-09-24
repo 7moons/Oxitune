@@ -19,6 +19,7 @@ and key.
 |---|---|---|
 | `app.ytmd.example-theme` | The smallest useful plugin: an accent color over YouTube Music | `ui` |
 | `app.ytmd.adblock` | Removes ad scheduling from YouTube Music's responses; mutes, hides and skips what slips through | `player:read`, `page`, `ui` |
+| `app.ytmd.downloader` | A player-bar button that saves the current song with yt-dlp (which the user installs) | `player:read`, `page`, `ui`, `media:save` |
 | `app.ytmd.sponsorblock` | Skips intros, outros and other non-music parts using the SponsorBlock database | `player:read`, `player:control`, `network` (`sponsor.ajay.app`) |
 
 The plugin API itself (manifest, permissions, the `ytmd` object) is
@@ -65,7 +66,7 @@ The folder name must be the plugin's `id`.
   version asks for **no** new permissions; otherwise the user is asked.
 - `apiVersion`: `1`.
 - `permissions`: any of `player:read`, `player:control`, `page`, `storage`,
-  `network`, `ui`. `network` needs `hosts` (plain host names, https only).
+  `network`, `ui`, `media:save`. `network` needs `hosts` (plain host names, https only).
 - `runAt`: `document-start` (before YouTube Music's own scripts, e.g. to
   wrap `fetch`) or `document-idle` (default).
 - `settings`: rendered in YTMD's Settings; types `boolean`, `number`
