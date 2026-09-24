@@ -56,7 +56,7 @@ const CONFIG_TOGGLED_PLUGINS: Record<string, [field: string, defaultValue: boole
   sponsorblock: ['sponsorblock_enabled', true],
   lyrics: ['lyrics_enabled', true],
   notifications: ['notifications_enabled', false],
-  web_remote: ['remote_enabled', true]
+  web_remote: ['remote_enabled', false]
 };
 
 function configToggleMap(config: Record<string, unknown>): Record<string, boolean> {

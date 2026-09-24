@@ -43,6 +43,10 @@ pub struct AppConfig {
     pub local_music_dir: String,
     pub remote_enabled: bool,
     pub remote_port: u16,
+    /// Where the phone remote listens: `lan` (this PC's private LAN address
+    /// only, the default) or `all` (every interface, e.g. for VPN setups).
+    #[serde(default = "default_remote_bind")]
+    pub remote_bind: String,
     pub inhibit_sleep: bool,
     pub pause_on_lock: bool,
     /// Reopen the last song at its position when the app starts.
@@ -62,6 +66,10 @@ pub struct AppConfig {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_remote_bind() -> String {
+    "lan".to_string()
 }
 
 fn default_discord_clear_after_pause_min() -> u32 {
@@ -126,8 +134,10 @@ impl Default for AppConfig {
             ambient_lighting_enabled: true,
             ambient_intensity: 0.6,
             local_music_dir: default_music_dir,
-            remote_enabled: true,
+            // Off until the user turns it on: it opens a port on the LAN.
+            remote_enabled: false,
             remote_port: 9863,
+            remote_bind: default_remote_bind(),
             inhibit_sleep: true,
             pause_on_lock: true,
             resume_on_launch: true,
@@ -175,6 +185,10 @@ impl AppConfig {
         // most platforms and includes many well-known services).
         if self.remote_port < 1024 {
             self.remote_port = AppConfig::default().remote_port;
+        }
+
+        if self.remote_bind != "lan" && self.remote_bind != "all" {
+            self.remote_bind = default_remote_bind();
         }
 
         if self.local_music_dir.trim().is_empty() {
@@ -399,8 +413,9 @@ mod tests {
         assert!(config.preserve_pitch);
         assert!(config.ambient_lighting_enabled);
         assert_eq!(config.ambient_intensity, 0.6);
-        assert!(config.remote_enabled);
+        assert!(!config.remote_enabled, "the phone remote opens a LAN port: off by default");
         assert_eq!(config.remote_port, 9863);
+        assert_eq!(config.remote_bind, "lan");
         assert!(config.inhibit_sleep);
         assert!(config.pause_on_lock);
         assert_eq!(config.wheel_volume_step, 0.05);

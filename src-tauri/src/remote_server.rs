@@ -66,6 +66,64 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long a page action may take to answer (search, queue edits).
 const PAGE_REPLY_TIMEOUT: Duration = Duration::from_secs(8);
 const WS_PING_EVERY: Duration = Duration::from_secs(20);
+/// Phone messages per second a session may send (bursts up to twice that);
+/// the rest are dropped. A person tapping buttons never gets near it.
+const WS_MESSAGES_PER_SEC: u32 = 20;
+/// Wrong or missing tokens per address before it is refused for a while.
+const MAX_AUTH_FAILURES: u32 = 20;
+const AUTH_FAILURE_WINDOW: Duration = Duration::from_secs(60);
+
+/// Token bucket for one phone session.
+struct MessageBudget {
+    tokens: f64,
+    last: std::time::Instant,
+}
+
+impl MessageBudget {
+    fn new() -> Self {
+        Self { tokens: f64::from(WS_MESSAGES_PER_SEC * 2), last: std::time::Instant::now() }
+    }
+
+    fn take_at(&mut self, now: std::time::Instant) -> bool {
+        let refill = now.saturating_duration_since(self.last).as_secs_f64() * f64::from(WS_MESSAGES_PER_SEC);
+        self.tokens = (self.tokens + refill).min(f64::from(WS_MESSAGES_PER_SEC * 2));
+        self.last = now;
+        if self.tokens >= 1.0 {
+            self.tokens -= 1.0;
+            true
+        } else {
+            false
+        }
+    }
+}
+
+/// Failed pairing attempts per client address (someone guessing tokens, or
+/// a page in a browser on the LAN poking at the port).
+#[derive(Default)]
+struct AuthLimiter {
+    failures: Mutex<HashMap<IpAddr, (std::time::Instant, u32)>>,
+}
+
+impl AuthLimiter {
+    fn blocked_at(&self, ip: IpAddr, now: std::time::Instant) -> bool {
+        self.failures
+            .lock()
+            .get(&ip)
+            .is_some_and(|(since, n)| *n >= MAX_AUTH_FAILURES && now.saturating_duration_since(*since) < AUTH_FAILURE_WINDOW)
+    }
+
+    fn record_failure_at(&self, ip: IpAddr, now: std::time::Instant) {
+        let mut failures = self.failures.lock();
+        if failures.len() > 1024 {
+            failures.retain(|_, (since, _)| now.saturating_duration_since(*since) < AUTH_FAILURE_WINDOW);
+        }
+        let entry = failures.entry(ip).or_insert((now, 0));
+        if now.saturating_duration_since(entry.0) >= AUTH_FAILURE_WINDOW {
+            *entry = (now, 0);
+        }
+        entry.1 += 1;
+    }
+}
 
 fn looks_like_virtual_adapter(name: &str) -> bool {
     let name = name.to_lowercase();
@@ -571,6 +629,7 @@ struct ServerCtx {
     status: Arc<RemoteServerStatus>,
     port: u16,
     actions: Arc<dyn RemoteActions>,
+    auth_limiter: AuthLimiter,
 }
 
 fn security_headers(res: &mut Response, host: &str) {
@@ -612,6 +671,20 @@ async fn guard(State(ctx): State<Arc<ServerCtx>>, req: Request, next: Next) -> R
     if !host_allowed(&host, ctx.port) {
         return (StatusCode::MISDIRECTED_REQUEST, "Unknown host").into_response();
     }
+    let client_ip = req
+        .extensions()
+        .get::<axum::extract::ConnectInfo<SocketAddr>>()
+        .map(|c| c.0.ip());
+    let now = std::time::Instant::now();
+    if client_ip.is_some_and(|ip| ctx.auth_limiter.blocked_at(ip, now)) {
+        return (StatusCode::TOO_MANY_REQUESTS, "Too many attempts").into_response();
+    }
+    let refuse = |ctx: &ServerCtx| {
+        if let Some(ip) = client_ip {
+            ctx.auth_limiter.record_failure_at(ip, now);
+        }
+        forbidden()
+    };
 
     let path = req.uri().path().to_string();
     if is_public_path(&path) {
@@ -622,7 +695,7 @@ async fn guard(State(ctx): State<Arc<ServerCtx>>, req: Request, next: Next) -> R
 
     if let Some(t) = query_param(req.uri().query(), "t") {
         if !ctx.status.token_matches(&t) {
-            return forbidden();
+            return refuse(&ctx);
         }
         let cookie = format!("{COOKIE_NAME}={t}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000");
         let location = if path.is_empty() { "/".to_string() } else { path };
@@ -639,7 +712,7 @@ async fn guard(State(ctx): State<Arc<ServerCtx>>, req: Request, next: Next) -> R
 
     let authed = cookie_value(req.headers(), COOKIE_NAME).is_some_and(|c| ctx.status.token_matches(&c));
     if !authed {
-        return forbidden();
+        return refuse(&ctx);
     }
 
     // A WebSocket from another page would carry that page's Origin.
@@ -723,6 +796,7 @@ async fn ws_session(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
 
     let mut ping = tokio::time::interval(WS_PING_EVERY);
     ping.tick().await;
+    let mut budget = MessageBudget::new();
     loop {
         tokio::select! {
             event = events.recv() => match event {
@@ -747,7 +821,13 @@ async fn ws_session(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
                 }
             }
             incoming = socket.recv() => match incoming {
-                Some(Ok(Message::Text(text))) => handle_incoming(&ctx, text.as_str(), &reply_tx),
+                Some(Ok(Message::Text(text))) => {
+                    if budget.take_at(std::time::Instant::now()) {
+                        handle_incoming(&ctx, text.as_str(), &reply_tx);
+                    } else {
+                        log::debug!("[YTMD Remote] Dropping a phone message over the rate limit");
+                    }
+                }
                 Some(Ok(Message::Close(_))) | None | Some(Err(_)) => return,
                 Some(Ok(_)) => {}
             },
@@ -1004,18 +1084,29 @@ async fn serve(listener: tokio::net::TcpListener, ctx: Arc<ServerCtx>) {
     }
 }
 
-pub fn start_remote_server(app_handle: AppHandle, port: u16, status: Arc<RemoteServerStatus>) {
+/// The address the remote listens on: this PC's private LAN address for
+/// `lan` (so VPN, Docker and public interfaces don't expose it; loopback if
+/// there is none), every interface for `all`.
+pub fn bind_address(bind: &str, port: u16) -> SocketAddr {
+    if bind == "all" {
+        return SocketAddr::from(([0, 0, 0, 0], port));
+    }
+    let ip = get_local_ip().parse::<IpAddr>().unwrap_or(IpAddr::from([127, 0, 0, 1]));
+    SocketAddr::new(ip, port)
+}
+
+pub fn start_remote_server(app_handle: AppHandle, port: u16, bind: &str, status: Arc<RemoteServerStatus>) {
     follow_app_events(&app_handle, &status);
     if let Some(state) = app_handle.try_state::<Arc<crate::AppState>>() {
         status.hub.on_room(state.sync_room.get_room_state().as_ref());
     }
     let actions: Arc<dyn RemoteActions> = Arc::new(AppActions { app: app_handle, status: status.clone() });
 
+    let addr = bind_address(bind, port);
     tauri::async_runtime::spawn(async move {
-        let addr = SocketAddr::from(([0, 0, 0, 0], port));
         let listener = match tokio::net::TcpListener::bind(addr).await {
             Ok(l) => {
-                log::info!("[YTMD Remote] Server listening on http://0.0.0.0:{port}");
+                log::info!("[YTMD Remote] Server listening on http://{addr}");
                 status.mark_bound(port);
                 l
             }
@@ -1024,7 +1115,7 @@ pub fn start_remote_server(app_handle: AppHandle, port: u16, status: Arc<RemoteS
                 return;
             }
         };
-        serve(listener, Arc::new(ServerCtx { status, port, actions })).await;
+        serve(listener, Arc::new(ServerCtx { status, port, actions, auth_limiter: AuthLimiter::default() })).await;
     });
 }
 
@@ -1074,6 +1165,39 @@ mod tests {
         let (a, b) = (generate_token(), generate_token());
         assert!(is_well_formed_token(&a) && is_well_formed_token(&b));
         assert_ne!(a, b, "two generated tokens collided — RNG is broken");
+    }
+
+    #[test]
+    fn test_message_budget_allows_bursts_then_limits() {
+        let mut budget = MessageBudget::new();
+        let t0 = std::time::Instant::now();
+        let burst = (0..100).filter(|_| budget.take_at(t0)).count();
+        assert_eq!(burst, (WS_MESSAGES_PER_SEC * 2) as usize);
+        assert!(!budget.take_at(t0));
+        assert!(budget.take_at(t0 + Duration::from_millis(100)), "refills over time");
+    }
+
+    #[test]
+    fn test_auth_limiter_blocks_after_repeated_failures_then_forgets() {
+        let limiter = AuthLimiter::default();
+        let ip: IpAddr = "192.168.1.50".parse().unwrap();
+        let other: IpAddr = "192.168.1.51".parse().unwrap();
+        let t0 = std::time::Instant::now();
+        for _ in 0..MAX_AUTH_FAILURES {
+            assert!(!limiter.blocked_at(ip, t0));
+            limiter.record_failure_at(ip, t0);
+        }
+        assert!(limiter.blocked_at(ip, t0));
+        assert!(!limiter.blocked_at(other, t0), "per address");
+        assert!(!limiter.blocked_at(ip, t0 + AUTH_FAILURE_WINDOW), "the block expires");
+    }
+
+    #[test]
+    fn test_bind_address_defaults_to_the_lan_address() {
+        assert_eq!(bind_address("all", 9863), SocketAddr::from(([0, 0, 0, 0], 9863)));
+        let lan = bind_address("lan", 9863);
+        assert!(!lan.ip().is_unspecified(), "lan mode never listens on every interface");
+        assert_eq!(lan.port(), 9863);
     }
 
     #[test]
@@ -1241,7 +1365,7 @@ mod tests {
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
         let port = listener.local_addr().unwrap().port();
         let status = Arc::new(RemoteServerStatus::new(true, None));
-        let ctx = Arc::new(ServerCtx { status: status.clone(), port, actions: Arc::new(EchoActions) });
+        let ctx = Arc::new(ServerCtx { status: status.clone(), port, actions: Arc::new(EchoActions), auth_limiter: AuthLimiter::default() });
         tokio::spawn(serve(listener, ctx));
         (port, status)
     }

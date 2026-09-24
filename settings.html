@@ -349,6 +349,17 @@
 
           <div class="setting-row">
             <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.remoteBind.title">Listen on</span>
+              <span class="setting-desc" data-i18n="settings.remoteBind.desc">Which network the phone remote is reachable from. Takes effect after restarting the app</span>
+            </div>
+            <select id="remote_bind" class="select" data-i18n-label="settings.remoteBind.title">
+              <option value="lan" data-i18n="settings.remoteBind.lan">Home network only</option>
+              <option value="all" data-i18n="settings.remoteBind.all">All networks (VPN too)</option>
+            </select>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-text">
               <span class="setting-title" data-i18n="settings.remoteRevoke.title">Revoke paired phones</span>
               <span class="setting-desc" data-i18n="settings.remoteRevoke.desc">Disconnects every phone; they need to scan the QR code again</span>
             </div>

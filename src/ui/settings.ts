@@ -34,6 +34,7 @@ interface AppConfig {
   ambient_intensity: number;
   local_music_dir: string;
   remote_enabled: boolean;
+  remote_bind: string;
   remote_port: number;
   inhibit_sleep: boolean;
   pause_on_lock: boolean;
@@ -67,7 +68,7 @@ const TOGGLES: [keyof AppConfig & string, boolean][] = [
   ['preserve_pitch', true],
   ['wheel_volume_on_player_page', false],
   ['ambient_lighting_enabled', true],
-  ['remote_enabled', true],
+  ['remote_enabled', false],
   ['inhibit_sleep', true],
   ['pause_on_lock', true],
   ['resume_on_launch', true],
@@ -427,6 +428,8 @@ function applyConfig(config: AppConfig) {
 
   const port = $<HTMLInputElement>('remote_port');
   if (port) port.value = String(config.remote_port || 9863);
+  const remoteBind = $<HTMLSelectElement>('remote_bind');
+  if (remoteBind) remoteBind.value = config.remote_bind === 'all' ? 'all' : 'lan';
   const discordPause = $<HTMLSelectElement>('discord_clear_after_pause_min');
   if (discordPause) discordPause.value = String(config.discord_clear_after_pause_min ?? 5);
   const localDir = $<HTMLInputElement>('local_music_dir');
@@ -479,6 +482,7 @@ function collectConfig(config: AppConfig): AppConfig {
   const num = (id: string) => parseFloat($<HTMLInputElement>(id)?.value ?? '0');
   const port = parseInt($<HTMLInputElement>('remote_port')?.value ?? '', 10);
   next.remote_port = Number.isFinite(port) && port >= 1024 && port <= 65535 ? port : config.remote_port || 9863;
+  next.remote_bind = $<HTMLSelectElement>('remote_bind')?.value === 'all' ? 'all' : 'lan';
   const discordPause = parseInt($<HTMLSelectElement>('discord_clear_after_pause_min')?.value ?? '', 10);
   if (Number.isFinite(discordPause)) next.discord_clear_after_pause_min = discordPause;
   next.local_music_dir = $<HTMLInputElement>('local_music_dir')?.value ?? next.local_music_dir;

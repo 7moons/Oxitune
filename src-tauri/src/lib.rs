@@ -137,6 +137,7 @@ pub fn run() {
     let app_state_for_setup = app_state.clone();
     let remote_port = initial_config.remote_port;
     let remote_enabled = initial_config.remote_enabled;
+    let remote_bind = initial_config.remote_bind.clone();
     let initial_shortcuts = initial_config.shortcuts.clone();
 
     tauri::Builder::default()
@@ -191,6 +192,7 @@ pub fn run() {
                 remote_server::start_remote_server(
                     handle.clone(),
                     remote_port,
+                    &remote_bind,
                     app_state_for_setup.remote_status.clone(),
                 );
             }
