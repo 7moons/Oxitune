@@ -207,20 +207,7 @@ fn write_token(path: &Path, token: &str) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let tmp = path.with_extension("tmp");
-    {
-        let mut opts = std::fs::OpenOptions::new();
-        opts.write(true).create(true).truncate(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            opts.mode(0o600);
-        }
-        use std::io::Write;
-        let mut file = opts.open(&tmp)?;
-        file.write_all(token.as_bytes())?;
-    }
-    std::fs::rename(&tmp, path)
+    crate::secure_fs::write_private(path, token.as_bytes())
 }
 
 fn constant_time_eq(a: &str, b: &str) -> bool {

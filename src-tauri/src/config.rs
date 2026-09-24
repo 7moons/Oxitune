@@ -243,8 +243,10 @@ impl ConfigManager {
             .map(|h| h.join(".ytmd"))
             .unwrap_or_else(|| dirs::config_dir().unwrap_or_else(|| PathBuf::from(".")).join(".ytmd"));
 
-        if !app_dir.exists() {
-            let _ = fs::create_dir_all(&app_dir);
+        // Owner-only: it holds the config, the room identity, the remote
+        // token, the last session and the logs.
+        if let Err(e) = crate::secure_fs::ensure_private_dir(&app_dir) {
+            log::warn!("couldn't set up {}: {e}", app_dir.display());
         }
         let config_path = app_dir.join("config.json");
 
@@ -254,7 +256,7 @@ impl ConfigManager {
                 let legacy_path = legacy_dir.join("ytmd").join("config.json");
                 if legacy_path.exists() {
                     if let Ok(content) = fs::read_to_string(&legacy_path) {
-                        let _ = fs::write(&config_path, content);
+                        let _ = crate::secure_fs::write_private(&config_path, content.as_bytes());
                     }
                 }
             }
@@ -301,12 +303,7 @@ impl ConfigManager {
         // `AppConfig::default()`). `rename` within the same directory is a
         // single atomic syscall on the filesystems this app ships on, so a
         // reader only ever observes the fully-old or fully-new file.
-        let mut tmp_os = self.config_path.clone().into_os_string();
-        tmp_os.push(".tmp");
-        let tmp_path = PathBuf::from(tmp_os);
-
-        fs::write(&tmp_path, &json).map_err(|e| e.to_string())?;
-        fs::rename(&tmp_path, &self.config_path).map_err(|e| e.to_string())
+        crate::secure_fs::write_private(&self.config_path, json.as_bytes()).map_err(|e| e.to_string())
     }
 }
 

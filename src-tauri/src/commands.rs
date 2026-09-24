@@ -114,6 +114,36 @@ pub fn settings_backup_json(config: &AppConfig) -> Result<String, String> {
     .map_err(|e| e.to_string())
 }
 
+/// Biggest backup file we read (real ones are a few KB).
+pub const MAX_BACKUP_BYTES: u64 = 1024 * 1024;
+
+/// What an import applies, and the custom CSS it carried, which the user
+/// must confirm separately (it can load outside resources into YouTube
+/// Music, and a backup may come from someone else).
+#[derive(Serialize)]
+pub struct ImportedSettings {
+    pub config: AppConfig,
+    pub custom_css: Option<String>,
+}
+
+/// A backup file is input from possibly someone else: everything is
+/// sanitized, and three things are never taken from it: folders (the
+/// library path stays this computer's), whether the phone remote is on
+/// and where it listens (a file must not open a port), and custom CSS
+/// (returned separately for the user to confirm).
+pub fn merge_imported(current: &AppConfig, imported: AppConfig) -> ImportedSettings {
+    let css = imported.custom_css.trim().to_string();
+    let custom_css = (!css.is_empty() && imported.custom_css != current.custom_css).then_some(imported.custom_css.clone());
+    let config = AppConfig {
+        local_music_dir: current.local_music_dir.clone(),
+        remote_enabled: current.remote_enabled,
+        remote_bind: current.remote_bind.clone(),
+        custom_css: current.custom_css.clone(),
+        ..imported
+    };
+    ImportedSettings { config, custom_css }
+}
+
 /// The settings in a backup file, sanitized like any saved config. Errors
 /// are i18n keys.
 pub fn parse_settings_backup(json: &str) -> Result<AppConfig, String> {
@@ -155,7 +185,7 @@ pub async fn export_settings(app_handle: AppHandle, state: State<'_, Arc<AppStat
 pub async fn import_settings(
     app_handle: AppHandle,
     state: State<'_, Arc<AppState>>,
-) -> Result<Option<AppConfig>, String> {
+) -> Result<Option<ImportedSettings>, String> {
     use tauri_plugin_dialog::DialogExt;
     let handle = app_handle.clone();
     let picked = tauri::async_runtime::spawn_blocking(move || {
@@ -166,11 +196,15 @@ pub async fn import_settings(
     let Some(path) = picked.and_then(|p| p.into_path().ok()) else {
         return Ok(None);
     };
+    let too_big = std::fs::metadata(&path).map(|m| m.len() > MAX_BACKUP_BYTES).unwrap_or(true);
+    if too_big {
+        return Err("settings.backup.invalid".to_string());
+    }
     let json = std::fs::read_to_string(&path).map_err(|_| "settings.backup.invalid".to_string())?;
-    let config = parse_settings_backup(&json)?;
-    state.config_manager.save(&config)?;
-    crate::shortcuts::apply(&app_handle, &config.shortcuts);
-    Ok(Some(config))
+    let imported = merge_imported(&state.config_manager.load(), parse_settings_backup(&json)?);
+    state.config_manager.save(&imported.config)?;
+    crate::shortcuts::apply(&app_handle, &imported.config.shortcuts);
+    Ok(Some(imported))
 }
 
 #[tauri::command]
@@ -716,6 +750,29 @@ mod tests {
         assert_eq!(restored.crossfade_seconds, 6.0);
         assert_eq!(restored.equalizer_custom_presets, config.equalizer_custom_presets);
         assert_eq!(restored.shortcuts["like"], "Control+Alt+KeyL");
+    }
+
+    #[test]
+    fn test_import_keeps_local_paths_remote_and_asks_about_css() {
+        let current = AppConfig { local_music_dir: "/home/me/Music".into(), custom_css: "a{}".into(), ..AppConfig::default() };
+        let from_file = AppConfig {
+            local_music_dir: "/etc".into(),
+            remote_enabled: true,
+            remote_bind: "all".into(),
+            custom_css: "@import url(https://evil.example/x.css);".into(),
+            crossfade_seconds: 4.0,
+            ..AppConfig::default()
+        };
+        let imported = merge_imported(&current, from_file);
+        assert_eq!(imported.config.local_music_dir, "/home/me/Music");
+        assert!(!imported.config.remote_enabled);
+        assert_eq!(imported.config.remote_bind, "lan");
+        assert_eq!(imported.config.custom_css, "a{}", "CSS only after the user confirms");
+        assert_eq!(imported.custom_css.as_deref(), Some("@import url(https://evil.example/x.css);"));
+        assert_eq!(imported.config.crossfade_seconds, 4.0);
+
+        let same_css = merge_imported(&current, AppConfig { custom_css: "a{}".into(), ..AppConfig::default() });
+        assert!(same_css.custom_css.is_none(), "nothing to confirm when the CSS is unchanged");
     }
 
     #[test]

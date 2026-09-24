@@ -633,6 +633,34 @@ function initSectionNav() {
   content.querySelectorAll('.settings-section').forEach((s) => observer.observe(s));
 }
 
+/** A backup's custom CSS is applied only if the user says so: it runs
+ * inside YouTube Music and can load outside resources (fonts, images,
+ * `@import`), which tells that server you use YTMD and when. */
+function confirmImportedCss(css: string) {
+  const preview = document.createElement('pre');
+  preview.className = 'css-preview';
+  preview.textContent = css.length > 600 ? `${css.slice(0, 600)}…` : css;
+  openDialog({
+    id: 'ytmd-import-css',
+    title: tr('settings.backup.cssTitle'),
+    body: [document.createTextNode(tr('settings.backup.cssBody')), preview],
+    actions: [
+      { label: tr('settings.backup.cssKeep') },
+      {
+        label: tr('settings.backup.cssUse'),
+        filled: true,
+        onClick: (close) => {
+          close();
+          const textarea = $<HTMLTextAreaElement>('custom_css');
+          if (textarea) textarea.value = css;
+          emitLiveEvent('set-custom-css', css);
+          scheduleSave();
+        }
+      }
+    ]
+  });
+}
+
 // --------------------------------------------------------- phone remote
 
 interface RemoteInfo {
@@ -730,11 +758,15 @@ document.addEventListener('DOMContentLoaded', () => {
   $('import-settings-btn')?.addEventListener('click', async () => {
     if (!window.__TAURI__?.core) return;
     try {
-      const config = (await window.__TAURI__.core.invoke('import_settings')) as AppConfig | null;
-      if (!config) return;
-      applyConfig(config);
-      pushLiveState(config);
+      const imported = (await window.__TAURI__.core.invoke('import_settings')) as {
+        config: AppConfig;
+        custom_css: string | null;
+      } | null;
+      if (!imported) return;
+      applyConfig(imported.config);
+      pushLiveState(imported.config);
       showToast(tr('settings.backup.imported'));
+      if (imported.custom_css) confirmImportedCss(imported.custom_css);
     } catch (e) {
       showToast(errorMessage(e), { durationMs: 8000 });
     }

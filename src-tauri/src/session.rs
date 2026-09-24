@@ -160,9 +160,9 @@ impl SessionStore {
         if let Some(dir) = self.path.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
-        // Write-then-rename, so a crash mid-write can't leave half a file.
-        let tmp = self.path.with_extension("json.tmp");
-        if std::fs::write(&tmp, json).and_then(|_| std::fs::rename(&tmp, &self.path)).is_ok() {
+        // Write-then-rename (a crash mid-write can't leave half a file),
+        // owner-only: it says what the user listens to.
+        if crate::secure_fs::write_private(&self.path, json.as_bytes()).is_ok() {
             *self.last_write.lock() = Some((now, snapshot.video_id.clone()));
         } else {
             log::warn!("[YTMD Session] Could not save {}", self.path.display());

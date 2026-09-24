@@ -6,6 +6,7 @@ pub mod join_link;
 pub mod local_files;
 pub mod lyrics;
 pub mod mpris;
+pub mod nav_policy;
 pub mod page_ipc;
 pub mod p2p_sync;
 pub mod power_manager;
@@ -82,6 +83,14 @@ pub fn run() {
     };
 
     let ytmd_dir = config_manager.config_path().parent().map(|dir| dir.to_path_buf());
+    if let Some(dir) = &ytmd_dir {
+        // Files written by older versions with the default umask.
+        for name in ["config.json", "session.json", "remote_token", "lyrics_offsets.json"] {
+            secure_fs::restrict_file(&dir.join(name));
+        }
+        // Protocol-2 install id, replaced by `sync_identity`.
+        let _ = std::fs::remove_file(dir.join("sync_client_id"));
+    }
     let logs_dir = config_manager
         .config_path()
         .parent()
@@ -236,7 +245,28 @@ pub fn run() {
             // margin and got visibly clipped on their left edge.
             .min_inner_size(700.0, 500.0)
             .resizable(true)
-            .initialization_script(include_str!("../inject/preload.js"));
+            .initialization_script(include_str!("../inject/preload.js"))
+            // YouTube Music and Google sign-in only (nav_policy.rs).
+            .on_navigation(|url| {
+                let ok = nav_policy::is_allowed_navigation(url);
+                if !ok {
+                    log::warn!("[YTMD] blocked navigation of the main window to {}", url.origin().ascii_serialization());
+                }
+                ok
+            })
+            // Pop-ups never open inside the app: web links go to the browser.
+            .on_new_window({
+                let handle = handle.clone();
+                move |url, _features| {
+                    if nav_policy::opens_in_browser(&url) {
+                        use tauri_plugin_opener::OpenerExt;
+                        if let Err(e) = handle.opener().open_url(url.as_str(), None::<&str>) {
+                            log::warn!("[YTMD] couldn't open a link in the browser: {e}");
+                        }
+                    }
+                    tauri::webview::NewWindowResponse::Deny
+                }
+            });
 
             if let Ok(icon) = tauri::image::Image::from_bytes(include_bytes!("../icons/icon.png")) {
                 main_builder = main_builder.icon(icon)?;
