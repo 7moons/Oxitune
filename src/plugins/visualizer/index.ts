@@ -1,9 +1,11 @@
-import { YTMDPlugin, PluginContext } from '../types';
+import { YTMDPlugin, PluginContext, PluginManifest } from '../types';
+import manifest from './manifest.json';
 
 let cleanup: (() => void) | null = null;
 
 export const VisualizerPlugin: YTMDPlugin = {
   id: 'visualizer',
+  manifest: manifest as PluginManifest,
   name: 'Sleek Scrollbars',
   description: 'Applies subtle, low-contrast scrollbar colors',
   defaultEnabled: true,

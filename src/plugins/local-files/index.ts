@@ -1,7 +1,9 @@
-import { YTMDPlugin, PluginContext } from '../types';
+import { YTMDPlugin, PluginContext, PluginManifest } from '../types';
+import manifest from './manifest.json';
 
 export const LocalFilesPlugin: YTMDPlugin = {
   id: 'local_files',
+  manifest: manifest as PluginManifest,
   name: 'Local Music Library',
   description: 'Play local offline audio files alongside YouTube Music streaming',
   defaultEnabled: true,

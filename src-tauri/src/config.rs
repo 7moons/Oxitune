@@ -15,8 +15,6 @@ pub struct AppConfig {
     pub discord_clear_after_pause_min: u32,
     pub mpris_enabled: bool,
     pub notifications_enabled: bool,
-    pub adblock_enabled: bool,
-    pub sponsorblock_enabled: bool,
     pub lyrics_enabled: bool,
     /// Lyrics providers in priority order, each on or off.
     #[serde(default = "crate::lyrics::default_provider_settings")]
@@ -111,8 +109,6 @@ impl Default for AppConfig {
             discord_clear_after_pause_min: default_discord_clear_after_pause_min(),
             mpris_enabled: true,
             notifications_enabled: false,
-            adblock_enabled: true,
-            sponsorblock_enabled: true,
             lyrics_enabled: true,
             lyrics_providers: crate::lyrics::default_provider_settings(),
             miniplayer_enabled: true,
@@ -397,8 +393,6 @@ mod tests {
         assert!(config.resume_on_launch);
         assert!(!config.resume_autoplay);
         assert!(config.mpris_enabled);
-        assert!(config.adblock_enabled);
-        assert!(config.sponsorblock_enabled);
         assert!(config.lyrics_enabled);
         assert_eq!(config.lyrics_providers, crate::lyrics::default_provider_settings());
         assert!(config.equalizer_enabled);

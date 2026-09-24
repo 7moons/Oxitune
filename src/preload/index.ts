@@ -1,9 +1,8 @@
 import { PlayerObserver } from './observer';
 import { PlayerBridge } from './bridge';
 import { startResume } from './resume';
-import { PluginRegistry } from '../plugins/registry';
-import { AdblockPlugin } from '../plugins/adblock';
-import { SponsorblockPlugin } from '../plugins/sponsorblock';
+import { HostContext, PluginRegistry } from '../plugins/registry';
+import { ExternalPlugin, announceSwitchedOff, externalPlugin, externalPlugins, installPluginHost } from './pluginHost';
 import { LyricsPlugin } from '../plugins/lyrics';
 import { VolumePlugin } from '../plugins/volume';
 import { NotificationsPlugin } from '../plugins/notifications';
@@ -16,7 +15,7 @@ import { LocalFilesPlugin } from '../plugins/local-files';
 import { SyncRoomPlugin, routeRoomPlayerCommand } from '../plugins/sync-room';
 import { PowerPlugin } from '../plugins/power';
 import { RemotePlugin } from '../plugins/remote';
-import { PluginContext, TrackInfo } from '../plugins/types';
+import { TrackInfo } from '../plugins/types';
 import { configureNavMenu, mountNavMenu } from './ui/navMenu';
 import { ICONS, showToast } from './ui/kit';
 import { t } from './ui/i18n';
@@ -52,8 +51,6 @@ function setupNavMenu() {
 // choice. Plugin ids missing here (ambient_lighting, audio_dsp, ...)
 // self-gate off ctx.config instead, so they're left out on purpose.
 const CONFIG_TOGGLED_PLUGINS: Record<string, [field: string, defaultValue: boolean]> = {
-  adblock: ['adblock_enabled', true],
-  sponsorblock: ['sponsorblock_enabled', true],
   lyrics: ['lyrics_enabled', true],
   notifications: ['notifications_enabled', false],
   web_remote: ['remote_enabled', false]
@@ -101,21 +98,25 @@ async function initYTMD() {
     console.error('[YTMD] Failed to load config, using defaults:', e);
   }
 
-  const context: PluginContext = {
+  // Everything plugins can do; each gets the slice its manifest grants
+  // (plugins/registry.ts `scopedContext`).
+  const host: HostContext = {
     track: null,
     config,
     invoke: invokeBackend,
     sendPlayerCommand: (command: string) => {
       handlePlayerCommand(command);
     },
-    getVideoElement: () => PlayerBridge.getVideo()
+    getVideoElement: () => PlayerBridge.getVideo(),
+    listen: (event, handler) => pageEvents.listen(event, handler)
   };
 
-
-  // Initialize plugins safely
-  const registry = new PluginRegistry(context);
-  registry.register(AdblockPlugin);
-  registry.register(SponsorblockPlugin);
+  // Built-in plugins, then installed ones (pluginHost.ts); errors in either
+  // are isolated per plugin, and installed plugins report them to the
+  // backend, which switches a plugin off after repeated failures.
+  const registry = new PluginRegistry(host, (plugin, error) => {
+    if (plugin instanceof ExternalPlugin) plugin.report('hook', error);
+  });
   registry.register(LyricsPlugin);
   registry.register(VolumePlugin);
   registry.register(NotificationsPlugin);
@@ -128,6 +129,14 @@ async function initYTMD() {
   registry.register(SyncRoomPlugin);
   registry.register(PowerPlugin);
   registry.register(RemotePlugin);
+  const switchOff = (id: string) => {
+    const plugin = externalPlugin(id);
+    void registry.disable(id);
+    if (plugin) announceSwitchedOff(plugin);
+  };
+  for (const plugin of externalPlugins({ sendPlayerCommand: (c) => handlePlayerCommand(c), onSwitchedOff: switchOff })) {
+    registry.register(plugin);
+  }
 
   try {
     await registry.initAll(configToggleMap(config));
@@ -240,6 +249,15 @@ async function initYTMD() {
     void pageEvents.listen<T>(eventName, (e) => handler(e.payload));
   };
 
+  // Plugin manager (Settings): switching off takes effect now; settings
+  // reach the plugin live.
+  listenEvent<{ id: string; enabled: boolean }>('plugin-state-changed', (p) => {
+    if (p && !p.enabled) void registry.disable(p.id);
+  });
+  listenEvent<{ id: string; values: Record<string, unknown> }>('plugin-settings-changed', (p) => {
+    if (p?.id && p.values) externalPlugin(p.id)?.setSettings(p.values);
+  });
+
   listenEvent<string>('player-command', (payload) => handlePlayerCommand(payload));
   listenEvent<string>('tray-command', (payload) => handlePlayerCommand(payload));
   listenEvent<string>('mpris-command', (payload) => handlePlayerCommand(payload));
@@ -249,7 +267,7 @@ async function initYTMD() {
   listenEvent<number>('player-volume', (payload) => PlayerBridge.setVolume(payload));
 
   // Settings window emits this after a successful Save so toggles the
-  // registry gates (adblock/sponsorblock/lyrics/notifications/web_remote)
+  // registry gates (lyrics/notifications/web_remote)
   // take effect immediately instead of only on next app restart. Plugins
   // that read ctx.config directly (audio_dsp, ambient_lighting, ...) pick up
   // the change for free since `config` is mutated in place, not reassigned.
@@ -287,12 +305,14 @@ async function initYTMD() {
 // there wastes resources, spams "event.listen not allowed" errors (those
 // origins aren't in our Tauri capability allowlist — by design, since they're
 // untrusted), and runs a duplicate copy of every setInterval polling loop
-// (adblock, lyrics, burger menu, DSP...) per ad iframe. Only the
+// (lyrics, burger menu, DSP...) per ad iframe. Only the
 // top-level music.youtube.com frame should ever run this.
 const isTopLevelYTMFrame =
   window.self === window.top && /(^|\.)music\.youtube\.com$/.test(location.hostname);
 
 if (isTopLevelYTMFrame) {
+  // Before the installed plugins' own init scripts run (they follow this one).
+  installPluginHost();
   startResume();
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => initYTMD());

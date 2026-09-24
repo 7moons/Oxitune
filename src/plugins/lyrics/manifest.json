@@ -1,0 +1,20 @@
+{
+  "id": "app.ytmd.lyrics",
+  "name": "Native Synced Lyrics",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "description": "Synchronized lyrics from several providers in the native Lyrics tab, with active highlighting and seek-on-click",
+  "author": "YTMD",
+  "matches": [
+    "https://music.youtube.com/*"
+  ],
+  "runAt": "document-idle",
+  "permissions": [
+    "player:read",
+    "player:control",
+    "page",
+    "ui",
+    "internal:lyrics"
+  ],
+  "entry": "index.js"
+}

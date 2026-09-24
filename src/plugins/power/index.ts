@@ -1,4 +1,5 @@
-import { YTMDPlugin, PluginContext } from '../types';
+import { YTMDPlugin, PluginContext, PluginManifest } from '../types';
+import manifest from './manifest.json';
 
 let cleanup: (() => void) | null = null;
 
@@ -10,6 +11,7 @@ export const shouldInhibitSleep = (inhibitSetting: unknown, playing: boolean): b
 
 export const PowerPlugin: YTMDPlugin = {
   id: 'power_watchdog',
+  manifest: manifest as PluginManifest,
   name: 'Smart Power & Audio Watchdog',
   description: 'Keeps the system awake during playback',
   defaultEnabled: true,

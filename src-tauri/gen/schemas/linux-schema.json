@@ -465,6 +465,72 @@
           "markdownDescription": "Enables the open_logs_folder command without any pre-configured scope."
         },
         {
+          "description": "Enables the plugins_add_dev command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-plugins-add-dev",
+          "markdownDescription": "Enables the plugins_add_dev command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the plugins_add_registry command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-plugins-add-registry",
+          "markdownDescription": "Enables the plugins_add_registry command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the plugins_available command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-plugins-available",
+          "markdownDescription": "Enables the plugins_available command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the plugins_check_updates command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-plugins-check-updates",
+          "markdownDescription": "Enables the plugins_check_updates command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the plugins_install command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-plugins-install",
+          "markdownDescription": "Enables the plugins_install command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the plugins_list command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-plugins-list",
+          "markdownDescription": "Enables the plugins_list command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the plugins_remove_registry command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-plugins-remove-registry",
+          "markdownDescription": "Enables the plugins_remove_registry command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the plugins_set_enabled command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-plugins-set-enabled",
+          "markdownDescription": "Enables the plugins_set_enabled command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the plugins_set_setting command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-plugins-set-setting",
+          "markdownDescription": "Enables the plugins_set_setting command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the plugins_set_update_interval command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-plugins-set-update-interval",
+          "markdownDescription": "Enables the plugins_set_update_interval command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the plugins_uninstall command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-plugins-uninstall",
+          "markdownDescription": "Enables the plugins_uninstall command without any pre-configured scope."
+        },
+        {
           "description": "Enables the regenerate_remote_token command without any pre-configured scope.",
           "type": "string",
           "const": "allow-regenerate-remote-token",
@@ -475,6 +541,12 @@
           "type": "string",
           "const": "allow-reset-shortcuts",
           "markdownDescription": "Enables the reset_shortcuts command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the restart_app command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-restart-app",
+          "markdownDescription": "Enables the restart_app command without any pre-configured scope."
         },
         {
           "description": "Enables the retry_connection command without any pre-configured scope.",
@@ -717,6 +789,72 @@
           "markdownDescription": "Denies the open_logs_folder command without any pre-configured scope."
         },
         {
+          "description": "Denies the plugins_add_dev command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-plugins-add-dev",
+          "markdownDescription": "Denies the plugins_add_dev command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the plugins_add_registry command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-plugins-add-registry",
+          "markdownDescription": "Denies the plugins_add_registry command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the plugins_available command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-plugins-available",
+          "markdownDescription": "Denies the plugins_available command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the plugins_check_updates command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-plugins-check-updates",
+          "markdownDescription": "Denies the plugins_check_updates command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the plugins_install command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-plugins-install",
+          "markdownDescription": "Denies the plugins_install command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the plugins_list command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-plugins-list",
+          "markdownDescription": "Denies the plugins_list command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the plugins_remove_registry command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-plugins-remove-registry",
+          "markdownDescription": "Denies the plugins_remove_registry command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the plugins_set_enabled command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-plugins-set-enabled",
+          "markdownDescription": "Denies the plugins_set_enabled command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the plugins_set_setting command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-plugins-set-setting",
+          "markdownDescription": "Denies the plugins_set_setting command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the plugins_set_update_interval command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-plugins-set-update-interval",
+          "markdownDescription": "Denies the plugins_set_update_interval command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the plugins_uninstall command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-plugins-uninstall",
+          "markdownDescription": "Denies the plugins_uninstall command without any pre-configured scope."
+        },
+        {
           "description": "Denies the regenerate_remote_token command without any pre-configured scope.",
           "type": "string",
           "const": "deny-regenerate-remote-token",
@@ -727,6 +865,12 @@
           "type": "string",
           "const": "deny-reset-shortcuts",
           "markdownDescription": "Denies the reset_shortcuts command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the restart_app command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-restart-app",
+          "markdownDescription": "Denies the restart_app command without any pre-configured scope."
         },
         {
           "description": "Denies the retry_connection command without any pre-configured scope.",

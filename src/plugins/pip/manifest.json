@@ -1,0 +1,17 @@
+{
+  "id": "app.ytmd.pip",
+  "name": "Floating Picture-in-Picture",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "description": "Detachable floating always-on-top video window for watching music videos while browsing",
+  "author": "YTMD",
+  "matches": [
+    "https://music.youtube.com/*"
+  ],
+  "runAt": "document-idle",
+  "permissions": [
+    "page",
+    "internal:windows"
+  ],
+  "entry": "index.js"
+}

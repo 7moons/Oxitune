@@ -9,6 +9,7 @@ const en = {
   menuLocal: 'Local music',
   menuSync: 'Listen together',
   menuRemote: 'Phone remote',
+  pluginSwitchedOff: (name: string) => `“${name}” kept failing and was switched off. You can turn it back on in Settings > Plugins.`,
   menuMiniPlayer: 'Mini player',
   syncInRoom: 'Listening together',
   syncListeners: (n: number) => (n === 1 ? '1 listener' : `${n} listeners`),
@@ -77,6 +78,7 @@ const pl: Strings = {
   menuLocal: 'Muzyka lokalna',
   menuSync: 'Słuchaj razem',
   menuRemote: 'Pilot w telefonie',
+  pluginSwitchedOff: (name: string) => `Wtyczka „${name}” ciągle zgłaszała błędy i została wyłączona. Możesz ją włączyć ponownie w Ustawieniach > Wtyczki.`,
   menuMiniPlayer: 'Miniodtwarzacz',
   syncInRoom: 'Słuchacie razem',
   syncListeners: (n: number) => {

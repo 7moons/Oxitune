@@ -10,7 +10,6 @@
  * already handles. Song lookups for enqueue use YTM's `music/get_queue`
  * through the app's `networkManager`, which signs requests like YTM does.
  */
-import { pageEvents } from '../../preload/bridgeClient';
 import type { PluginContext } from '../types';
 import { PlayerBridge } from '../../preload/bridge';
 import { getPlayerVolumePercent, isPlayerMuted } from '../../preload/playerVolume';
@@ -222,7 +221,7 @@ function setClients(ctx: PluginContext, count: number) {
 }
 
 export function startRemoteHost(ctx: PluginContext): void {
-  const events = pageEvents;
+  const events = ctx.events;
   if (!events) return;
   events
     .listen<RemoteActionEvent>('remote-action', ({ payload }) => {

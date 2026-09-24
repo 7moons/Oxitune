@@ -1,5 +1,5 @@
-import { pageEvents } from '../../preload/bridgeClient';
-import { YTMDPlugin, PluginContext, TrackInfo } from '../types';
+import { YTMDPlugin, PluginContext, TrackInfo, PluginManifest } from '../types';
+import manifest from './manifest.json';
 import { extractPalette, renderAmbientWash } from './color';
 import { createEl } from '../../utils/dom';
 
@@ -9,6 +9,7 @@ let lastCoverUrl: string | null | undefined;
 
 export const AmbientLightingPlugin: YTMDPlugin = {
   id: 'ambient_lighting',
+  manifest: manifest as PluginManifest,
   name: 'Dynamic Ambient Lighting',
   description: 'Fills the page behind the translucent chrome with a blurred, color-extracted wash of the active album cover — the same treatment the companion windows use',
   defaultEnabled: true,
@@ -79,12 +80,12 @@ export const AmbientLightingPlugin: YTMDPlugin = {
     };
 
     const unlistenPromises: Promise<() => void>[] = [];
-    if (pageEvents) {
+    if (ctx.events) {
       unlistenPromises.push(
-        pageEvents.listen<number>('set-ambient-intensity', (e) => {
+        ctx.events.listen<number>('set-ambient-intensity', (e) => {
           setIntensity?.(e.payload);
         }),
-        pageEvents.listen<boolean>('set-ambient-enabled', (e) => {
+        ctx.events.listen<boolean>('set-ambient-enabled', (e) => {
           // Re-enabling restores the user's chosen intensity, not a default.
           const configured = typeof ctx.config.ambient_intensity === 'number' ? ctx.config.ambient_intensity : 0.6;
           setIntensity?.(e.payload ? configured : 0);

@@ -1,4 +1,5 @@
-import { YTMDPlugin, PluginContext } from '../types';
+import { YTMDPlugin, PluginContext, PluginManifest } from '../types';
+import manifest from './manifest.json';
 import { createIconButton, ICONS } from '../../preload/ui/kit';
 import { t } from '../../preload/ui/i18n';
 
@@ -6,6 +7,7 @@ let cleanup: (() => void) | null = null;
 
 export const PipPlugin: YTMDPlugin = {
   id: 'pip',
+  manifest: manifest as PluginManifest,
   name: 'Floating Picture-in-Picture',
   description: 'Detachable floating always-on-top video window for watching music videos while browsing',
   defaultEnabled: true,

@@ -21,6 +21,18 @@
     "allow-regenerate-remote-token",
     "allow-get-app-version",
     "allow-check-for-updates",
-    "allow-install-update"
+    "allow-install-update",
+    "allow-restart-app",
+    "allow-plugins-list",
+    "allow-plugins-set-enabled",
+    "allow-plugins-uninstall",
+    "allow-plugins-set-setting",
+    "allow-plugins-add-registry",
+    "allow-plugins-remove-registry",
+    "allow-plugins-available",
+    "allow-plugins-install",
+    "allow-plugins-check-updates",
+    "allow-plugins-add-dev",
+    "allow-plugins-set-update-interval"
   ]
 }

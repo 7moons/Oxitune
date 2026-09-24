@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import { VolumePlugin } from '../plugins/volume';
 import { PluginContext } from '../plugins/types';
+import { scopedContext } from '../plugins/registry';
 import { KIT_CSS } from '../preload/ui/kit';
 
 const globals = ['window', 'document', 'Element', 'getComputedStyle'] as const;
@@ -121,13 +122,17 @@ function createPage() {
     }
   });
 
-  const ctx: PluginContext = {
-    track: null,
-    config: { wheel_volume_on_player_page: true, wheel_volume_step: 0.05 },
-    invoke: async () => null,
-    sendPlayerCommand: () => {},
-    getVideoElement: () => video as unknown as HTMLVideoElement
-  };
+  const ctx: PluginContext = scopedContext(
+    {
+      track: null,
+      config: { wheel_volume_on_player_page: true, wheel_volume_step: 0.05 },
+      invoke: async () => null,
+      sendPlayerCommand: () => {},
+      getVideoElement: () => video as unknown as HTMLVideoElement,
+      listen: async () => () => {}
+    },
+    VolumePlugin.manifest
+  );
   VolumePlugin.onInit?.(ctx);
 
   return {

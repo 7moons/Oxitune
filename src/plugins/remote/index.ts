@@ -1,4 +1,5 @@
-import { YTMDPlugin, PluginContext } from '../types';
+import { YTMDPlugin, PluginContext, PluginManifest } from '../types';
+import manifest from './manifest.json';
 import { startRemoteHost, stopRemoteHost } from './host';
 
 /**
@@ -9,6 +10,7 @@ import { startRemoteHost, stopRemoteHost } from './host';
  */
 export const RemotePlugin: YTMDPlugin = {
   id: 'web_remote',
+  manifest: manifest as PluginManifest,
   name: 'Mobile Web Remote',
   description: 'Control playback from phone or tablet over Wi-Fi with QR code pairing',
   defaultEnabled: true,

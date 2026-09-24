@@ -125,6 +125,41 @@ struct ReactionArgs {
 }
 
 #[derive(Deserialize)]
+struct PluginKeyArgs {
+    id: String,
+    key: String,
+}
+
+#[derive(Deserialize)]
+struct PluginSetArgs {
+    id: String,
+    key: String,
+    value: Value,
+}
+
+#[derive(Deserialize)]
+struct PluginIdArgs {
+    id: String,
+}
+
+#[derive(Deserialize)]
+struct PluginFetchArgs {
+    id: String,
+    url: String,
+}
+
+#[derive(Deserialize)]
+struct PluginErrorArgs {
+    id: String,
+    #[serde(default)]
+    message: String,
+}
+
+fn plugin_manager(h: &AppHandle) -> Arc<crate::plugins::PluginManager> {
+    h.state::<Arc<crate::plugins::PluginManager>>().inner().clone()
+}
+
+#[derive(Deserialize)]
 struct InhibitSleepArgs {
     inhibit: bool,
 }
@@ -297,6 +332,36 @@ bridge_commands! {
         let p: InhibitSleepArgs = parse_args("set_inhibit_sleep", args)?;
         state.power_manager.set_inhibit_sleep(p.inhibit);
         Ok(Value::Null)
+    }
+    // Runtime plugins (plugins/mod.rs). Each call names the plugin; what
+    // it may do is checked against that plugin's install (on, granted,
+    // hosts), since anything in the page can make these calls.
+    "plugin_storage_get" => |h, state, args| {
+        let p: PluginKeyArgs = parse_args("plugin_storage_get", args)?;
+        plugin_manager(h).storage_get(&p.id, &p.key)
+    }
+    "plugin_storage_set" => |h, state, args| {
+        let p: PluginSetArgs = parse_args("plugin_storage_set", args)?;
+        plugin_manager(h).storage_set(&p.id, &p.key, Some(p.value))?;
+        Ok(Value::Null)
+    }
+    "plugin_storage_remove" => |h, state, args| {
+        let p: PluginKeyArgs = parse_args("plugin_storage_remove", args)?;
+        plugin_manager(h).storage_set(&p.id, &p.key, None)?;
+        Ok(Value::Null)
+    }
+    "plugin_storage_keys" => |h, state, args| {
+        let p: PluginIdArgs = parse_args("plugin_storage_keys", args)?;
+        to_data(plugin_manager(h).storage_keys(&p.id)?)
+    }
+    "plugin_fetch" => |h, state, args| {
+        let p: PluginFetchArgs = parse_args("plugin_fetch", args)?;
+        to_data(plugin_manager(h).fetch(&p.id, &p.url).await?)
+    }
+    // Returns true when this error switched the plugin off.
+    "plugin_error" => |h, state, args| {
+        let p: PluginErrorArgs = parse_args("plugin_error", args)?;
+        to_data(plugin_manager(h).report_error(&p.id, &p.message))
     }
     // Phone remote (remote_server.rs): the page reports what a connected
     // phone shows and answers the phone's `remote-action` requests.

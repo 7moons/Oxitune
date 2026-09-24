@@ -1,7 +1,9 @@
-import { YTMDPlugin, PluginContext, TrackInfo } from '../types';
+import { YTMDPlugin, PluginContext, TrackInfo, PluginManifest } from '../types';
+import manifest from './manifest.json';
 
 export const NotificationsPlugin: YTMDPlugin = {
   id: 'notifications',
+  manifest: manifest as PluginManifest,
   name: 'Track Change Notifications',
   description: 'Displays native desktop notifications when songs change',
   defaultEnabled: false,

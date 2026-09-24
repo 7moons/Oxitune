@@ -1,5 +1,5 @@
-import { pageEvents } from '../../preload/bridgeClient';
-import { YTMDPlugin, PluginContext, TrackInfo } from '../types';
+import { YTMDPlugin, PluginContext, TrackInfo, PluginManifest } from '../types';
+import manifest from './manifest.json';
 import { AudioEngine } from './engine';
 import { CrossfadeController } from './crossfade';
 import { SkipSilenceController } from './skip-silence';
@@ -26,6 +26,7 @@ export function needsAudioGraph(config: Record<string, unknown>): boolean {
 
 export const AudioDspPlugin: YTMDPlugin = {
   id: 'audio_dsp',
+  manifest: manifest as PluginManifest,
   name: 'Audio DSP & 10-Band Equalizer',
   description: 'Parametric 10-band equalizer, loudness normalization, crossfade, silence skipping, and speed/pitch control',
   defaultEnabled: true,
@@ -97,8 +98,8 @@ export const AudioDspPlugin: YTMDPlugin = {
 
     // Listen to Tauri events for live adjustments from settings window
     const unlistenPromises: Promise<() => void>[] = [];
-    if (pageEvents) {
-      const { listen } = pageEvents;
+    if (ctx.events) {
+      const { listen } = ctx.events;
 
       unlistenPromises.push(
         listen<{ bandIndex: number; gain: number }>('set-eq-band', (e) => {

@@ -1,0 +1,1 @@
+{"format":1,"name":"Test registry","plugins":[{"id":"app.ytmd.example-theme","name":"Example theme","version":"1.0.0","apiVersion":1,"description":"test","author":"YTMD","permissions":["ui"],"url":"https://example.com/app.ytmd.example-theme-1.0.0.tar.gz","sha256":"c3e176a71c348fb4465a7c36dc2b3b739417239fe9b55a6d74febf14d30ab834"}]}

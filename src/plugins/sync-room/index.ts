@@ -1,5 +1,5 @@
-import { pageEvents } from '../../preload/bridgeClient';
-import { YTMDPlugin, PluginContext, TrackInfo } from '../types';
+import { YTMDPlugin, PluginContext, TrackInfo, PluginManifest } from '../types';
+import manifest from './manifest.json';
 import { PlayerBridge } from '../../preload/bridge';
 import { setSyncStatus } from '../../preload/ui/navMenu';
 import { showReaction, showToast } from '../../preload/ui/kit';
@@ -780,6 +780,7 @@ function applyRoomUi(room: RoomStatePayload | null, announce: boolean, leaveReas
 
 export const SyncRoomPlugin: YTMDPlugin = {
   id: 'sync_room',
+  manifest: manifest as PluginManifest,
   name: 'P2P Room Sync',
   description: 'Listen together with friends in real-time synchronized listening rooms',
   defaultEnabled: true,
@@ -790,23 +791,23 @@ export const SyncRoomPlugin: YTMDPlugin = {
     invokeRef = ctx.invoke;
 
     const unlistenPromises: Promise<() => void>[] = [];
-    if (pageEvents) {
+    if (ctx.events) {
       unlistenPromises.push(
-        pageEvents.listen<RoomStatePayload>('sync-room-updated', (e) => {
+        ctx.events.listen<RoomStatePayload>('sync-room-updated', (e) => {
           controller.setRoomState(true, e.payload.is_host, canControl(ownRole(e.payload)));
           applyRoomUi(e.payload, true);
         }),
-        pageEvents.listen<{ reason?: LeaveReason } | null>('sync-room-left', (e) => {
+        ctx.events.listen<{ reason?: LeaveReason } | null>('sync-room-left', (e) => {
           controller.setRoomState(false, false);
           applyRoomUi(null, true, e.payload?.reason ?? 'left');
         }),
-        pageEvents.listen<SyncPlaybackPayload>('sync-playback-remote', (e) => {
+        ctx.events.listen<SyncPlaybackPayload>('sync-playback-remote', (e) => {
           controller.handleRemotePlayback(e.payload, ctx.getVideoElement());
         }),
-        pageEvents.listen<SyncControlRequest>('sync-control-remote', (e) => {
+        ctx.events.listen<SyncControlRequest>('sync-control-remote', (e) => {
           controller.applyRemoteControl(e.payload);
         }),
-        pageEvents.listen<ReactionPayload>('sync-reaction', (e) => {
+        ctx.events.listen<ReactionPayload>('sync-reaction', (e) => {
           showReaction(e.payload.emoji, e.payload.from);
         })
       );

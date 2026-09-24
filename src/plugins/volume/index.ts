@@ -1,4 +1,5 @@
-import { YTMDPlugin, PluginContext } from '../types';
+import { YTMDPlugin, PluginContext, PluginManifest } from '../types';
+import manifest from './manifest.json';
 import { getPlayerVolumePercent, isPlayerMuted, setPlayerVolumePercent } from '../../preload/playerVolume';
 import { ensureKitStyles } from '../../preload/ui/kit';
 import { t } from '../../preload/ui/i18n';
@@ -21,6 +22,7 @@ function visibleRect(element: Element | null): DOMRect | null {
 
 export const VolumePlugin: YTMDPlugin = {
   id: 'volume',
+  manifest: manifest as PluginManifest,
   name: 'Wheel Volume Controller',
   description: 'Adjust volume by scrolling over the player bar or, when enabled, the main player panel',
   defaultEnabled: true,

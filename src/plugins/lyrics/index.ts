@@ -1,5 +1,5 @@
-import { pageEvents } from '../../preload/bridgeClient';
-import { YTMDPlugin, PluginContext, TrackInfo } from '../types';
+import { YTMDPlugin, PluginContext, TrackInfo, PluginManifest } from '../types';
+import manifest from './manifest.json';
 import { createEl } from '../../utils/dom';
 import { ensureKitStyles, openDialog, showToast } from '../../preload/ui/kit';
 import { t } from '../../preload/ui/i18n';
@@ -40,6 +40,7 @@ export const songKeyOf = (track: Pick<TrackInfo, 'videoId' | 'title' | 'artist'>
 
 export const LyricsPlugin: YTMDPlugin = {
   id: 'lyrics',
+  manifest: manifest as PluginManifest,
   name: 'Native Synced Lyrics',
   description: 'Synchronized lyrics from several providers in the native Lyrics tab, with active highlighting and seek-on-click',
   defaultEnabled: true,
@@ -85,8 +86,8 @@ export const LyricsPlugin: YTMDPlugin = {
     // backend once so every window uses the same correction.
     migrateOffsets(ctx);
 
-    const unlisten = pageEvents
-      ? pageEvents.listen<unknown>('lyrics-changed', (e) => {
+    const unlisten = ctx.events
+      ? ctx.events.listen<unknown>('lyrics-changed', (e) => {
           const next = toCurrentLyrics(e.payload);
           if (!isForCurrentSong(next)) return;
           applyLyrics(ctx, next);

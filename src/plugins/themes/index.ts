@@ -1,11 +1,12 @@
-import { pageEvents } from '../../preload/bridgeClient';
-import { YTMDPlugin, PluginContext } from '../types';
+import { YTMDPlugin, PluginContext, PluginManifest } from '../types';
+import manifest from './manifest.json';
 import { AMBIENT_THEME_CSS, BASE_THEME_CSS } from './presets';
 
 let cleanup: (() => void) | null = null;
 
 export const ThemeEnginePlugin: YTMDPlugin = {
   id: 'theme_engine',
+  manifest: manifest as PluginManifest,
   name: 'Theme Engine & Live CSS',
   description: 'Switches YouTube Music\'s chrome between the Ambient and Base looks, and injects user custom CSS with instant hot-reload',
   defaultEnabled: true,
@@ -60,12 +61,12 @@ export const ThemeEnginePlugin: YTMDPlugin = {
     // Listen to live updates from settings — the same 'set-ambient-enabled'
     // event AmbientLightingPlugin listens to for the glow orb's opacity.
     const unlistenPromises: Promise<() => void>[] = [];
-    if (pageEvents) {
+    if (ctx.events) {
       unlistenPromises.push(
-        pageEvents.listen<boolean>('set-ambient-enabled', (e) => {
+        ctx.events.listen<boolean>('set-ambient-enabled', (e) => {
           applyMode(e.payload);
         }),
-        pageEvents.listen<string>('set-custom-css', (e) => {
+        ctx.events.listen<string>('set-custom-css', (e) => {
           applyCustomCss(e.payload);
         })
       );

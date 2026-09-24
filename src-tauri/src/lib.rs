@@ -13,6 +13,7 @@ pub mod i18n;
 pub mod mpris;
 pub mod nav_policy;
 pub mod page_ipc;
+pub mod plugins;
 pub mod p2p_sync;
 pub mod power_manager;
 pub mod remote_server;
@@ -137,6 +138,11 @@ pub fn run() {
 
     crash::install_panic_hook(logs_dir.clone(), env!("CARGO_PKG_VERSION").to_string());
 
+    let plugin_manager = Arc::new(plugins::PluginManager::new(
+        ytmd_dir.clone().unwrap_or_else(|| std::path::PathBuf::from(".")).join("plugins"),
+    ));
+    let plugins_for_setup = plugin_manager.clone();
+
     let app_state = Arc::new(AppState {
         config_manager,
         discord_rpc: Mutex::new(discord_rpc),
@@ -214,6 +220,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(app_state)
+        .manage(plugin_manager)
         .manage(Arc::new(connectivity::PageAlive::default()))
         .setup(move |app| {
             let handle = app.handle().clone();
@@ -310,7 +317,15 @@ pub fn run() {
             .resizable(true)
             // A login-item launch starts in the tray.
             .visible(!std::env::args().any(|a| a == AUTOSTART_ARG))
-            .initialization_script(include_str!("../inject/preload.js"))
+            .initialization_script(include_str!("../inject/preload.js"));
+            // Enabled plugins, one script each after the plugin host
+            // (plugins/mod.rs, src/preload/pluginHost.ts).
+            let enabled_plugins = plugins_for_setup.enabled_plugins();
+            for script in plugins::page_scripts(&enabled_plugins) {
+                main_builder = main_builder.initialization_script(&script);
+            }
+            plugins_for_setup.clear_reload_needed();
+            main_builder = main_builder
             // YouTube Music and Google sign-in only (nav_policy.rs).
             .on_navigation(|url| {
                 let ok = nav_policy::is_allowed_navigation(url);
@@ -350,6 +365,7 @@ pub fn run() {
             let main_win = main_builder.build()?;
             log::info!("[YTMD] main window created {} ms after start", started.elapsed().as_millis());
             connectivity::watch_startup(handle.clone());
+            plugins::commands::start_update_checks(handle.clone(), plugins_for_setup.clone());
 
             // Windows: prev/play/next under the taskbar preview.
             thumbbar::install(&handle, &main_win);
@@ -449,6 +465,18 @@ pub fn run() {
             commands::get_app_version,
             commands::check_for_updates,
             commands::install_update,
+            plugins::commands::restart_app,
+            plugins::commands::plugins_list,
+            plugins::commands::plugins_set_enabled,
+            plugins::commands::plugins_uninstall,
+            plugins::commands::plugins_set_setting,
+            plugins::commands::plugins_add_registry,
+            plugins::commands::plugins_remove_registry,
+            plugins::commands::plugins_available,
+            plugins::commands::plugins_install,
+            plugins::commands::plugins_check_updates,
+            plugins::commands::plugins_add_dev,
+            plugins::commands::plugins_set_update_interval,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

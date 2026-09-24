@@ -1,0 +1,19 @@
+{
+  "id": "app.ytmd.power",
+  "name": "Smart Power & Audio Watchdog",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "description": "Keeps the system awake during playback",
+  "author": "YTMD",
+  "matches": [
+    "https://music.youtube.com/*"
+  ],
+  "runAt": "document-idle",
+  "permissions": [
+    "player:read",
+    "page",
+    "internal:config",
+    "internal:power"
+  ],
+  "entry": "index.js"
+}

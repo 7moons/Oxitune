@@ -16,8 +16,6 @@ interface AppConfig {
   discord_clear_after_pause_min: number;
   mpris_enabled: boolean;
   notifications_enabled: boolean;
-  adblock_enabled: boolean;
-  sponsorblock_enabled: boolean;
   lyrics_enabled: boolean;
   lyrics_providers?: ProviderSetting[];
   custom_css: string;
@@ -62,8 +60,6 @@ const TOGGLES: [keyof AppConfig & string, boolean][] = [
   ['notifications_enabled', false],
   ['close_to_tray', true],
   ['autostart', false],
-  ['adblock_enabled', true],
-  ['sponsorblock_enabled', true],
   ['lyrics_enabled', true],
   ['loudness_normalization', false],
   ['skip_silence_enabled', false],
@@ -523,7 +519,7 @@ async function saveSettings() {
     await window.__TAURI__.core.invoke('save_config', { config: next });
     currentConfig = next;
     // Lets the main window's plugin registry re-check toggles
-    // (adblock/sponsorblock/lyrics/notifications/remote/...) right away.
+    // (lyrics/notifications/remote/...) right away.
     emitLiveEvent('config-updated', next);
     const status = $('save-status');
     if (status) {

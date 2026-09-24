@@ -1,9 +1,9 @@
+// Tests for the ad blocker plugin's pure logic (bun test).
 import { describe, expect, test } from 'bun:test';
-import {
+
+const {
   computeMuteSync,
   isAdShowingFromClassList,
-  MuteSyncState,
-  AdblockPlugin,
   shouldRunTickSafetyNet,
   AD_VIDEO_HIDE_STYLE,
   deleteNestedKey,
@@ -11,9 +11,7 @@ import {
   isAdResponseUrl,
   AD_RESPONSE_ENDPOINTS,
   BANNER_SELECTOR
-} from '../plugins/adblock';
-import { PluginRegistry } from '../plugins/registry';
-import { PluginContext } from '../plugins/types';
+} = require('./main.js');
 
 describe('isAdShowingFromClassList', () => {
   test('detects ad-showing class', () => {
@@ -34,7 +32,7 @@ describe('isAdShowingFromClassList', () => {
 });
 
 describe('computeMuteSync — edge-triggered mute-only ad suppression', () => {
-  const initial: MuteSyncState = { adWasShowing: false, preAdMuted: false };
+  const initial = { adWasShowing: false, preAdMuted: false };
 
   test('ad starts while unmuted: mutes and remembers prior state', () => {
     const result = computeMuteSync(true, initial, false);
@@ -49,21 +47,21 @@ describe('computeMuteSync — edge-triggered mute-only ad suppression', () => {
   });
 
   test('ad continues showing: no repeated action (edge-triggered, not level-triggered)', () => {
-    const midAd: MuteSyncState = { adWasShowing: true, preAdMuted: false };
+    const midAd = { adWasShowing: true, preAdMuted: false };
     const result = computeMuteSync(true, midAd, true);
     expect(result.setMutedTo).toBeNull();
     expect(result.nextState).toBe(midAd);
   });
 
   test('ad ends: restores the mute state from before the ad', () => {
-    const midAd: MuteSyncState = { adWasShowing: true, preAdMuted: false };
+    const midAd = { adWasShowing: true, preAdMuted: false };
     const result = computeMuteSync(false, midAd, true);
     expect(result.setMutedTo).toBe(false);
     expect(result.nextState).toEqual({ adWasShowing: false, preAdMuted: false });
   });
 
   test('ad ends when the user was muted beforehand: stays muted, does not unmute', () => {
-    const midAd: MuteSyncState = { adWasShowing: true, preAdMuted: true };
+    const midAd = { adWasShowing: true, preAdMuted: true };
     const result = computeMuteSync(false, midAd, true);
     expect(result.setMutedTo).toBe(true);
     expect(result.nextState).toEqual({ adWasShowing: false, preAdMuted: true });
@@ -230,30 +228,6 @@ describe('isAdResponseUrl', () => {
     expect(isAdResponseUrl('https://music.youtube.com/youtubei/v1/log_event')).toBe(false);
     expect(isAdResponseUrl('https://music.youtube.com/youtubei/v1/att/get')).toBe(false);
     expect(isAdResponseUrl('https://music.youtube.com/generate_204')).toBe(false);
-  });
-});
-
-describe('AdblockPlugin registry lifecycle', () => {
-  const dummyContext: PluginContext = {
-    track: null,
-    config: {},
-    invoke: async () => null,
-    sendPlayerCommand: () => {},
-    getVideoElement: () => null
-  };
-
-  test('initializes and registers in PluginRegistry', async () => {
-    const registry = new PluginRegistry(dummyContext);
-    registry.register(AdblockPlugin);
-
-    expect(registry.getRegisteredPlugins().length).toBe(1);
-    expect(registry.isEnabled('adblock')).toBe(true);
-
-    await registry.initAll();
-    expect(registry.isEnabled('adblock')).toBe(true);
-
-    await registry.disable('adblock');
-    expect(registry.isEnabled('adblock')).toBe(false);
   });
 });
 

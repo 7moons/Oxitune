@@ -48,6 +48,19 @@ const APP_COMMANDS: &[&str] = &[
     "get_app_version",
     "check_for_updates",
     "install_update",
+    "restart_app",
+    // Plugin manager (Settings).
+    "plugins_list",
+    "plugins_set_enabled",
+    "plugins_uninstall",
+    "plugins_set_setting",
+    "plugins_add_registry",
+    "plugins_remove_registry",
+    "plugins_available",
+    "plugins_install",
+    "plugins_check_updates",
+    "plugins_add_dev",
+    "plugins_set_update_interval",
 ];
 
 fn main() {

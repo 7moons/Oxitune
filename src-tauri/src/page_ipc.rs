@@ -53,6 +53,10 @@ pub const PAGE_EVENTS: &[&str] = &[
     "sync-reaction",
     "remote-action",
     "remote-clients",
+    // Plugin manager: a plugin switched off (unloaded at once) or its
+    // settings changed.
+    "plugin-state-changed",
+    "plugin-settings-changed",
 ];
 
 /// Config fields the page's plugins read. Paths, ports, the remote and

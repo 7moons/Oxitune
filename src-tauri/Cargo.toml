@@ -57,6 +57,10 @@ tower-http = { version = "0.6", features = ["limit", "timeout"] }
 rust-embed = { version = "8", features = ["mime-guess"] }
 tauri-plugin-window-state = "2"
 tauri-plugin-autostart = "2"
+semver = "1"
+tar = "0.4"
+flate2 = "1"
+minisign-verify = "0.2"
 
 # Screen-lock detection (src/screen_lock.rs). zbus is already in the tree via
 # notify-rust with its default async-io backend; keeping that backend (rather

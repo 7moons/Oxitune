@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-plugins-add-registry"
+description = "Enables the plugins_add_registry command without any pre-configured scope."
+commands.allow = ["plugins_add_registry"]
+
+[[permission]]
+identifier = "deny-plugins-add-registry"
+description = "Denies the plugins_add_registry command without any pre-configured scope."
+commands.deny = ["plugins_add_registry"]
