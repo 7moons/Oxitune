@@ -507,6 +507,12 @@
           "markdownDescription": "Enables the plugins_remove_registry command without any pre-configured scope."
         },
         {
+          "description": "Enables the plugins_restore_official command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-plugins-restore-official",
+          "markdownDescription": "Enables the plugins_restore_official command without any pre-configured scope."
+        },
+        {
           "description": "Enables the plugins_set_enabled command without any pre-configured scope.",
           "type": "string",
           "const": "allow-plugins-set-enabled",
@@ -829,6 +835,12 @@
           "type": "string",
           "const": "deny-plugins-remove-registry",
           "markdownDescription": "Denies the plugins_remove_registry command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the plugins_restore_official command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-plugins-restore-official",
+          "markdownDescription": "Denies the plugins_restore_official command without any pre-configured scope."
         },
         {
           "description": "Denies the plugins_set_enabled command without any pre-configured scope.",

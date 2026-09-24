@@ -9,7 +9,7 @@
  * index whose signature doesn't check out with the key the user added, and
  * any archive whose SHA-256 differs from the signed index.
  *
- *   BASE_URL=https://<owner>.github.io/ytmd-plugins bun scripts/build-index.ts
+ *   BASE_URL=https://<owner>.github.io/oscilla-plugins bun scripts/build-index.ts
  */
 import { createHash } from 'crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs';
@@ -18,7 +18,7 @@ import { join } from 'path';
 const root = join(import.meta.dir, '..');
 const pluginsDir = join(root, 'plugins');
 const dist = join(root, 'dist');
-const baseUrl = (process.env.BASE_URL ?? 'https://example.invalid/ytmd-plugins').replace(/\/$/, '');
+const baseUrl = (process.env.BASE_URL ?? 'https://example.invalid/oscilla-plugins').replace(/\/$/, '');
 
 const ID = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
@@ -107,7 +107,7 @@ if (import.meta.main) {
     console.log(`${archive}  ${sha256}`);
   }
   if (failed) process.exit(1);
-  const index = { format: 1, name: process.env.REGISTRY_NAME ?? 'YTMD plugins', plugins: entries };
+  const index = { format: 1, name: process.env.REGISTRY_NAME ?? 'Oscilla plugins', plugins: entries };
   writeFileSync(join(dist, 'index.json'), JSON.stringify(index, null, 2) + '\n');
   console.log(`dist/index.json: ${entries.length} plugins`);
 }

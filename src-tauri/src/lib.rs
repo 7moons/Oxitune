@@ -472,6 +472,7 @@ pub fn run() {
             plugins::commands::plugins_set_setting,
             plugins::commands::plugins_add_registry,
             plugins::commands::plugins_remove_registry,
+            plugins::commands::plugins_restore_official,
             plugins::commands::plugins_available,
             plugins::commands::plugins_install,
             plugins::commands::plugins_check_updates,

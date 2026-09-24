@@ -36,7 +36,7 @@ jobs:
           sudo apt-get update && sudo apt-get install -y minisign
           umask 077
           printf '%s\n' "$MINISIGN_SECRET_KEY" > "$RUNNER_TEMP/registry.key"
-          printf '%s\n' "$MINISIGN_PASSWORD" | minisign -S -s "$RUNNER_TEMP/registry.key" -m dist/index.json -t "ytmd-plugins ${{ github.ref_name }}"
+          printf '%s\n' "$MINISIGN_PASSWORD" | minisign -S -s "$RUNNER_TEMP/registry.key" -m dist/index.json -t "oscilla-plugins ${{ github.ref_name }}"
           rm -f "$RUNNER_TEMP/registry.key"
           minisign -V -p minisign.pub -m dist/index.json
       - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3.0.1

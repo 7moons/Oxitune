@@ -73,6 +73,9 @@ pub struct PluginState {
     pub registries: Vec<Registry>,
     #[serde(default = "default_update_hours")]
     pub update_interval_hours: u32,
+    /// The user removed the official registry.
+    #[serde(default)]
+    pub official_hidden: bool,
 }
 
 fn default_update_hours() -> u32 {
@@ -86,6 +89,7 @@ impl Default for PluginState {
             settings: BTreeMap::new(),
             registries: Vec::new(),
             update_interval_hours: DEFAULT_UPDATE_HOURS,
+            official_hidden: false,
         }
     }
 }
@@ -380,9 +384,31 @@ impl PluginManager {
 
     // --- Registries and installs -----------------------------------------------
 
+    /// The registries in use: the official one (unless hidden), then the
+    /// user's.
+    pub fn registries(&self) -> Vec<Registry> {
+        let state = self.state.lock();
+        let official = (!state.official_hidden).then(registry::official);
+        official
+            .into_iter()
+            .chain(state.registries.iter().filter(|r| r.url != registry::OFFICIAL_URL).cloned())
+            .collect()
+    }
+
     pub async fn add_registry(&self, reg: Registry) -> Result<registry::RegistryIndex, String> {
+        if reg.url == registry::OFFICIAL_URL {
+            // Adding the official address brings the built-in one back,
+            // with its built-in key, whatever key was typed.
+            let index = registry::fetch_index(&registry::official()).await?;
+            self.update_state(|s| s.official_hidden = false);
+            return Ok(index);
+        }
         let index = registry::fetch_index(&reg).await?;
-        let reg = Registry { name: if reg.name.trim().is_empty() { index.name.clone() } else { reg.name }, ..reg };
+        let reg = Registry {
+            name: if reg.name.trim().is_empty() { index.name.clone() } else { reg.name },
+            official: false,
+            ..reg
+        };
         self.update_state(|s| {
             s.registries.retain(|r| r.url != reg.url);
             s.registries.push(reg);
@@ -391,7 +417,17 @@ impl PluginManager {
     }
 
     pub fn remove_registry(&self, url: &str) {
-        self.update_state(|s| s.registries.retain(|r| r.url != url));
+        self.update_state(|s| {
+            if url == registry::OFFICIAL_URL {
+                s.official_hidden = true;
+            }
+            s.registries.retain(|r| r.url != url);
+        });
+    }
+
+    /// Brings back the official registry after it was removed.
+    pub fn restore_official(&self) {
+        self.update_state(|s| s.official_hidden = false);
     }
 
     /// Unpacks a verified archive into place: staging folder → checks →
@@ -432,8 +468,7 @@ impl PluginManager {
 
     async fn find_entry(&self, registry_url: &str, id: &str) -> Result<IndexEntry, String> {
         let reg = self
-            .state()
-            .registries
+            .registries()
             .into_iter()
             .find(|r| r.url == registry_url)
             .ok_or("plugins.error.noSuchRegistry")?;
@@ -513,7 +548,7 @@ impl PluginManager {
     pub async fn check_updates(&self) -> usize {
         let state = self.state();
         let mut installed = 0;
-        for reg in &state.registries {
+        for reg in &self.registries() {
             let index = match registry::fetch_index(reg).await {
                 Ok(i) => i,
                 Err(e) => {
@@ -771,6 +806,36 @@ mod tests {
         let scripts = page_scripts(&enabled);
         assert!(scripts[0].contains("ytmd.settings.onChange(applyAccent)"));
         assert!(scripts[0].contains("--example-accent"), "styles travel with the payload");
+    }
+
+    #[test]
+    fn test_official_registry_is_built_in_and_can_be_hidden() {
+        let (_d, m) = manager();
+        let regs = m.registries();
+        assert_eq!(regs.len(), 1);
+        assert!(regs[0].official);
+        assert_eq!(regs[0].url, registry::OFFICIAL_URL);
+        registry::validate_registry(&regs[0]).unwrap();
+
+        m.remove_registry(registry::OFFICIAL_URL);
+        assert!(m.registries().is_empty());
+        let again = PluginManager::new(m.root.clone());
+        assert!(again.registries().is_empty(), "hiding it survives a restart");
+        again.restore_official();
+        assert_eq!(again.registries().len(), 1);
+    }
+
+    #[test]
+    fn test_a_stored_registry_cannot_pose_as_the_official_one() {
+        let (_d, m) = manager();
+        let fake = r#"{"registries":[{"url":"https://kayzedd.github.io/oscilla-plugins/index.json","public_key":"RWattacker","official":true},{"url":"https://example.com/index.json","public_key":"RWx","official":true}]}"#;
+        std::fs::create_dir_all(&m.root).unwrap();
+        std::fs::write(m.root.join("state.json"), fake).unwrap();
+        let m = PluginManager::new(m.root.clone());
+        let regs = m.registries();
+        assert_eq!(regs.len(), 2);
+        assert_eq!(regs[0].public_key, registry::OFFICIAL_KEY, "the official URL always uses the built-in key");
+        assert!(!regs[1].official, "`official` is never read from disk");
     }
 
     #[test]

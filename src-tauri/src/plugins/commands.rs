@@ -16,6 +16,7 @@ pub type Plugins<'a> = State<'a, Arc<PluginManager>>;
 pub struct PluginsOverview {
     pub plugins: Vec<PluginInfo>,
     pub registries: Vec<Registry>,
+    pub official_hidden: bool,
     pub update_interval_hours: u32,
     pub restart_needed: bool,
     pub api_version: u32,
@@ -47,7 +48,8 @@ pub fn plugins_list(plugins: Plugins<'_>) -> PluginsOverview {
     let state = plugins.state();
     PluginsOverview {
         plugins: plugins.list(),
-        registries: state.registries,
+        registries: plugins.registries(),
+        official_hidden: state.official_hidden,
         update_interval_hours: state.update_interval_hours,
         restart_needed: plugins.reload_needed(),
         api_version: super::manifest::API_VERSION,
@@ -92,7 +94,12 @@ pub async fn plugins_add_registry(
     name: Option<String>,
 ) -> Result<(), String> {
     plugins
-        .add_registry(Registry { url: url.trim().to_string(), public_key: public_key.trim().to_string(), name: name.unwrap_or_default() })
+        .add_registry(Registry {
+            url: url.trim().to_string(),
+            public_key: public_key.trim().to_string(),
+            name: name.unwrap_or_default(),
+            official: false,
+        })
         .await
         .map(|_| ())
 }
@@ -102,12 +109,17 @@ pub fn plugins_remove_registry(plugins: Plugins<'_>, url: String) {
     plugins.remove_registry(&url);
 }
 
+#[tauri::command]
+pub fn plugins_restore_official(plugins: Plugins<'_>) {
+    plugins.restore_official();
+}
+
 /// Everything the user's registries offer (each index verified).
 #[tauri::command]
 pub async fn plugins_available(plugins: Plugins<'_>) -> Result<Vec<Available>, String> {
     let state = plugins.state();
     let mut out = Vec::new();
-    for reg in &state.registries {
+    for reg in &plugins.registries() {
         let index = match super::registry::fetch_index(reg).await {
             Ok(i) => i,
             Err(e) => {
@@ -183,7 +195,7 @@ pub fn start_update_checks(app: AppHandle, plugins: Arc<PluginManager>) {
         tokio::time::sleep(std::time::Duration::from_secs(60)).await;
         loop {
             let hours = plugins.state().update_interval_hours;
-            if hours > 0 && !plugins.state().registries.is_empty() {
+            if hours > 0 && !plugins.registries().is_empty() {
                 let updated = plugins.check_updates().await;
                 if updated > 0 {
                     let _ = app.emit("plugins-updated", updated);

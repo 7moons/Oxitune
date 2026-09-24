@@ -1,12 +1,19 @@
-# YTMD plugins
+# Oscilla plugins
 
-Plugins for [YTMD](https://github.com/KayZedd/ytmd), the desktop client for
-YouTube Music, and the signed registry YTMD installs them from.
+Plugins for [YTMD](https://github.com/KayZedd/ytmd) (soon Oscilla), the
+desktop client for YouTube Music, and the official signed registry YTMD
+installs them from.
 
-This folder is meant to be pushed as its own repository. YTMD ships with no
-registry: users add one in **Settings → Plugins → Registries** with its
-address and public key, and YTMD refuses anything that isn't signed with
-that key.
+This folder is meant to be pushed as its own repository,
+`KayZedd/oscilla-plugins`. YTMD has this registry built in:
+
+- index: `https://kayzedd.github.io/oscilla-plugins/index.json`
+- public key (also in `minisign.pub`, key id `2254F07B14D10D3E`):
+  `RWQ+DdEUe/BUIiUnj3ovEvBOs/mbG7mVy+1yR0/0VqkAAKX/36+pTw34`
+
+YTMD refuses anything that isn't signed with that key. Users can add other
+registries in **Settings → Plugins → Registries** with their own address
+and key.
 
 | Plugin | What it does | Permissions |
 |---|---|---|
@@ -78,22 +85,23 @@ The folder name must be the plugin's `id`.
    YouTube Music session, because it does.
 5. To publish, bump `version` in the manifest and push a tag (`v2026.09.24`).
 
-## Signing key (once, by the maintainer)
+## Signing key
 
 The registry has its own minisign key, separate from YTMD's updater key.
+The public half is `minisign.pub` and is built into YTMD
+(`src-tauri/src/plugins/registry.rs`, `OFFICIAL_KEY`); changing it means
+shipping a YTMD update first.
 
-```sh
-minisign -G -p minisign.pub -s registry.key
-```
+Once, when creating the repository:
 
-- Commit `minisign.pub`; publish the key line (`RW…`) in this README so
-  users can paste it into YTMD.
-- Store the full contents of `registry.key` as the repository secret
-  `MINISIGN_SECRET_KEY` and its password as `MINISIGN_PASSWORD`, then
-  delete the local file or keep it offline.
+- Store the full contents of the secret key file as the repository secret
+  `MINISIGN_SECRET_KEY` and its password as `MINISIGN_PASSWORD`, then keep
+  the file offline (or delete it). Never commit it.
 - Enable GitHub Pages with "GitHub Actions" as the source.
 
-Users add: `https://<owner>.github.io/<repo>/index.json` and the public key.
+A lost or leaked secret key: generate a new pair
+(`minisign -G -p minisign.pub -s registry.key`), release YTMD with the new
+`OFFICIAL_KEY`, then re-sign the registry with it.
 
 ## What the registry publishes
 

@@ -48,11 +48,13 @@ interface Registry {
   url: string;
   public_key: string;
   name: string;
+  official: boolean;
 }
 
 interface Overview {
   plugins: PluginInfo[];
   registries: Registry[];
+  officialHidden: boolean;
   updateIntervalHours: number;
   restartNeeded: boolean;
 }
@@ -270,7 +272,9 @@ function renderRegistries(registries: Registry[], refresh: () => void): void {
   for (const r of registries) {
     const row = createEl('div', { className: 'setting-row' });
     const text = createEl('div', { className: 'setting-text' });
-    text.append(createEl('span', { className: 'setting-title', text: r.name || r.url }));
+    const title = createEl('span', { className: 'setting-title', text: r.official ? tr('plugins.registry.official') : r.name || r.url });
+    if (r.official) title.append(' ', createEl('span', { className: 'chip', text: tr('plugins.registry.officialBadge') }));
+    text.append(title);
     text.append(createEl('span', { className: 'setting-desc mono', text: r.url }));
     row.append(text);
     const remove = createEl('button', { className: 'btn btn-tonal', text: tr('plugins.registry.remove') });
@@ -296,6 +300,7 @@ export async function refreshPlugins(): Promise<void> {
   list?.replaceChildren(...overview.plugins.map((p) => installedCard(p, refresh)));
   $('plugins-installed-empty')?.classList.toggle('is-hidden', overview.plugins.length > 0);
   renderRegistries(overview.registries, refresh);
+  $('registry-restore-btn')?.classList.toggle('is-hidden', !overview.officialHidden);
   const interval = $<HTMLSelectElement>('plugins-update-interval');
   if (interval) interval.value = String(overview.updateIntervalHours);
 }
@@ -305,6 +310,9 @@ export function initPluginsSection(): void {
   void refreshPlugins();
   $('plugins-restart-btn')?.addEventListener('click', () => void invoke('restart_app'));
   $('plugins-browse-btn')?.addEventListener('click', () => void showAvailable(refresh));
+  $('registry-restore-btn')?.addEventListener('click', () => {
+    invoke('plugins_restore_official').then(refresh).catch((e) => showToast(errorText(e)));
+  });
   $('registry-add-btn')?.addEventListener('click', async () => {
     const url = $<HTMLInputElement>('registry-url');
     const key = $<HTMLInputElement>('registry-key');

@@ -45,7 +45,7 @@ YTMD wraps music.youtube.com with what a desktop player should have: media keys 
 
 ### Plugins
 - A versioned plugin API ([`docs/PLUGIN_API.md`](docs/PLUGIN_API.md)): a manifest with a closed set of permissions, shown before you install and again before any update that asks for more; per-plugin settings, storage and network access limited to the hosts it lists; errors isolated per plugin, repeatedly failing plugins switched off.
-- Install from **registries you add** (YTMD ships none): every registry's index must be signed with the key you entered, every archive must match its signed checksum, installs are atomic. Updates are checked automatically (configurable). Developer mode loads a plugin from a folder, with a warning.
+- Install from the built-in **official registry** or **registries you add**: every registry's index must be signed with that registry's key, every archive must match its signed checksum, installs are atomic. Updates are checked automatically (configurable). Developer mode loads a plugin from a folder, with a warning.
 - YTMD's own features are built-in plugins on the same API. A ready-to-publish registry with an example theme, an ad blocker and SponsorBlock lives in [`_plugins-export/`](_plugins-export).
 
 ### Settings, data and logs

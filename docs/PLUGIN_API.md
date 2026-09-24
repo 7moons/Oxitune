@@ -7,7 +7,8 @@ plugin, including YTMD's own built-in ones, goes through the same API: a
 gives it exactly that.
 
 - Plugins are JavaScript and CSS. No native code, no Node, no Tauri APIs.
-- Installed plugins come from **registries the user added** (a signed index,
+- Installed plugins come from the **official registry** or **registries the
+  user added** (a signed index,
   a checksum for every archive), or, for plugin authors, from a local folder
   in developer mode.
 - The example to start from: [`_plugins-export/plugins/app.ytmd.example-theme`](../_plugins-export/plugins/app.ytmd.example-theme).
@@ -186,8 +187,9 @@ consequences plugin users and authors should know:
   well-behaved plugin; **trust comes from the registry you added**.
 - The Tauri globals are shadowed in the plugin's scope and plugins get no
   API to the rest of YTMD, but that's hygiene, not a sandbox.
-- Registries: YTMD ships none. A registry's `index.json` must be signed
-  (minisign, Ed25519) by the key the user entered with it; each archive
+- Registries: YTMD has the official one built in (its key is compiled in;
+  the user can remove it) and the user can add others. A registry's
+  `index.json` must be signed (minisign, Ed25519) by that registry's key; each archive
   must match the SHA-256 in that signed index, and the manifest inside
   must match its index entry (id, version, permissions). Archives are
   unpacked into a staging folder with no absolute paths, `..`, links or

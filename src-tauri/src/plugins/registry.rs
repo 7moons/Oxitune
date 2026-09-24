@@ -1,9 +1,11 @@
 //! Plugin registries: an `index.json` signed with minisign (Ed25519) by the
 //! registry's own key, listing each plugin's archive URL and SHA-256.
 //!
-//! YTMD ships no registry; the user adds one (URL + public key). Nothing
-//! from a registry is used unless the signature checks out with that key,
-//! and no archive is unpacked unless its SHA-256 matches the signed index.
+//! YTMD comes with one registry, the official one (`official()`, its key
+//! built in; the user can hide it), and the user can add others (URL +
+//! public key). Nothing from a registry is used unless the signature checks
+//! out with that key, and no archive is unpacked unless its SHA-256 matches
+//! the signed index.
 
 use serde::{Deserialize, Serialize};
 
@@ -12,7 +14,17 @@ const MAX_INDEX_BYTES: usize = 2 * 1024 * 1024;
 const MAX_ARCHIVE_BYTES: usize = super::manifest::MAX_PLUGIN_BYTES as usize;
 const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 
-/// A registry the user added.
+/// The official registry (`_plugins-export/`, published on GitHub Pages).
+pub const OFFICIAL_URL: &str = "https://kayzedd.github.io/oscilla-plugins/index.json";
+/// Its minisign key (`_plugins-export/minisign.pub`, key id 2254F07B14D10D3E).
+/// Only the registry's release workflow holds the secret half.
+pub const OFFICIAL_KEY: &str = "RWQ+DdEUe/BUIiUnj3ovEvBOs/mbG7mVy+1yR0/0VqkAAKX/36+pTw34";
+
+pub fn official() -> Registry {
+    Registry { url: OFFICIAL_URL.into(), public_key: OFFICIAL_KEY.into(), name: String::new(), official: true }
+}
+
+/// A registry: the official one or one the user added.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Registry {
     /// `https://…/index.json`; the signature is at `…/index.json.minisig`.
@@ -21,6 +33,10 @@ pub struct Registry {
     pub public_key: String,
     #[serde(default)]
     pub name: String,
+    /// Built in, never read from the state file (a stored registry can't
+    /// claim to be the official one).
+    #[serde(default, skip_deserializing)]
+    pub official: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -196,7 +212,7 @@ mod tests {
 
     #[test]
     fn test_registries_must_be_https_with_a_real_key() {
-        let good = Registry { url: "https://example.com/index.json".into(), public_key: key(), name: String::new() };
+        let good = Registry { url: "https://example.com/index.json".into(), public_key: key(), name: String::new(), official: false };
         assert!(validate_registry(&good).is_ok());
         assert!(validate_registry(&Registry { url: "http://example.com/index.json".into(), ..good.clone() }).is_err());
         assert!(validate_registry(&Registry { public_key: "nope".into(), ..good }).is_err());

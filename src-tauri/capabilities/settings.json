@@ -29,6 +29,7 @@
     "allow-plugins-set-setting",
     "allow-plugins-add-registry",
     "allow-plugins-remove-registry",
+    "allow-plugins-restore-official",
     "allow-plugins-available",
     "allow-plugins-install",
     "allow-plugins-check-updates",
