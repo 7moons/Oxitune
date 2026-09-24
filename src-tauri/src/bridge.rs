@@ -1,15 +1,15 @@
 //! The injected-page → Rust command bridge.
 //!
-//! The main window loads the external `https://music.youtube.com` origin, so
-//! its injected script can't call `#[tauri::command]`s directly. Instead
-//! `invokeBackend()` (src/preload/index.ts) emits a `ytmd-invoke` event with
-//! `{ id, cmd, args }`, `lib.rs` hands it to [`dispatch`], and the result goes
-//! back on `ytmd-response-{id}` wrapped by [`response_envelope`]:
+//! The main window loads the external `https://music.youtube.com` origin.
+//! Its capability (`capabilities/main.json`) allows exactly one command for
+//! requests, `ytmd_bridge { cmd, args }` (`invokeBackend()` in
+//! src/preload/bridgeClient.ts), which runs [`dispatch`] and answers the
+//! invoke directly. Events reach the page only through `page_ipc.rs`.
 //!
-//! ```json
-//! { "ok": true,  "data": <value or null> }
-//! { "ok": false, "error": "<message>" }
-//! ```
+//! Everything here is callable by any script running in that page, not
+//! just ours, so the table is the minimum the page needs to be a player:
+//! no file system, no downloads, no whole-config reads or writes, no room
+//! code, no remote token, no updater. Every command validates its input.
 //!
 //! Every bridge-callable command is declared exactly once, in the
 //! `bridge_commands!` invocation below: the macro generates both
@@ -20,20 +20,17 @@
 //! silently (the call just timed out), which is how Listen Together and the
 //! sleep inhibitor were once dead.
 
-use crate::{commands, config, discord_rpc::TrackPayload, downloader, lyrics, remote_server, sync_room, AppState};
+use crate::{commands, discord_rpc::TrackPayload, lyrics, page_ipc, sync_room, AppState};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
 use tauri::{AppHandle, Manager};
 
-/// Wraps a dispatch result in the wire envelope described in the module docs.
-pub fn response_envelope(result: Result<Value, String>) -> Value {
-    match result {
-        Ok(data) => serde_json::json!({ "ok": true, "data": data }),
-        Err(error) => serde_json::json!({ "ok": false, "error": error }),
-    }
-}
+/// Longest pasted link or id the shared queue accepts.
+const MAX_QUEUE_INPUT_CHARS: usize = 300;
+/// Most lyrics offsets imported from the page's old localStorage at once.
+const MAX_IMPORTED_OFFSETS: usize = 5_000;
 
 /// Deserializes a command's `args`, naming the command and including serde's
 /// own message on failure so a shape mismatch is debuggable from the page.
@@ -61,11 +58,6 @@ struct RemoteReplyArgs {
     data: Value,
     #[serde(default)]
     error: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct SaveConfigArgs {
-    config: config::AppConfig,
 }
 
 #[derive(Deserialize)]
@@ -137,11 +129,6 @@ struct InhibitSleepArgs {
     inhibit: bool,
 }
 
-#[derive(Deserialize)]
-struct DownloadArgs {
-    request: downloader::DownloadRequest,
-}
-
 /// Declares the bridge command table. Each entry is
 /// `"name" => |handle, state, args| { body }`, where the body evaluates to
 /// `Result<Value, String>` and may `.await`.
@@ -175,8 +162,9 @@ macro_rules! bridge_commands {
 }
 
 bridge_commands! {
+    // Only the settings the page's plugins use (`page_ipc::PAGE_CONFIG_KEYS`).
     "get_config" => |h, state, args| {
-        to_data(state.config_manager.load())
+        Ok(page_ipc::page_config(&state.config_manager.load()))
     }
     "take_resume_session" => |h, state, args| {
         // Once per launch; never while in a room (the host decides the song).
@@ -186,14 +174,11 @@ bridge_commands! {
         }
         to_data(target)
     }
-    "save_config" => |h, state, args| {
-        let p: SaveConfigArgs = parse_args("save_config", args)?;
-        state.config_manager.save(&p.config)?;
+    // The pairing QR carries the remote's token, so it is shown in the
+    // Settings window, never in the page.
+    "open_remote_pairing" => |h, state, args| {
+        commands::show_settings_section(h, "sec-remote");
         Ok(Value::Null)
-    }
-    "get_remote_info" => |h, state, args| {
-        let port = state.remote_status.serving_port()?;
-        to_data(remote_server::get_remote_info(port, &state.remote_status.token()))
     }
     "toggle_settings_window" => |h, state, args| {
         commands::toggle_settings_window(h.clone())?;
@@ -213,12 +198,14 @@ bridge_commands! {
     }
     "update_track_info" => |h, state, args| {
         let p: UpdateTrackArgs = parse_args("update_track_info", args)?;
-        commands::update_track_info(h.clone(), h.state::<Arc<AppState>>(), p.track)?;
+        commands::update_track_info(h.clone(), h.state::<Arc<AppState>>(), p.track.sanitized())?;
         Ok(Value::Null)
     }
     "notify_track_change" => |h, state, args| {
         let p: NotifyArgs = parse_args("notify_track_change", args)?;
-        commands::notify_track_change(h.clone(), h.state::<Arc<AppState>>(), p.title, p.artist)?;
+        let title = sync_room::clean_text(&p.title, 200);
+        let artist = sync_room::clean_text(&p.artist, 200);
+        commands::notify_track_change(h.clone(), h.state::<Arc<AppState>>(), title, artist)?;
         Ok(Value::Null)
     }
     "fetch_lyrics" => |h, state, args| {
@@ -230,6 +217,9 @@ bridge_commands! {
     }
     "set_lyrics_offset" => |h, state, args| {
         let p: LyricsOffsetArgs = parse_args("set_lyrics_offset", args)?;
+        if !p.offset_secs.is_finite() {
+            return Err("Invalid arguments for `set_lyrics_offset`: not a number".into());
+        }
         to_data(lyrics::commands::set_offset(&state.lyrics, p.offset_secs, h)?)
     }
     "list_lyrics_candidates" => |h, state, args| {
@@ -240,13 +230,16 @@ bridge_commands! {
         to_data(lyrics::commands::pick(&state.lyrics, &p.provider, &p.id, h)?)
     }
     "import_lyrics_offsets" => |h, state, args| {
-        let p: ImportOffsetsArgs = parse_args("import_lyrics_offsets", args)?;
+        let mut p: ImportOffsetsArgs = parse_args("import_lyrics_offsets", args)?;
+        p.entries.truncate(MAX_IMPORTED_OFFSETS);
+        p.entries.retain(|(id, offset)| sync_room::is_video_id(id) && offset.is_finite());
         to_data(lyrics::commands::import_offsets(&state.lyrics, p.entries, h))
     }
     "broadcast_sync_state" => |h, state, args| {
         let p: BroadcastSyncArgs = parse_args("broadcast_sync_state", args)?;
+        let playback = p.playback.sanitized().ok_or("Invalid arguments for `broadcast_sync_state`")?;
         let sink: Arc<dyn sync_room::SyncEventSink> = Arc::new(h.clone());
-        sync_room::broadcast_playback(&state.sync_room, &sink, p.playback);
+        sync_room::broadcast_playback(&state.sync_room, &sink, playback);
         Ok(Value::Null)
     }
     "send_sync_control" => |h, state, args| {
@@ -255,7 +248,7 @@ bridge_commands! {
         Ok(Value::Null)
     }
     "get_sync_room_state" => |h, state, args| {
-        to_data(state.sync_room.get_room_state())
+        Ok(state.sync_room.get_room_state().map_or(Value::Null, |room| page_ipc::page_room_value(&room)))
     }
     // A listener's next button (and anyone's, if they choose) votes instead.
     "vote_sync_skip" => |h, state, args| {
@@ -272,6 +265,9 @@ bridge_commands! {
     // The shared queue panel and YTM's own queue menu items, in a room.
     "sync_queue_add" => |h, state, args| {
         let p: QueueAddArgs = parse_args("sync_queue_add", args)?;
+        if p.input.chars().count() > MAX_QUEUE_INPUT_CHARS {
+            return Err("sync.error.badLink".into());
+        }
         commands::add_to_sync_queue(h.clone(), state, &p.input, p.next).await?;
         Ok(Value::Null)
     }
@@ -300,20 +296,6 @@ bridge_commands! {
         state.power_manager.set_inhibit_sleep(p.inhibit);
         Ok(Value::Null)
     }
-    // Returns as soon as the download starts: a download outlives any
-    // reasonable bridge timeout, so progress, completion and failure are
-    // reported through `download-progress` events instead.
-    "download_track" => |h, state, args| {
-        let p: DownloadArgs = parse_args("download_track", args)?;
-        let handle = h.clone();
-        tauri::async_runtime::spawn(async move {
-            let state = handle.state::<Arc<AppState>>();
-            if let Err(e) = commands::download_track(handle.clone(), state, p.request).await {
-                log::warn!("download failed: {e}");
-            }
-        });
-        Ok(Value::Null)
-    }
     // Phone remote (remote_server.rs): the page reports what a connected
     // phone shows and answers the phone's `remote-action` requests.
     "remote_clients" => |h, state, args| {
@@ -338,19 +320,6 @@ mod tests {
     use std::collections::HashSet;
 
     #[test]
-    fn test_envelope_success_shape() {
-        let v = response_envelope(Ok(serde_json::json!({ "a": 1 })));
-        assert_eq!(v, serde_json::json!({ "ok": true, "data": { "a": 1 } }));
-        assert_eq!(response_envelope(Ok(Value::Null)), serde_json::json!({ "ok": true, "data": null }));
-    }
-
-    #[test]
-    fn test_envelope_error_shape() {
-        let v = response_envelope(Err("boom".to_string()));
-        assert_eq!(v, serde_json::json!({ "ok": false, "error": "boom" }));
-    }
-
-    #[test]
     fn test_parse_args_error_names_command_and_serde_reason() {
         let err = parse_args::<InhibitSleepArgs>("set_inhibit_sleep", Some(serde_json::json!({ "inhibit": "yes" })))
             .err()
@@ -362,15 +331,26 @@ mod tests {
         assert!(missing.contains("set_inhibit_sleep"), "{missing}");
     }
 
-    /// Regression: the bridge used to deserialize `save_config`'s args with
-    /// `if let Ok(..)` and reply success either way, so a malformed config
-    /// silently didn't save.
+    /// The page is a remote origin shared with YouTube's own scripts:
+    /// nothing that touches files, the whole config, the remote token, the
+    /// room code or the updater may be reachable from it.
     #[test]
-    fn test_save_config_rejects_malformed_config() {
-        let err = parse_args::<SaveConfigArgs>("save_config", Some(serde_json::json!({ "config": 42 })))
-            .err()
-            .expect("a number is not a config");
-        assert!(err.contains("save_config"), "{err}");
+    fn test_bridge_has_no_privileged_commands() {
+        for cmd in [
+            "get_remote_info",
+            "scan_local_music",
+            "import_settings",
+            "export_settings",
+            "install_update",
+            "create_sync_room",
+            "join_sync_room",
+            "kick_sync_member",
+            "set_sync_member_role",
+            "open_logs_folder",
+            "regenerate_remote_token",
+        ] {
+            assert!(!BRIDGE_COMMANDS.contains(&cmd), "`{cmd}` must not be reachable from music.youtube.com");
+        }
     }
 
     #[test]
@@ -382,7 +362,6 @@ mod tests {
         for cmd in [
             "broadcast_sync_state",
             "send_sync_control",
-            "download_track",
             "fetch_lyrics",
             "get_current_lyrics",
             "set_lyrics_offset",
@@ -390,7 +369,7 @@ mod tests {
             "pick_lyrics",
             "import_lyrics_offsets",
             "get_config",
-            "get_remote_info",
+            "open_remote_pairing",
             "notify_track_change",
             "set_inhibit_sleep",
             "toggle_local_library_window",
@@ -406,7 +385,6 @@ mod tests {
             "sync_queue_remove",
             "sync_queue_play",
             "sync_queue_move",
-            "save_config",
             "remote_clients",
             "remote_publish",
             "remote_reply",

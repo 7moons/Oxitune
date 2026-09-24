@@ -1,3 +1,4 @@
+import { pageEvents } from '../../preload/bridgeClient';
 import { YTMDPlugin, PluginContext, TrackInfo } from '../types';
 import { PlayerBridge } from '../../preload/bridge';
 import { setSyncStatus } from '../../preload/ui/navMenu';
@@ -787,23 +788,23 @@ export const SyncRoomPlugin: YTMDPlugin = {
     invokeRef = ctx.invoke;
 
     const unlistenPromises: Promise<() => void>[] = [];
-    if (window.__TAURI__?.event) {
+    if (pageEvents) {
       unlistenPromises.push(
-        window.__TAURI__.event.listen<RoomStatePayload>('sync-room-updated', (e) => {
+        pageEvents.listen<RoomStatePayload>('sync-room-updated', (e) => {
           controller.setRoomState(true, e.payload.is_host, canControl(ownRole(e.payload)));
           applyRoomUi(e.payload, true);
         }),
-        window.__TAURI__.event.listen<{ reason?: LeaveReason } | null>('sync-room-left', (e) => {
+        pageEvents.listen<{ reason?: LeaveReason } | null>('sync-room-left', (e) => {
           controller.setRoomState(false, false);
           applyRoomUi(null, true, e.payload?.reason ?? 'left');
         }),
-        window.__TAURI__.event.listen<SyncPlaybackPayload>('sync-playback-remote', (e) => {
+        pageEvents.listen<SyncPlaybackPayload>('sync-playback-remote', (e) => {
           controller.handleRemotePlayback(e.payload, ctx.getVideoElement());
         }),
-        window.__TAURI__.event.listen<SyncControlRequest>('sync-control-remote', (e) => {
+        pageEvents.listen<SyncControlRequest>('sync-control-remote', (e) => {
           controller.applyRemoteControl(e.payload);
         }),
-        window.__TAURI__.event.listen<ReactionPayload>('sync-reaction', (e) => {
+        pageEvents.listen<ReactionPayload>('sync-reaction', (e) => {
           showReaction(e.payload.emoji, e.payload.from);
         })
       );

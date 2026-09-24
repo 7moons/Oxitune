@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ytmd-subscribe"
+description = "Enables the ytmd_subscribe command without any pre-configured scope."
+commands.allow = ["ytmd_subscribe"]
+
+[[permission]]
+identifier = "deny-ytmd-subscribe"
+description = "Denies the ytmd_subscribe command without any pre-configured scope."
+commands.deny = ["ytmd_subscribe"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-transfer-sync-host"
+description = "Enables the transfer_sync_host command without any pre-configured scope."
+commands.allow = ["transfer_sync_host"]
+
+[[permission]]
+identifier = "deny-transfer-sync-host"
+description = "Denies the transfer_sync_host command without any pre-configured scope."
+commands.deny = ["transfer_sync_host"]

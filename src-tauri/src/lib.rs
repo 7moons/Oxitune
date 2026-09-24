@@ -3,10 +3,10 @@ pub mod commands;
 pub mod config;
 pub mod discord_rpc;
 pub mod join_link;
-pub mod downloader;
 pub mod local_files;
 pub mod lyrics;
 pub mod mpris;
+pub mod page_ipc;
 pub mod p2p_sync;
 pub mod power_manager;
 pub mod remote_server;
@@ -25,7 +25,7 @@ use parking_lot::Mutex;
 use power_manager::PowerManager;
 use std::sync::Arc;
 use sync_room::SyncRoomManager;
-use tauri::{Emitter, Listener, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri::{Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 
 pub struct AppState {
     pub config_manager: ConfigManager,
@@ -196,28 +196,8 @@ pub fn run() {
             // also fired on minimize/hide-to-tray.
             screen_lock::start(handle.clone());
 
-            // Injected-page command bridge (see bridge.rs for the protocol).
-            // Always answers when a request id is present, including for
-            // unknown commands and malformed args, so the page never has to
-            // fall back on its timeout to learn something failed.
-            let handle_for_bridge = handle.clone();
-            let app_state_for_bridge = app_state_for_setup.clone();
-            handle.listen("ytmd-invoke", move |event| {
-                let Ok(raw) = serde_json::from_str::<serde_json::Value>(event.payload()) else {
-                    return;
-                };
-                let Some(id) = raw.get("id").and_then(|v| v.as_str()).map(str::to_owned) else {
-                    return;
-                };
-                let cmd = raw.get("cmd").and_then(|v| v.as_str()).unwrap_or_default().to_owned();
-                let args = raw.get("args").cloned();
-                let h = handle_for_bridge.clone();
-                let state = app_state_for_bridge.clone();
-                tauri::async_runtime::spawn(async move {
-                    let result = bridge::dispatch(h.clone(), state, &cmd, args).await;
-                    let _ = h.emit(&format!("ytmd-response-{id}"), bridge::response_envelope(result));
-                });
-            });
+            // The music.youtube.com page's event feed (page_ipc.rs).
+            page_ipc::start_relay(&handle);
 
             {
                 use tauri_plugin_deep_link::DeepLinkExt;
@@ -305,25 +285,13 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            // Keep in sync with APP_COMMANDS in build.rs and capabilities/*.json.
+            commands::ytmd_bridge,
+            commands::ytmd_subscribe,
             commands::get_config,
             commands::save_config,
-            commands::update_track_info,
             commands::get_current_track,
-            commands::toggle_mini_player,
-            commands::toggle_settings_window,
-            commands::toggle_local_library_window,
-            commands::toggle_sync_window,
-            commands::send_player_command,
-            commands::send_seek_command,
-            commands::send_volume_command,
-            lyrics::commands::fetch_lyrics,
             lyrics::commands::get_current_lyrics,
-            lyrics::commands::set_lyrics_offset,
-            lyrics::commands::list_lyrics_candidates,
-            lyrics::commands::pick_lyrics,
-            lyrics::commands::import_lyrics_offsets,
-            commands::notify_track_change,
-            commands::download_track,
             commands::scan_local_music,
             commands::create_sync_room,
             commands::join_sync_room,
@@ -351,10 +319,8 @@ pub fn run() {
             commands::open_logs_folder,
             commands::export_settings,
             commands::import_settings,
-            commands::broadcast_sync_state,
             commands::get_remote_info,
             commands::regenerate_remote_token,
-            commands::set_inhibit_sleep,
             commands::minimize_window,
             commands::toggle_maximize_window,
             commands::close_window,

@@ -1,3 +1,4 @@
+import { pageEvents } from '../../preload/bridgeClient';
 import { YTMDPlugin, PluginContext, TrackInfo } from '../types';
 import { AudioEngine } from './engine';
 import { CrossfadeController } from './crossfade';
@@ -96,8 +97,8 @@ export const AudioDspPlugin: YTMDPlugin = {
 
     // Listen to Tauri events for live adjustments from settings window
     const unlistenPromises: Promise<() => void>[] = [];
-    if (window.__TAURI__?.event) {
-      const { listen } = window.__TAURI__.event;
+    if (pageEvents) {
+      const { listen } = pageEvents;
 
       unlistenPromises.push(
         listen<{ bandIndex: number; gain: number }>('set-eq-band', (e) => {

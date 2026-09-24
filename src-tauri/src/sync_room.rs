@@ -248,6 +248,19 @@ pub struct SyncPlaybackState {
     pub timestamp_ms: u64,
 }
 
+impl SyncPlaybackState {
+    /// The host page's report, or `None` if it isn't a real playback state:
+    /// only YouTube video ids, finite non-negative positions, capped text.
+    pub(crate) fn sanitized(mut self) -> Option<Self> {
+        if !is_video_id(&self.video_id) || !self.current_time_secs.is_finite() || self.current_time_secs < 0.0 {
+            return None;
+        }
+        self.title = clean_text(&self.title, 200);
+        self.artist = clean_text(&self.artist, 200);
+        Some(self)
+    }
+}
+
 /// The view of room state handed to the frontend. `is_host` and
 /// `current_user_id` are perspective-relative, and `banned`/`pending`/
 /// `reconnecting` are local only, so none of those go over the wire (see

@@ -32,9 +32,6 @@ interface AppConfig {
   wheel_volume_step: number;
   ambient_lighting_enabled: boolean;
   ambient_intensity: number;
-  download_dir: string;
-  download_format: string;
-  embed_lyrics: boolean;
   local_music_dir: string;
   remote_enabled: boolean;
   remote_port: number;
@@ -70,7 +67,6 @@ const TOGGLES: [keyof AppConfig & string, boolean][] = [
   ['preserve_pitch', true],
   ['wheel_volume_on_player_page', false],
   ['ambient_lighting_enabled', true],
-  ['embed_lyrics', true],
   ['remote_enabled', true],
   ['inhibit_sleep', true],
   ['pause_on_lock', true],
@@ -431,12 +427,8 @@ function applyConfig(config: AppConfig) {
 
   const port = $<HTMLInputElement>('remote_port');
   if (port) port.value = String(config.remote_port || 9863);
-  const format = $<HTMLSelectElement>('download_format');
-  if (format) format.value = config.download_format || 'mp3';
   const discordPause = $<HTMLSelectElement>('discord_clear_after_pause_min');
   if (discordPause) discordPause.value = String(config.discord_clear_after_pause_min ?? 5);
-  const downloadDir = $<HTMLInputElement>('download_dir');
-  if (downloadDir) downloadDir.value = config.download_dir || '';
   const localDir = $<HTMLInputElement>('local_music_dir');
   if (localDir) localDir.value = config.local_music_dir || '';
   const css = $<HTMLTextAreaElement>('custom_css');
@@ -487,10 +479,8 @@ function collectConfig(config: AppConfig): AppConfig {
   const num = (id: string) => parseFloat($<HTMLInputElement>(id)?.value ?? '0');
   const port = parseInt($<HTMLInputElement>('remote_port')?.value ?? '', 10);
   next.remote_port = Number.isFinite(port) && port >= 1024 && port <= 65535 ? port : config.remote_port || 9863;
-  next.download_format = $<HTMLSelectElement>('download_format')?.value ?? next.download_format;
   const discordPause = parseInt($<HTMLSelectElement>('discord_clear_after_pause_min')?.value ?? '', 10);
   if (Number.isFinite(discordPause)) next.discord_clear_after_pause_min = discordPause;
-  next.download_dir = $<HTMLInputElement>('download_dir')?.value ?? next.download_dir;
   next.local_music_dir = $<HTMLInputElement>('local_music_dir')?.value ?? next.local_music_dir;
   next.custom_css = $<HTMLTextAreaElement>('custom_css')?.value ?? next.custom_css;
   next.equalizer_preset = $<HTMLSelectElement>('eq_preset')?.value ?? next.equalizer_preset;
@@ -639,12 +629,47 @@ function initSectionNav() {
   content.querySelectorAll('.settings-section').forEach((s) => observer.observe(s));
 }
 
+// --------------------------------------------------------- phone remote
+
+interface RemoteInfo {
+  url: string;
+  qr_svg: string;
+}
+
+/** The pairing QR lives here, not in the YouTube Music page: it carries
+ * the remote's token. */
+async function loadRemotePairing(): Promise<void> {
+  const frame = $('remote-qr');
+  const url = $('remote-url');
+  if (!frame || !url) return;
+  try {
+    const info = (await window.__TAURI__?.core.invoke('get_remote_info')) as RemoteInfo | null;
+    if (!info?.qr_svg) return;
+    const img = document.createElement('img');
+    img.src = `data:image/svg+xml;utf8,${encodeURIComponent(info.qr_svg)}`;
+    img.alt = tr('settings.remotePair.title');
+    frame.replaceChildren(img);
+    url.textContent = info.url;
+  } catch {
+    // Remote off or not bound: the frame keeps its "not running" text.
+  }
+}
+
+function showSection(sectionId: string) {
+  document.querySelector<HTMLButtonElement>(`.settings-nav-item[data-section="${CSS.escape(sectionId)}"]`)?.click();
+  if (sectionId === 'sec-remote') void loadRemotePairing();
+}
+
 // --------------------------------------------------------------- wiring
 
 document.addEventListener('DOMContentLoaded', () => {
   initWindowChrome();
   initAmbientBackdrop();
   initSectionNav();
+  void loadRemotePairing();
+  void window.__TAURI__?.event.listen<string>('settings-open-section', (e) => {
+    if (typeof e.payload === 'string') showSection(e.payload);
+  });
   void loadSettings();
   void loadAppVersion();
   void checkForUpdates(false);
@@ -714,6 +739,7 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       await window.__TAURI__?.core.invoke('regenerate_remote_token');
       showToast(tr('settings.remoteRevoke.done'));
+      void loadRemotePairing();
     } catch (e) {
       showToast(errorMessage(e));
     }

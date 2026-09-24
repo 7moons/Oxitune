@@ -7,7 +7,7 @@ use parking_lot::Mutex;
 /// lifetime of that child, and killing the child releases it immediately.
 /// This intentionally avoids adding a D-Bus/`libc` dependency (none is
 /// available in this crate) — shelling out matches the existing pattern
-/// already used for `yt-dlp` in downloader.rs. On a non-systemd platform
+/// used elsewhere for child processes. On a non-systemd platform
 /// (or one without `systemd-inhibit` on PATH) the spawn simply fails and is
 /// logged; playback still works, sleep is just not prevented.
 ///

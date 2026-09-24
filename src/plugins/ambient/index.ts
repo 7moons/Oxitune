@@ -1,3 +1,4 @@
+import { pageEvents } from '../../preload/bridgeClient';
 import { YTMDPlugin, PluginContext, TrackInfo } from '../types';
 import { extractPalette, renderAmbientWash } from './color';
 import { createEl } from '../../utils/dom';
@@ -78,12 +79,12 @@ export const AmbientLightingPlugin: YTMDPlugin = {
     };
 
     const unlistenPromises: Promise<() => void>[] = [];
-    if (window.__TAURI__?.event) {
+    if (pageEvents) {
       unlistenPromises.push(
-        window.__TAURI__.event.listen<number>('set-ambient-intensity', (e) => {
+        pageEvents.listen<number>('set-ambient-intensity', (e) => {
           setIntensity?.(e.payload);
         }),
-        window.__TAURI__.event.listen<boolean>('set-ambient-enabled', (e) => {
+        pageEvents.listen<boolean>('set-ambient-enabled', (e) => {
           // Re-enabling restores the user's chosen intensity, not a default.
           const configured = typeof ctx.config.ambient_intensity === 'number' ? ctx.config.ambient_intensity : 0.6;
           setIntensity?.(e.payload ? configured : 0);

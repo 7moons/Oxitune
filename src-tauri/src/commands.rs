@@ -6,6 +6,45 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::NotificationExt;
 
+/// The music.youtube.com page's only request command (see bridge.rs and
+/// page_ipc.rs): runs one entry of the bridge table.
+#[tauri::command]
+pub async fn ytmd_bridge(
+    webview: tauri::Webview,
+    app_handle: AppHandle,
+    cmd: String,
+    args: Option<serde_json::Value>,
+) -> Result<serde_json::Value, String> {
+    if !crate::page_ipc::is_main_page(webview.label(), webview.url().ok().as_ref()) {
+        return Err("not allowed".into());
+    }
+    let state = app_handle.state::<Arc<AppState>>().inner().clone();
+    crate::bridge::dispatch(app_handle, state, &cmd, args).await
+}
+
+/// The page's event feed: app events listed in `page_ipc::PAGE_EVENTS`.
+#[tauri::command]
+pub fn ytmd_subscribe(
+    webview: tauri::Webview,
+    app_handle: AppHandle,
+    channel: tauri::ipc::Channel<serde_json::Value>,
+) -> Result<(), String> {
+    if !crate::page_ipc::is_main_page(webview.label(), webview.url().ok().as_ref()) {
+        return Err("not allowed".into());
+    }
+    app_handle.state::<crate::page_ipc::PageChannel>().set(channel);
+    Ok(())
+}
+
+/// Shows the Settings window on one section (`sec-…` id in settings.html).
+pub fn show_settings_section(app_handle: &AppHandle, section: &'static str) {
+    if let Some(win) = app_handle.get_webview_window("settings") {
+        let _ = win.show();
+        let _ = win.set_focus();
+        let _ = app_handle.emit_to("settings", "settings-open-section", section);
+    }
+}
+
 #[tauri::command]
 pub fn get_config(state: State<'_, Arc<AppState>>) -> AppConfig {
     state.config_manager.load()
@@ -206,24 +245,6 @@ pub fn toggle_settings_window(app_handle: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
-pub fn send_player_command(app_handle: AppHandle, command: String) -> Result<(), String> {
-    let _ = app_handle.emit("player-command", command);
-    Ok(())
-}
-
-#[tauri::command]
-pub fn send_seek_command(app_handle: AppHandle, position: f64) -> Result<(), String> {
-    let _ = app_handle.emit("player-seek", position);
-    Ok(())
-}
-
-#[tauri::command]
-pub fn send_volume_command(app_handle: AppHandle, volume: f64) -> Result<(), String> {
-    let _ = app_handle.emit("player-volume", volume);
-    Ok(())
-}
-
 /// Lets a companion window (settings, local library, sync) that opens or
 /// reloads mid-song fetch the track already playing, instead of sitting
 /// blank until the next `track-changed` broadcast.
@@ -249,17 +270,6 @@ pub fn notify_track_change(
             .show();
     }
     Ok(())
-}
-
-#[tauri::command]
-pub async fn download_track(
-    app_handle: AppHandle,
-    state: State<'_, Arc<AppState>>,
-    request: crate::downloader::DownloadRequest,
-) -> Result<String, String> {
-    let config = state.config_manager.load();
-    let output_dir = std::path::PathBuf::from(&config.download_dir);
-    crate::downloader::execute_download(app_handle, request, output_dir).await
 }
 
 #[derive(Serialize, Clone)]
@@ -629,16 +639,6 @@ pub fn get_sync_room_state(
 }
 
 #[tauri::command]
-pub fn broadcast_sync_state(
-    app_handle: AppHandle,
-    state: State<'_, Arc<AppState>>,
-    playback: crate::sync_room::SyncPlaybackState,
-) -> Result<(), String> {
-    crate::sync_room::broadcast_playback(&state.sync_room, &sync_sink(app_handle), playback);
-    Ok(())
-}
-
-#[tauri::command]
 pub fn get_remote_info(
     state: State<'_, Arc<AppState>>,
 ) -> Result<crate::remote_server::RemoteInfo, String> {
@@ -653,15 +653,6 @@ pub fn get_remote_info(
 #[tauri::command]
 pub fn regenerate_remote_token(state: State<'_, Arc<AppState>>) -> Result<(), String> {
     state.remote_status.regenerate_token().map(|_| ())
-}
-
-#[tauri::command]
-pub fn set_inhibit_sleep(
-    state: State<'_, Arc<AppState>>,
-    inhibit: bool,
-) -> Result<(), String> {
-    state.power_manager.set_inhibit_sleep(inhibit);
-    Ok(())
 }
 
 #[tauri::command]

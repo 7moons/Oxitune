@@ -1,3 +1,4 @@
+import { pageEvents } from '../../preload/bridgeClient';
 import { YTMDPlugin, PluginContext, TrackInfo } from '../types';
 import { createEl } from '../../utils/dom';
 import { ensureKitStyles, openDialog, showToast } from '../../preload/ui/kit';
@@ -84,8 +85,8 @@ export const LyricsPlugin: YTMDPlugin = {
     // backend once so every window uses the same correction.
     migrateOffsets(ctx);
 
-    const unlisten = window.__TAURI__?.event
-      ? window.__TAURI__.event.listen<unknown>('lyrics-changed', (e) => {
+    const unlisten = pageEvents
+      ? pageEvents.listen<unknown>('lyrics-changed', (e) => {
           const next = toCurrentLyrics(e.payload);
           if (!isForCurrentSong(next)) return;
           applyLyrics(ctx, next);

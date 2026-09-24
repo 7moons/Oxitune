@@ -1,26 +1,13 @@
 /**
- * Client side of the injected-page IPC bridge (the `ytmd-invoke` event
- * handled in src-tauri/src/lib.rs). The main window loads an external
- * origin, so it can't call `#[tauri::command]`s directly.
+ * The injected page's link to the backend. The main window shows the
+ * external music.youtube.com origin, whose capability (capabilities/main.json)
+ * allows exactly two commands:
+ *
+ * - `ytmd_bridge { cmd, args }` for requests (the table in bridge.rs), and
+ * - `ytmd_subscribe { channel }` for the app events the page reacts to
+ *   (page_ipc.rs relays `PAGE_EVENTS`; the page cannot emit or listen to
+ *   Tauri events itself).
  */
-
-export interface BridgeResponse {
-  ok: boolean;
-  data?: unknown;
-  error?: string;
-}
-
-/** Unwraps a `ytmd-response-{id}` payload per the bridge contract in
- * lib.rs: `{ ok: true, data }` resolves to `data`, `{ ok: false, error }`
- * throws, so callers see backend failures instead of a silent `null`. */
-export function unwrapBridgeResponse(cmd: string, payload: unknown): unknown {
-  if (!payload || typeof payload !== 'object' || !('ok' in payload)) {
-    throw new Error(`Malformed response to ${cmd}`);
-  }
-  const res = payload as BridgeResponse;
-  if (!res.ok) throw new Error(res.error || `${cmd} failed`);
-  return res.data ?? null;
-}
 
 const DEFAULT_BRIDGE_TIMEOUT_MS = 8000;
 
@@ -29,39 +16,63 @@ export const invokeBackend = (
   args: Record<string, unknown> = {},
   opts: { timeoutMs?: number } = {}
 ): Promise<unknown> => {
+  const core = window.__TAURI__?.core;
+  if (!core?.invoke) return Promise.reject(new Error('Tauri bridge unavailable'));
   return new Promise((resolve, reject) => {
-    const tauri = window.__TAURI__;
-    if (!tauri?.event?.emit) {
-      reject(new Error('Tauri bridge unavailable'));
-      return;
-    }
-
-    const id = Math.random().toString(36).slice(2) + Date.now().toString(36);
-    let unlisten: (() => void) | null = null;
-
-    const timer = setTimeout(() => {
-      if (unlisten) unlisten();
-      reject(new Error(`Timed out waiting for ${cmd}`));
-    }, opts.timeoutMs ?? DEFAULT_BRIDGE_TIMEOUT_MS);
-
-    tauri.event
-      .listen(`ytmd-response-${id}`, (event) => {
+    const timer = setTimeout(
+      () => reject(new Error(`Timed out waiting for ${cmd}`)),
+      opts.timeoutMs ?? DEFAULT_BRIDGE_TIMEOUT_MS
+    );
+    core.invoke('ytmd_bridge', { cmd, args }).then(
+      (data) => {
         clearTimeout(timer);
-        if (unlisten) unlisten();
-        try {
-          resolve(unwrapBridgeResponse(cmd, event.payload));
-        } catch (e) {
-          reject(e);
-        }
-      })
-      .then((unlistenFn) => {
-        unlisten = unlistenFn;
-        return tauri.event.emit('ytmd-invoke', { id, cmd, args });
-      })
-      .catch((e) => {
+        resolve(data ?? null);
+      },
+      (e: unknown) => {
         clearTimeout(timer);
         reject(e instanceof Error ? e : new Error(String(e)));
-      });
+      }
+    );
   });
 };
 
+type Handler = (event: { payload: unknown }) => void;
+const handlers = new Map<string, Set<Handler>>();
+let subscribed = false;
+
+function subscribe(): void {
+  if (subscribed) return;
+  const core = window.__TAURI__?.core;
+  if (!core?.Channel || !core.invoke) return;
+  subscribed = true;
+  const channel = new core.Channel<{ event: string; payload: unknown }>();
+  channel.onmessage = (msg) => {
+    const set = handlers.get(msg?.event);
+    if (!set) return;
+    for (const handler of [...set]) {
+      try {
+        handler({ payload: msg.payload });
+      } catch (e) {
+        console.error(`[YTMD] ${msg.event} handler failed:`, e);
+      }
+    }
+  };
+  core.invoke('ytmd_subscribe', { channel }).catch((e: unknown) => {
+    subscribed = false;
+    console.error('[YTMD] Event feed unavailable:', e);
+  });
+}
+
+/** Same shape as Tauri's `event.listen`, fed by the page's event channel. */
+export const pageEvents = {
+  listen<T = unknown>(event: string, handler: (event: { payload: T }) => void): Promise<() => void> {
+    subscribe();
+    const h = handler as Handler;
+    let set = handlers.get(event);
+    if (!set) handlers.set(event, (set = new Set()));
+    set.add(h);
+    return Promise.resolve(() => {
+      handlers.get(event)?.delete(h);
+    });
+  }
+};

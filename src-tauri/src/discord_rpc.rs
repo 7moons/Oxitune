@@ -68,6 +68,37 @@ pub struct TrackPayload {
     pub playlist_id: Option<String>,
 }
 
+const MAX_TRACK_TEXT_CHARS: usize = 512;
+const MAX_COVER_URL_LEN: usize = 2048;
+
+fn clean_track_text(raw: &str) -> String {
+    raw.trim().chars().filter(|c| !c.is_control()).take(MAX_TRACK_TEXT_CHARS).collect()
+}
+
+impl TrackPayload {
+    /// What the page reports, made safe to hand to Discord, MPRIS/SMTC,
+    /// notifications and the other windows: text trimmed of control
+    /// characters and capped, the cover only as an https URL, ids only in
+    /// YouTube's own shapes. The page is a remote origin; its values are
+    /// treated like any other outside input.
+    pub fn sanitized(mut self) -> Self {
+        self.title = clean_track_text(&self.title);
+        self.artist = clean_track_text(&self.artist);
+        self.album = self.album.map(|a| clean_track_text(&a)).filter(|a| !a.is_empty());
+        self.cover_url = self.cover_url.filter(|u| {
+            u.len() <= MAX_COVER_URL_LEN && url::Url::parse(u).is_ok_and(|p| p.scheme() == "https")
+        });
+        self.video_id = self.video_id.filter(|v| crate::sync_room::is_video_id(v));
+        self.playlist_id = self.playlist_id.filter(|p| {
+            (1..=64).contains(&p.len()) && p.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        });
+        // A day is far longer than any song; anything above is junk.
+        self.duration_secs = self.duration_secs.min(86_400);
+        self.current_time_secs = self.current_time_secs.min(self.duration_secs.max(86_400));
+        self
+    }
+}
+
 /// Discord drops `SET_ACTIVITY` calls past about 5 per 20 s without an
 /// error, so a burst of skips used to leave an old song on the profile.
 const DISCORD_RATE_MAX: usize = 5;

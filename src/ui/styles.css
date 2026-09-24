@@ -1302,3 +1302,22 @@ button {
   width: 32px;
   height: 32px;
 }
+
+/* Phone remote pairing QR (Settings → Phone remote). */
+.remote-qr {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 212px;
+  min-height: 212px;
+  margin: 12px 0 8px;
+  padding: 16px;
+  box-sizing: border-box;
+  border-radius: 12px;
+  background: #fff;
+  color: #606060;
+  font-size: 12px;
+  text-align: center;
+}
+.remote-qr img { display: block; width: 180px; height: 180px; }
+.remote-url { word-break: break-all; user-select: all; }

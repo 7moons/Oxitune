@@ -40,9 +40,6 @@ pub struct AppConfig {
     pub preserve_pitch: bool,
     pub ambient_lighting_enabled: bool,
     pub ambient_intensity: f64,
-    pub download_dir: String,
-    pub download_format: String,
-    pub embed_lyrics: bool,
     pub local_music_dir: String,
     pub remote_enabled: bool,
     pub remote_port: u16,
@@ -98,12 +95,6 @@ impl Default for AppConfig {
             .to_string_lossy()
             .to_string();
 
-        let default_download_dir = dirs::audio_dir()
-            .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join("Music"))
-            .join("YTMD")
-            .to_string_lossy()
-            .to_string();
-
         Self {
             autostart: false,
             minimize_to_tray: true,
@@ -134,9 +125,6 @@ impl Default for AppConfig {
             preserve_pitch: true,
             ambient_lighting_enabled: true,
             ambient_intensity: 0.6,
-            download_dir: default_download_dir,
-            download_format: "mp3".to_string(),
-            embed_lyrics: true,
             local_music_dir: default_music_dir,
             remote_enabled: true,
             remote_port: 9863,
@@ -189,9 +177,6 @@ impl AppConfig {
             self.remote_port = AppConfig::default().remote_port;
         }
 
-        if self.download_dir.trim().is_empty() {
-            self.download_dir = AppConfig::default().download_dir;
-        }
         if self.local_music_dir.trim().is_empty() {
             self.local_music_dir = AppConfig::default().local_music_dir;
         }
@@ -324,7 +309,6 @@ mod tests {
             playback_speed: f64::INFINITY,
             ambient_intensity: f64::NAN,
             remote_port: 22, // SSH — a malicious save_config trying to steer us onto a privileged port
-            download_dir: "".to_string(),
             local_music_dir: "   ".to_string(),
             equalizer_gains: vec![1000.0; 5000],
             discord_clear_after_pause_min: u32::MAX,
@@ -339,7 +323,6 @@ mod tests {
         assert_eq!(clean.playback_speed, 1.0); // non-finite input falls back to the default, not a clamp bound
         assert_eq!(clean.ambient_intensity, 0.6); // same for NaN
         assert_eq!(clean.remote_port, AppConfig::default().remote_port);
-        assert_eq!(clean.download_dir, AppConfig::default().download_dir);
         assert_eq!(clean.local_music_dir, AppConfig::default().local_music_dir);
         assert_eq!(clean.equalizer_gains.len(), 32);
         assert!(clean.equalizer_gains.iter().all(|g| *g == 24.0));
@@ -416,8 +399,6 @@ mod tests {
         assert!(config.preserve_pitch);
         assert!(config.ambient_lighting_enabled);
         assert_eq!(config.ambient_intensity, 0.6);
-        assert_eq!(config.download_format, "mp3");
-        assert!(config.embed_lyrics);
         assert!(config.remote_enabled);
         assert_eq!(config.remote_port, 9863);
         assert!(config.inhibit_sleep);
@@ -452,8 +433,6 @@ mod tests {
             preserve_pitch: false,
             ambient_lighting_enabled: true,
             ambient_intensity: 0.8,
-            download_format: "flac".to_string(),
-            embed_lyrics: true,
             remote_enabled: false,
             remote_port: 8888,
             ..AppConfig::default()
@@ -470,8 +449,6 @@ mod tests {
         assert!(!deserialized.preserve_pitch);
         assert!(deserialized.ambient_lighting_enabled);
         assert_eq!(deserialized.ambient_intensity, 0.8);
-        assert_eq!(deserialized.download_format, "flac");
-        assert!(deserialized.embed_lyrics);
         assert!(!deserialized.remote_enabled);
         assert_eq!(deserialized.remote_port, 8888);
     }
@@ -546,6 +523,20 @@ mod tests {
 
         let loaded_again = manager.load();
         assert_eq!(loaded_again.custom_css, AppConfig::default().custom_css);
+    }
+
+    /// Configs from before the downloader was removed still load; the old
+    /// download fields are simply dropped on the next save.
+    #[test]
+    fn test_config_with_removed_download_fields_still_loads() {
+        let mut saved = serde_json::to_value(AppConfig { crossfade_seconds: 3.0, ..AppConfig::default() }).unwrap();
+        let obj = saved.as_object_mut().unwrap();
+        obj.insert("download_dir".into(), serde_json::json!("/home/me/Music/YTMD"));
+        obj.insert("download_format".into(), serde_json::json!("flac"));
+        obj.insert("embed_lyrics".into(), serde_json::json!(true));
+        let loaded: AppConfig = serde_json::from_value(saved).expect("old config still loads");
+        assert_eq!(loaded.crossfade_seconds, 3.0);
+        assert!(!serde_json::to_string(&loaded).unwrap().contains("download"));
     }
 
     /// A config written before custom presets and shortcuts existed (and

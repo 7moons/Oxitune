@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-take-pending-join-code"
+description = "Enables the take_pending_join_code command without any pre-configured scope."
+commands.allow = ["take_pending_join_code"]
+
+[[permission]]
+identifier = "deny-take-pending-join-code"
+description = "Denies the take_pending_join_code command without any pre-configured scope."
+commands.deny = ["take_pending_join_code"]

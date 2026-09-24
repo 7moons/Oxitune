@@ -94,7 +94,7 @@ export function startResume(): void {
       try {
         return await invokeBackend('take_resume_session');
       } catch (e) {
-        if (attempt >= 20 || window.__TAURI__?.event?.emit) throw e;
+        if (attempt >= 20 || window.__TAURI__?.core?.invoke) throw e;
         await new Promise((r) => setTimeout(r, 100));
       }
     }

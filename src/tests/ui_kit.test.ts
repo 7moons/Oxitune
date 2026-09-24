@@ -1,7 +1,5 @@
 import { describe, expect, test } from 'bun:test';
 import { pickLocale } from '../preload/ui/i18n';
-import { unwrapBridgeResponse } from '../preload/bridgeClient';
-import { downloadPhase, DownloadProgress } from '../plugins/downloader';
 import { diffMembers } from '../plugins/sync-room';
 
 describe('pickLocale follows the language YTM renders in', () => {
@@ -26,41 +24,6 @@ describe('pickLocale follows the language YTM renders in', () => {
     const en = pickLocale('en');
     const pl = pickLocale('pl');
     expect(Object.keys(pl).sort()).toEqual(Object.keys(en).sort());
-  });
-});
-
-describe('bridge response contract', () => {
-  test('ok responses resolve to their data', () => {
-    expect(unwrapBridgeResponse('get_config', { ok: true, data: { a: 1 } })).toEqual({ a: 1 });
-    expect(unwrapBridgeResponse('toggle_mini_player', { ok: true, data: null })).toBeNull();
-    expect(unwrapBridgeResponse('toggle_mini_player', { ok: true })).toBeNull();
-  });
-  test('errors surface the backend message', () => {
-    expect(() => unwrapBridgeResponse('save_config', { ok: false, error: 'bad field' })).toThrow('bad field');
-    expect(() => unwrapBridgeResponse('save_config', { ok: false })).toThrow('save_config failed');
-  });
-  test('anything else is rejected, not treated as success', () => {
-    expect(() => unwrapBridgeResponse('x', null)).toThrow();
-    expect(() => unwrapBridgeResponse('x', { success: true })).toThrow();
-  });
-});
-
-describe('download progress events', () => {
-  const p = (over: Partial<DownloadProgress>): DownloadProgress => ({
-    video_id: 'dQw4w9WgXcQ',
-    title: 'T',
-    percent: 50,
-    status: '',
-    output_path: null,
-    error: null,
-    ...over
-  });
-  test('classifies progress, completion and failure', () => {
-    expect(downloadPhase(p({}))).toBe('progress');
-    expect(downloadPhase(p({ percent: 100, output_path: '/m/a.mp3' }))).toBe('done');
-    expect(downloadPhase(p({ error: 'yt-dlp is not installed' }))).toBe('failed');
-    // A failure never reads as done, even at 100%.
-    expect(downloadPhase(p({ percent: 100, output_path: '/m/a.mp3', error: 'x' }))).toBe('failed');
   });
 });
 

@@ -7,6 +7,8 @@ declare global {
         invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
         /** Local file path -> URL the webview can load (asset protocol; differs per OS). */
         convertFileSrc: (filePath: string, protocol?: string) => string;
+        /** A Tauri IPC channel: pass it as a command argument, receive on `onmessage`. */
+        Channel: new <T = unknown>() => { onmessage: (message: T) => void };
       };
       event: {
         listen: <T = unknown>(event: string, handler: (event: { payload: T }) => void) => Promise<() => void>;
@@ -18,6 +20,5 @@ declare global {
         };
       };
     };
-    __ytmd_show_remote_qr?: () => void;
   }
 }

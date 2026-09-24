@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-sync-require-approval"
+description = "Enables the set_sync_require_approval command without any pre-configured scope."
+commands.allow = ["set_sync_require_approval"]
+
+[[permission]]
+identifier = "deny-set-sync-require-approval"
+description = "Denies the set_sync_require_approval command without any pre-configured scope."
+commands.deny = ["set_sync_require_approval"]

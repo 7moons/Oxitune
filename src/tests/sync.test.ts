@@ -576,6 +576,8 @@ describe('injected-page IPC bridge', () => {
   test('every command invoked from src/preload + src/plugins is in the bridge table', () => {
     const invoked = new Set<string>();
     for (const file of [...walk(join(root, 'src/preload')), ...walk(join(root, 'src/plugins'))]) {
+      // The client itself calls the two page commands (ytmd_bridge/ytmd_subscribe).
+      if (file.endsWith('bridgeClient.ts')) continue;
       for (const m of readFileSync(file, 'utf8').matchAll(/(?:invoke|invokeBackend|runAction)\(\s*'([a-z_]+)'/g)) {
         invoked.add(m[1]);
       }
@@ -585,5 +587,40 @@ describe('injected-page IPC bridge', () => {
     expect(handled.size).toBeGreaterThan(10);
     expect(invoked.size).toBeGreaterThan(5);
     expect([...invoked].filter((cmd) => !handled.has(cmd))).toEqual([]);
+  });
+});
+
+// The page is a remote origin shared with YouTube's own scripts: only the
+// main window may carry a remote URL, and it may reach nothing but the two
+// page commands. Companion windows are local and never list remote URLs.
+describe('capabilities', () => {
+  const dir = join(import.meta.dir, '..', '..', 'src-tauri', 'capabilities');
+  const caps = readdirSync(dir)
+    .filter((f) => f.endsWith('.json'))
+    .map((f) => JSON.parse(readFileSync(join(dir, f), 'utf8')) as {
+      identifier: string;
+      windows: string[];
+      permissions: string[];
+      remote?: { urls: string[] };
+    });
+
+  test('only the main page capability has remote URLs, and only YouTube Music', () => {
+    const remote = caps.filter((c) => c.remote);
+    expect(remote.map((c) => c.identifier)).toEqual(['main-page']);
+    expect(remote[0].windows).toEqual(['main']);
+    expect(remote[0].remote?.urls).toEqual(['https://music.youtube.com/*']);
+    expect(remote[0].permissions.sort()).toEqual(['allow-ytmd-bridge', 'allow-ytmd-subscribe']);
+  });
+
+  test('no capability applies to every window', () => {
+    for (const c of caps) expect(c.windows).not.toContain('*');
+  });
+
+  test('no window gets shell, file system or the page bridge by accident', () => {
+    for (const c of caps.filter((c) => c.identifier !== 'main-page')) {
+      for (const p of c.permissions) {
+        expect(p.startsWith('shell:') || p.startsWith('fs:') || p === 'allow-ytmd-bridge').toBe(false);
+      }
+    }
   });
 });

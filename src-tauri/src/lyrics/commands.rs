@@ -45,13 +45,18 @@ pub struct FetchArgs {
 
 impl From<FetchArgs> for Query {
     fn from(a: FetchArgs) -> Self {
+        // Comes from the music.youtube.com page: capped before it reaches
+        // providers, the cache or the other windows.
+        const MAX_FIELD_CHARS: usize = 512;
+        const MAX_YTM_PLAIN_BYTES: usize = 64 * 1024;
+        let cap = |s: String| -> String { s.chars().take(MAX_FIELD_CHARS).collect() };
         Query {
-            video_id: a.video_id.filter(|v| !v.trim().is_empty()),
-            title: a.title,
-            artist: a.artist,
-            album: a.album_name.filter(|a| !a.trim().is_empty()),
-            duration: a.duration.filter(|d| d.is_finite() && *d > 0.0),
-            ytm_plain: a.ytm_plain,
+            video_id: a.video_id.filter(|v| crate::sync_room::is_video_id(v.trim())),
+            title: cap(a.title),
+            artist: cap(a.artist),
+            album: a.album_name.filter(|a| !a.trim().is_empty()).map(cap),
+            duration: a.duration.filter(|d| d.is_finite() && *d > 0.0 && *d < 86_400.0),
+            ytm_plain: a.ytm_plain.filter(|p| p.len() <= MAX_YTM_PLAIN_BYTES),
         }
     }
 }
@@ -222,7 +227,7 @@ pub fn import_offsets(ls: &LyricsState, entries: Vec<(String, f64)>, sink: &dyn 
 pub fn configured_providers(state: &AppState) -> (Vec<Arc<dyn LyricsProvider>>, bool) {
     let config = state.config_manager.load();
     let ids = enabled_providers(&config.lyrics_providers);
-    let roots = vec![PathBuf::from(&config.local_music_dir), PathBuf::from(&config.download_dir)];
+    let roots = vec![PathBuf::from(&config.local_music_dir)];
     let ytm_enabled = ids.contains(&ProviderId::Ytm);
     (state.lyrics.providers(&ids, roots), ytm_enabled)
 }
@@ -238,44 +243,8 @@ pub async fn candidates(state: &AppState) -> Result<Vec<CandidateSummary>, Strin
 }
 
 #[tauri::command]
-#[allow(clippy::too_many_arguments)]
-pub async fn fetch_lyrics(
-    app_handle: AppHandle,
-    state: State<'_, Arc<AppState>>,
-    video_id: Option<String>,
-    artist: String,
-    title: String,
-    album_name: Option<String>,
-    duration: Option<f64>,
-    ytm_plain: Option<String>,
-) -> Result<CurrentLyrics, String> {
-    let args = FetchArgs { video_id, artist, title, album_name, duration, ytm_plain };
-    Ok(fetch(&app_handle, &state, args).await)
-}
-
-#[tauri::command]
 pub fn get_current_lyrics(state: State<'_, Arc<AppState>>) -> CurrentLyrics {
     state.lyrics.current.lock().clone()
-}
-
-#[tauri::command]
-pub fn set_lyrics_offset(app_handle: AppHandle, state: State<'_, Arc<AppState>>, offset_secs: f64) -> Result<CurrentLyrics, String> {
-    set_offset(&state.lyrics, offset_secs, &app_handle)
-}
-
-#[tauri::command]
-pub async fn list_lyrics_candidates(state: State<'_, Arc<AppState>>) -> Result<Vec<CandidateSummary>, String> {
-    candidates(&state).await
-}
-
-#[tauri::command]
-pub fn pick_lyrics(app_handle: AppHandle, state: State<'_, Arc<AppState>>, provider: String, id: String) -> Result<CurrentLyrics, String> {
-    pick(&state.lyrics, &provider, &id, &app_handle)
-}
-
-#[tauri::command]
-pub fn import_lyrics_offsets(app_handle: AppHandle, state: State<'_, Arc<AppState>>, entries: Vec<(String, f64)>) -> usize {
-    import_offsets(&state.lyrics, entries, &app_handle)
 }
 
 #[cfg(test)]

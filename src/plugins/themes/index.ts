@@ -1,3 +1,4 @@
+import { pageEvents } from '../../preload/bridgeClient';
 import { YTMDPlugin, PluginContext } from '../types';
 import { AMBIENT_THEME_CSS, BASE_THEME_CSS } from './presets';
 
@@ -59,12 +60,12 @@ export const ThemeEnginePlugin: YTMDPlugin = {
     // Listen to live updates from settings — the same 'set-ambient-enabled'
     // event AmbientLightingPlugin listens to for the glow orb's opacity.
     const unlistenPromises: Promise<() => void>[] = [];
-    if (window.__TAURI__?.event) {
+    if (pageEvents) {
       unlistenPromises.push(
-        window.__TAURI__.event.listen<boolean>('set-ambient-enabled', (e) => {
+        pageEvents.listen<boolean>('set-ambient-enabled', (e) => {
           applyMode(e.payload);
         }),
-        window.__TAURI__.event.listen<string>('set-custom-css', (e) => {
+        pageEvents.listen<string>('set-custom-css', (e) => {
           applyCustomCss(e.payload);
         })
       );

@@ -140,6 +140,174 @@
                   "identifier": {
                     "anyOf": [
                       {
+                        "description": "This permission set allows opening `mailto:`, `tel:`, `https://` and `http://` urls using their default application\nas well as reveal file in directories using default file explorer\n#### This default permission set includes:\n\n- `allow-open-url`\n- `allow-reveal-item-in-dir`\n- `allow-default-urls`",
+                        "type": "string",
+                        "const": "opener:default",
+                        "markdownDescription": "This permission set allows opening `mailto:`, `tel:`, `https://` and `http://` urls using their default application\nas well as reveal file in directories using default file explorer\n#### This default permission set includes:\n\n- `allow-open-url`\n- `allow-reveal-item-in-dir`\n- `allow-default-urls`"
+                      },
+                      {
+                        "description": "This enables opening `mailto:`, `tel:`, `https://` and `http://` urls using their default application.",
+                        "type": "string",
+                        "const": "opener:allow-default-urls",
+                        "markdownDescription": "This enables opening `mailto:`, `tel:`, `https://` and `http://` urls using their default application."
+                      },
+                      {
+                        "description": "Enables the open_path command without any pre-configured scope.",
+                        "type": "string",
+                        "const": "opener:allow-open-path",
+                        "markdownDescription": "Enables the open_path command without any pre-configured scope."
+                      },
+                      {
+                        "description": "Enables the open_url command without any pre-configured scope.",
+                        "type": "string",
+                        "const": "opener:allow-open-url",
+                        "markdownDescription": "Enables the open_url command without any pre-configured scope."
+                      },
+                      {
+                        "description": "Enables the reveal_item_in_dir command without any pre-configured scope.",
+                        "type": "string",
+                        "const": "opener:allow-reveal-item-in-dir",
+                        "markdownDescription": "Enables the reveal_item_in_dir command without any pre-configured scope."
+                      },
+                      {
+                        "description": "Denies the open_path command without any pre-configured scope.",
+                        "type": "string",
+                        "const": "opener:deny-open-path",
+                        "markdownDescription": "Denies the open_path command without any pre-configured scope."
+                      },
+                      {
+                        "description": "Denies the open_url command without any pre-configured scope.",
+                        "type": "string",
+                        "const": "opener:deny-open-url",
+                        "markdownDescription": "Denies the open_url command without any pre-configured scope."
+                      },
+                      {
+                        "description": "Denies the reveal_item_in_dir command without any pre-configured scope.",
+                        "type": "string",
+                        "const": "opener:deny-reveal-item-in-dir",
+                        "markdownDescription": "Denies the reveal_item_in_dir command without any pre-configured scope."
+                      }
+                    ]
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "allow": {
+                    "items": {
+                      "title": "OpenerScopeEntry",
+                      "description": "Opener scope entry.",
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "url"
+                          ],
+                          "properties": {
+                            "app": {
+                              "description": "An application to open this url with, for example: firefox.",
+                              "allOf": [
+                                {
+                                  "$ref": "#/definitions/Application"
+                                }
+                              ]
+                            },
+                            "url": {
+                              "description": "A URL that can be opened by the webview when using the Opener APIs.\n\nWildcards can be used following the UNIX glob pattern.\n\nExamples:\n\n- \"https://*\" : allows all HTTPS origin\n\n- \"https://*.github.com/tauri-apps/tauri\": allows any subdomain of \"github.com\" with the \"tauri-apps/api\" path\n\n- \"https://myapi.service.com/users/*\": allows access to any URLs that begins with \"https://myapi.service.com/users/\"",
+                              "type": "string"
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "path"
+                          ],
+                          "properties": {
+                            "app": {
+                              "description": "An application to open this path with, for example: xdg-open.",
+                              "allOf": [
+                                {
+                                  "$ref": "#/definitions/Application"
+                                }
+                              ]
+                            },
+                            "path": {
+                              "description": "A path that can be opened by the webview when using the Opener APIs.\n\nThe pattern can start with a variable that resolves to a system base directory. The variables are: `$AUDIO`, `$CACHE`, `$CONFIG`, `$DATA`, `$LOCALDATA`, `$DESKTOP`, `$DOCUMENT`, `$DOWNLOAD`, `$EXE`, `$FONT`, `$HOME`, `$PICTURE`, `$PUBLIC`, `$RUNTIME`, `$TEMPLATE`, `$VIDEO`, `$RESOURCE`, `$APP`, `$LOG`, `$TEMP`, `$APPCONFIG`, `$APPDATA`, `$APPLOCALDATA`, `$APPCACHE`, `$APPLOG`.",
+                              "type": "string"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  "deny": {
+                    "items": {
+                      "title": "OpenerScopeEntry",
+                      "description": "Opener scope entry.",
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "url"
+                          ],
+                          "properties": {
+                            "app": {
+                              "description": "An application to open this url with, for example: firefox.",
+                              "allOf": [
+                                {
+                                  "$ref": "#/definitions/Application"
+                                }
+                              ]
+                            },
+                            "url": {
+                              "description": "A URL that can be opened by the webview when using the Opener APIs.\n\nWildcards can be used following the UNIX glob pattern.\n\nExamples:\n\n- \"https://*\" : allows all HTTPS origin\n\n- \"https://*.github.com/tauri-apps/tauri\": allows any subdomain of \"github.com\" with the \"tauri-apps/api\" path\n\n- \"https://myapi.service.com/users/*\": allows access to any URLs that begins with \"https://myapi.service.com/users/\"",
+                              "type": "string"
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "path"
+                          ],
+                          "properties": {
+                            "app": {
+                              "description": "An application to open this path with, for example: xdg-open.",
+                              "allOf": [
+                                {
+                                  "$ref": "#/definitions/Application"
+                                }
+                              ]
+                            },
+                            "path": {
+                              "description": "A path that can be opened by the webview when using the Opener APIs.\n\nThe pattern can start with a variable that resolves to a system base directory. The variables are: `$AUDIO`, `$CACHE`, `$CONFIG`, `$DATA`, `$LOCALDATA`, `$DESKTOP`, `$DOCUMENT`, `$DOWNLOAD`, `$EXE`, `$FONT`, `$HOME`, `$PICTURE`, `$PUBLIC`, `$RUNTIME`, `$TEMPLATE`, `$VIDEO`, `$RESOURCE`, `$APP`, `$LOG`, `$TEMP`, `$APPCONFIG`, `$APPDATA`, `$APPLOCALDATA`, `$APPCACHE`, `$APPLOG`.",
+                              "type": "string"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              },
+              "properties": {
+                "identifier": {
+                  "description": "Identifier of the permission or permission set.",
+                  "allOf": [
+                    {
+                      "$ref": "#/definitions/Identifier"
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "identifier": {
+                    "anyOf": [
+                      {
                         "description": "This permission set configures which\nshell functionality is exposed by default.\n\n#### Granted Permissions\n\nIt allows to use the `open` functionality with a reasonable\nscope pre-configured. It will allow opening `http(s)://`,\n`tel:` and `mailto:` links.\n\n#### This default permission set includes:\n\n- `allow-open`",
                         "type": "string",
                         "const": "shell:default",
@@ -386,6 +554,498 @@
     "Identifier": {
       "description": "Permission identifier",
       "oneOf": [
+        {
+          "description": "Enables the check_for_updates command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-check-for-updates",
+          "markdownDescription": "Enables the check_for_updates command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the close_window command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-close-window",
+          "markdownDescription": "Enables the close_window command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the create_sync_room command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-create-sync-room",
+          "markdownDescription": "Enables the create_sync_room command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the decide_sync_join command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-decide-sync-join",
+          "markdownDescription": "Enables the decide_sync_join command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the end_sync_room command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-end-sync-room",
+          "markdownDescription": "Enables the end_sync_room command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the export_settings command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-export-settings",
+          "markdownDescription": "Enables the export_settings command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_app_version command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-app-version",
+          "markdownDescription": "Enables the get_app_version command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_config command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-config",
+          "markdownDescription": "Enables the get_config command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_current_lyrics command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-current-lyrics",
+          "markdownDescription": "Enables the get_current_lyrics command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_current_track command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-current-track",
+          "markdownDescription": "Enables the get_current_track command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_discord_invite command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-discord-invite",
+          "markdownDescription": "Enables the get_discord_invite command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_remote_info command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-remote-info",
+          "markdownDescription": "Enables the get_remote_info command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_sync_room_state command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-sync-room-state",
+          "markdownDescription": "Enables the get_sync_room_state command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the import_settings command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-import-settings",
+          "markdownDescription": "Enables the import_settings command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the install_update command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-install-update",
+          "markdownDescription": "Enables the install_update command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the join_sync_room command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-join-sync-room",
+          "markdownDescription": "Enables the join_sync_room command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the kick_sync_member command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-kick-sync-member",
+          "markdownDescription": "Enables the kick_sync_member command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the leave_sync_room command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-leave-sync-room",
+          "markdownDescription": "Enables the leave_sync_room command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the minimize_window command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-minimize-window",
+          "markdownDescription": "Enables the minimize_window command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open_logs_folder command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-logs-folder",
+          "markdownDescription": "Enables the open_logs_folder command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the regenerate_remote_token command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-regenerate-remote-token",
+          "markdownDescription": "Enables the regenerate_remote_token command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the reset_shortcuts command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-reset-shortcuts",
+          "markdownDescription": "Enables the reset_shortcuts command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the save_config command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-save-config",
+          "markdownDescription": "Enables the save_config command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the scan_local_music command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-scan-local-music",
+          "markdownDescription": "Enables the scan_local_music command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the send_sync_reaction command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-send-sync-reaction",
+          "markdownDescription": "Enables the send_sync_reaction command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_discord_invite command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-discord-invite",
+          "markdownDescription": "Enables the set_discord_invite command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_shortcut command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-shortcut",
+          "markdownDescription": "Enables the set_shortcut command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_sync_default_role command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-sync-default-role",
+          "markdownDescription": "Enables the set_sync_default_role command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_sync_member_role command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-sync-member-role",
+          "markdownDescription": "Enables the set_sync_member_role command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_sync_require_approval command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-sync-require-approval",
+          "markdownDescription": "Enables the set_sync_require_approval command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the sync_queue_move command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-sync-queue-move",
+          "markdownDescription": "Enables the sync_queue_move command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the sync_queue_play command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-sync-queue-play",
+          "markdownDescription": "Enables the sync_queue_play command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the sync_queue_remove command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-sync-queue-remove",
+          "markdownDescription": "Enables the sync_queue_remove command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the take_pending_join_code command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-take-pending-join-code",
+          "markdownDescription": "Enables the take_pending_join_code command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the test_sync_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-test-sync-connection",
+          "markdownDescription": "Enables the test_sync_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the toggle_maximize_window command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-toggle-maximize-window",
+          "markdownDescription": "Enables the toggle_maximize_window command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the transfer_sync_host command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-transfer-sync-host",
+          "markdownDescription": "Enables the transfer_sync_host command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the unban_sync_member command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-unban-sync-member",
+          "markdownDescription": "Enables the unban_sync_member command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the vote_sync_skip command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-vote-sync-skip",
+          "markdownDescription": "Enables the vote_sync_skip command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the ytmd_bridge command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-ytmd-bridge",
+          "markdownDescription": "Enables the ytmd_bridge command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the ytmd_subscribe command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-ytmd-subscribe",
+          "markdownDescription": "Enables the ytmd_subscribe command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the check_for_updates command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-check-for-updates",
+          "markdownDescription": "Denies the check_for_updates command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the close_window command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-close-window",
+          "markdownDescription": "Denies the close_window command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the create_sync_room command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-create-sync-room",
+          "markdownDescription": "Denies the create_sync_room command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the decide_sync_join command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-decide-sync-join",
+          "markdownDescription": "Denies the decide_sync_join command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the end_sync_room command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-end-sync-room",
+          "markdownDescription": "Denies the end_sync_room command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the export_settings command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-export-settings",
+          "markdownDescription": "Denies the export_settings command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_app_version command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-app-version",
+          "markdownDescription": "Denies the get_app_version command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_config command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-config",
+          "markdownDescription": "Denies the get_config command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_current_lyrics command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-current-lyrics",
+          "markdownDescription": "Denies the get_current_lyrics command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_current_track command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-current-track",
+          "markdownDescription": "Denies the get_current_track command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_discord_invite command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-discord-invite",
+          "markdownDescription": "Denies the get_discord_invite command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_remote_info command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-remote-info",
+          "markdownDescription": "Denies the get_remote_info command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_sync_room_state command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-sync-room-state",
+          "markdownDescription": "Denies the get_sync_room_state command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the import_settings command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-import-settings",
+          "markdownDescription": "Denies the import_settings command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the install_update command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-install-update",
+          "markdownDescription": "Denies the install_update command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the join_sync_room command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-join-sync-room",
+          "markdownDescription": "Denies the join_sync_room command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the kick_sync_member command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-kick-sync-member",
+          "markdownDescription": "Denies the kick_sync_member command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the leave_sync_room command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-leave-sync-room",
+          "markdownDescription": "Denies the leave_sync_room command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the minimize_window command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-minimize-window",
+          "markdownDescription": "Denies the minimize_window command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_logs_folder command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-logs-folder",
+          "markdownDescription": "Denies the open_logs_folder command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the regenerate_remote_token command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-regenerate-remote-token",
+          "markdownDescription": "Denies the regenerate_remote_token command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the reset_shortcuts command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-reset-shortcuts",
+          "markdownDescription": "Denies the reset_shortcuts command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the save_config command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-save-config",
+          "markdownDescription": "Denies the save_config command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the scan_local_music command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-scan-local-music",
+          "markdownDescription": "Denies the scan_local_music command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the send_sync_reaction command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-send-sync-reaction",
+          "markdownDescription": "Denies the send_sync_reaction command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_discord_invite command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-discord-invite",
+          "markdownDescription": "Denies the set_discord_invite command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_shortcut command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-shortcut",
+          "markdownDescription": "Denies the set_shortcut command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_sync_default_role command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-sync-default-role",
+          "markdownDescription": "Denies the set_sync_default_role command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_sync_member_role command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-sync-member-role",
+          "markdownDescription": "Denies the set_sync_member_role command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_sync_require_approval command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-sync-require-approval",
+          "markdownDescription": "Denies the set_sync_require_approval command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the sync_queue_move command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-sync-queue-move",
+          "markdownDescription": "Denies the sync_queue_move command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the sync_queue_play command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-sync-queue-play",
+          "markdownDescription": "Denies the sync_queue_play command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the sync_queue_remove command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-sync-queue-remove",
+          "markdownDescription": "Denies the sync_queue_remove command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the take_pending_join_code command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-take-pending-join-code",
+          "markdownDescription": "Denies the take_pending_join_code command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the test_sync_connection command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-test-sync-connection",
+          "markdownDescription": "Denies the test_sync_connection command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the toggle_maximize_window command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-toggle-maximize-window",
+          "markdownDescription": "Denies the toggle_maximize_window command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the transfer_sync_host command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-transfer-sync-host",
+          "markdownDescription": "Denies the transfer_sync_host command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the unban_sync_member command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-unban-sync-member",
+          "markdownDescription": "Denies the unban_sync_member command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the vote_sync_skip command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-vote-sync-skip",
+          "markdownDescription": "Denies the vote_sync_skip command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the ytmd_bridge command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-ytmd-bridge",
+          "markdownDescription": "Denies the ytmd_bridge command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the ytmd_subscribe command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-ytmd-subscribe",
+          "markdownDescription": "Denies the ytmd_subscribe command without any pre-configured scope."
+        },
         {
           "description": "Default core plugins set.\n#### This default permission set includes:\n\n- `core:path:default`\n- `core:event:default`\n- `core:window:default`\n- `core:webview:default`\n- `core:app:default`\n- `core:image:default`\n- `core:resources:default`\n- `core:menu:default`\n- `core:tray:default`",
           "type": "string",
@@ -2403,6 +3063,126 @@
           "markdownDescription": "Denies the unminimize command without any pre-configured scope."
         },
         {
+          "description": "Allows reading the opened deep link via the get_current command\n#### This default permission set includes:\n\n- `allow-get-current`",
+          "type": "string",
+          "const": "deep-link:default",
+          "markdownDescription": "Allows reading the opened deep link via the get_current command\n#### This default permission set includes:\n\n- `allow-get-current`"
+        },
+        {
+          "description": "Enables the get_current command without any pre-configured scope.",
+          "type": "string",
+          "const": "deep-link:allow-get-current",
+          "markdownDescription": "Enables the get_current command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the is_registered command without any pre-configured scope.",
+          "type": "string",
+          "const": "deep-link:allow-is-registered",
+          "markdownDescription": "Enables the is_registered command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the register command without any pre-configured scope.",
+          "type": "string",
+          "const": "deep-link:allow-register",
+          "markdownDescription": "Enables the register command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the unregister command without any pre-configured scope.",
+          "type": "string",
+          "const": "deep-link:allow-unregister",
+          "markdownDescription": "Enables the unregister command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_current command without any pre-configured scope.",
+          "type": "string",
+          "const": "deep-link:deny-get-current",
+          "markdownDescription": "Denies the get_current command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the is_registered command without any pre-configured scope.",
+          "type": "string",
+          "const": "deep-link:deny-is-registered",
+          "markdownDescription": "Denies the is_registered command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the register command without any pre-configured scope.",
+          "type": "string",
+          "const": "deep-link:deny-register",
+          "markdownDescription": "Denies the register command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the unregister command without any pre-configured scope.",
+          "type": "string",
+          "const": "deep-link:deny-unregister",
+          "markdownDescription": "Denies the unregister command without any pre-configured scope."
+        },
+        {
+          "description": "This permission set configures the types of dialogs\navailable from the dialog plugin.\n\n#### Granted Permissions\n\nAll dialog types are enabled.\n\n\n\n#### This default permission set includes:\n\n- `allow-message`\n- `allow-save`\n- `allow-open`",
+          "type": "string",
+          "const": "dialog:default",
+          "markdownDescription": "This permission set configures the types of dialogs\navailable from the dialog plugin.\n\n#### Granted Permissions\n\nAll dialog types are enabled.\n\n\n\n#### This default permission set includes:\n\n- `allow-message`\n- `allow-save`\n- `allow-open`"
+        },
+        {
+          "description": "Enables the ask command without any pre-configured scope. (**DEPRECATED**: This is now an alias to `allow-message` and will be removed in v3)",
+          "type": "string",
+          "const": "dialog:allow-ask",
+          "markdownDescription": "Enables the ask command without any pre-configured scope. (**DEPRECATED**: This is now an alias to `allow-message` and will be removed in v3)"
+        },
+        {
+          "description": "Enables the confirm command without any pre-configured scope. (**DEPRECATED**: This is now an alias to `allow-message` and will be removed in v3)",
+          "type": "string",
+          "const": "dialog:allow-confirm",
+          "markdownDescription": "Enables the confirm command without any pre-configured scope. (**DEPRECATED**: This is now an alias to `allow-message` and will be removed in v3)"
+        },
+        {
+          "description": "Enables the message command without any pre-configured scope.",
+          "type": "string",
+          "const": "dialog:allow-message",
+          "markdownDescription": "Enables the message command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open command without any pre-configured scope.",
+          "type": "string",
+          "const": "dialog:allow-open",
+          "markdownDescription": "Enables the open command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the save command without any pre-configured scope.",
+          "type": "string",
+          "const": "dialog:allow-save",
+          "markdownDescription": "Enables the save command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the ask command without any pre-configured scope. (**DEPRECATED**: This is now an alias to `deny-message` and will be removed in v3)",
+          "type": "string",
+          "const": "dialog:deny-ask",
+          "markdownDescription": "Denies the ask command without any pre-configured scope. (**DEPRECATED**: This is now an alias to `deny-message` and will be removed in v3)"
+        },
+        {
+          "description": "Denies the confirm command without any pre-configured scope. (**DEPRECATED**: This is now an alias to `deny-message` and will be removed in v3)",
+          "type": "string",
+          "const": "dialog:deny-confirm",
+          "markdownDescription": "Denies the confirm command without any pre-configured scope. (**DEPRECATED**: This is now an alias to `deny-message` and will be removed in v3)"
+        },
+        {
+          "description": "Denies the message command without any pre-configured scope.",
+          "type": "string",
+          "const": "dialog:deny-message",
+          "markdownDescription": "Denies the message command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open command without any pre-configured scope.",
+          "type": "string",
+          "const": "dialog:deny-open",
+          "markdownDescription": "Denies the open command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the save command without any pre-configured scope.",
+          "type": "string",
+          "const": "dialog:deny-save",
+          "markdownDescription": "Denies the save command without any pre-configured scope."
+        },
+        {
           "description": "No features are enabled by default, as we believe\nthe shortcuts can be inherently dangerous and it is\napplication specific if specific shortcuts should be\nregistered or unregistered.\n",
           "type": "string",
           "const": "global-shortcut:default",
@@ -2467,6 +3247,24 @@
           "type": "string",
           "const": "global-shortcut:deny-unregister-all",
           "markdownDescription": "Denies the unregister_all command without any pre-configured scope."
+        },
+        {
+          "description": "Allows the log command\n#### This default permission set includes:\n\n- `allow-log`",
+          "type": "string",
+          "const": "log:default",
+          "markdownDescription": "Allows the log command\n#### This default permission set includes:\n\n- `allow-log`"
+        },
+        {
+          "description": "Enables the log command without any pre-configured scope.",
+          "type": "string",
+          "const": "log:allow-log",
+          "markdownDescription": "Enables the log command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the log command without any pre-configured scope.",
+          "type": "string",
+          "const": "log:deny-log",
+          "markdownDescription": "Denies the log command without any pre-configured scope."
         },
         {
           "description": "This permission set configures which\nnotification features are by default exposed.\n\n#### Granted Permissions\n\nIt allows all notification related features.\n\n\n#### This default permission set includes:\n\n- `allow-is-permission-granted`\n- `allow-request-permission`\n- `allow-notify`\n- `allow-register-action-types`\n- `allow-register-listener`\n- `allow-cancel`\n- `allow-get-pending`\n- `allow-remove-active`\n- `allow-get-active`\n- `allow-check-permissions`\n- `allow-show`\n- `allow-batch`\n- `allow-list-channels`\n- `allow-delete-channel`\n- `allow-create-channel`\n- `allow-permission-state`",
@@ -2665,6 +3463,54 @@
           "type": "string",
           "const": "notification:deny-show",
           "markdownDescription": "Denies the show command without any pre-configured scope."
+        },
+        {
+          "description": "This permission set allows opening `mailto:`, `tel:`, `https://` and `http://` urls using their default application\nas well as reveal file in directories using default file explorer\n#### This default permission set includes:\n\n- `allow-open-url`\n- `allow-reveal-item-in-dir`\n- `allow-default-urls`",
+          "type": "string",
+          "const": "opener:default",
+          "markdownDescription": "This permission set allows opening `mailto:`, `tel:`, `https://` and `http://` urls using their default application\nas well as reveal file in directories using default file explorer\n#### This default permission set includes:\n\n- `allow-open-url`\n- `allow-reveal-item-in-dir`\n- `allow-default-urls`"
+        },
+        {
+          "description": "This enables opening `mailto:`, `tel:`, `https://` and `http://` urls using their default application.",
+          "type": "string",
+          "const": "opener:allow-default-urls",
+          "markdownDescription": "This enables opening `mailto:`, `tel:`, `https://` and `http://` urls using their default application."
+        },
+        {
+          "description": "Enables the open_path command without any pre-configured scope.",
+          "type": "string",
+          "const": "opener:allow-open-path",
+          "markdownDescription": "Enables the open_path command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open_url command without any pre-configured scope.",
+          "type": "string",
+          "const": "opener:allow-open-url",
+          "markdownDescription": "Enables the open_url command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the reveal_item_in_dir command without any pre-configured scope.",
+          "type": "string",
+          "const": "opener:allow-reveal-item-in-dir",
+          "markdownDescription": "Enables the reveal_item_in_dir command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_path command without any pre-configured scope.",
+          "type": "string",
+          "const": "opener:deny-open-path",
+          "markdownDescription": "Denies the open_path command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_url command without any pre-configured scope.",
+          "type": "string",
+          "const": "opener:deny-open-url",
+          "markdownDescription": "Denies the open_url command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the reveal_item_in_dir command without any pre-configured scope.",
+          "type": "string",
+          "const": "opener:deny-reveal-item-in-dir",
+          "markdownDescription": "Denies the reveal_item_in_dir command without any pre-configured scope."
         },
         {
           "description": "This permission set configures which\nshell functionality is exposed by default.\n\n#### Granted Permissions\n\nIt allows to use the `open` functionality with a reasonable\nscope pre-configured. It will allow opening `http(s)://`,\n`tel:` and `mailto:` links.\n\n#### This default permission set includes:\n\n- `allow-open`",
@@ -3053,6 +3899,23 @@
           "enum": [
             "iOS"
           ]
+        }
+      ]
+    },
+    "Application": {
+      "description": "Opener scope application.",
+      "anyOf": [
+        {
+          "description": "Open in default application.",
+          "type": "null"
+        },
+        {
+          "description": "If true, allow open with any application.",
+          "type": "boolean"
+        },
+        {
+          "description": "Allow specific application to open with.",
+          "type": "string"
         }
       ]
     },

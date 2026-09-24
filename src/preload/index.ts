@@ -12,19 +12,16 @@ import { AudioDspPlugin } from '../plugins/audio-dsp';
 import { AmbientLightingPlugin } from '../plugins/ambient';
 import { ThemeEnginePlugin } from '../plugins/themes';
 import { PipPlugin } from '../plugins/pip';
-import { DownloaderPlugin, startDownload } from '../plugins/downloader';
 import { LocalFilesPlugin } from '../plugins/local-files';
 import { SyncRoomPlugin, routeRoomPlayerCommand } from '../plugins/sync-room';
 import { PowerPlugin } from '../plugins/power';
-import { RemotePlugin, showQrModal } from '../plugins/remote';
+import { RemotePlugin } from '../plugins/remote';
 import { PluginContext, TrackInfo } from '../plugins/types';
 import { configureNavMenu, mountNavMenu } from './ui/navMenu';
 import { ICONS, showToast } from './ui/kit';
 import { t } from './ui/i18n';
-import { invokeBackend } from './bridgeClient';
+import { invokeBackend, pageEvents } from './bridgeClient';
 
-let currentActiveTrack: TrackInfo | null = null;
-let currentPluginContext: PluginContext | null = null;
 
 /** Fire-and-forget for menu actions: failures are logged and surfaced as a
  * toast rather than left as an unhandled rejection. */
@@ -42,24 +39,8 @@ function setupNavMenu() {
       { id: 'settings', iconPath: ICONS.tune, label: t().menuSettings, hint: 'Ctrl+,', onSelect: () => runAction('toggle_settings_window') },
       { id: 'local', iconPath: ICONS.folderMusic, label: t().menuLocal, onSelect: () => runAction('toggle_local_library_window') },
       { id: 'sync', iconPath: ICONS.group, label: t().menuSync, onSelect: () => runAction('toggle_sync_window') },
-      {
-        id: 'remote',
-        iconPath: ICONS.phone,
-        label: t().menuRemote,
-        onSelect: () => {
-          if (currentPluginContext) showQrModal(currentPluginContext);
-        }
-      },
-      { id: 'mini', iconPath: ICONS.miniPlayer, label: t().menuMiniPlayer, onSelect: () => runAction('toggle_mini_player') },
-      {
-        id: 'download',
-        iconPath: ICONS.download,
-        label: t().menuDownload,
-        dividerBefore: true,
-        onSelect: () => {
-          if (currentPluginContext) startDownload(currentPluginContext, currentActiveTrack);
-        }
-      }
+      { id: 'remote', iconPath: ICONS.phone, label: t().menuRemote, onSelect: () => runAction('open_remote_pairing') },
+      { id: 'mini', iconPath: ICONS.miniPlayer, label: t().menuMiniPlayer, onSelect: () => runAction('toggle_mini_player') }
     ]
   });
 }
@@ -130,7 +111,6 @@ async function initYTMD() {
     getVideoElement: () => PlayerBridge.getVideo()
   };
 
-  currentPluginContext = context;
 
   // Initialize plugins safely
   const registry = new PluginRegistry(context);
@@ -144,7 +124,6 @@ async function initYTMD() {
   registry.register(AmbientLightingPlugin);
   registry.register(ThemeEnginePlugin);
   registry.register(PipPlugin);
-  registry.register(DownloaderPlugin);
   registry.register(LocalFilesPlugin);
   registry.register(SyncRoomPlugin);
   registry.register(PowerPlugin);
@@ -187,7 +166,6 @@ async function initYTMD() {
   }
 
   observer.onTrackChange(async (track) => {
-    currentActiveTrack = track;
     lastSyncedPosition = track.currentTimeSecs || 0;
     lastSyncRealTime = Date.now();
     registry.handleTrackChange(track);
@@ -255,12 +233,9 @@ async function initYTMD() {
     }
   }
 
-  // Listen to Tauri IPC events
+  // App events, relayed by page_ipc.rs over the page's event channel.
   const listenEvent = <T>(eventName: string, handler: (payload: T) => void) => {
-    const tauri = window.__TAURI__;
-    if (tauri?.event?.listen) {
-      tauri.event.listen<T>(eventName, (e) => handler(e.payload));
-    }
+    void pageEvents.listen<T>(eventName, (e) => handler(e.payload));
   };
 
   listenEvent<string>('player-command', (payload) => handlePlayerCommand(payload));
@@ -310,7 +285,7 @@ async function initYTMD() {
 // there wastes resources, spams "event.listen not allowed" errors (those
 // origins aren't in our Tauri capability allowlist — by design, since they're
 // untrusted), and runs a duplicate copy of every setInterval polling loop
-// (adblock, lyrics, downloader, burger menu, DSP...) per ad iframe. Only the
+// (adblock, lyrics, burger menu, DSP...) per ad iframe. Only the
 // top-level music.youtube.com frame should ever run this.
 const isTopLevelYTMFrame =
   window.self === window.top && /(^|\.)music\.youtube\.com$/.test(location.hostname);
