@@ -49,7 +49,7 @@
     "category": "Music",
     "shortDescription": "Desktop client for YouTube Music",
     "longDescription": "Oscilla is a lightweight desktop client for YouTube Music with media keys, Discord status, synced lyrics, an equalizer, a phone remote and Listen Together sessions.",
-    "homepage": "https://github.com/KayZedd/oscilla",
+    "homepage": "https://github.com/KayZedd/Oscilla",
     "license": "MIT",
     "licenseFile": "../LICENSE",
     "linux": {

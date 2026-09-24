@@ -373,7 +373,7 @@ nową komendę mostu `window_action` (strona YTM nie ma uprawnień okna).
 (zależą od nich zainstalowane pluginy), stałe protokołu (etykiety HKDF, znacznik kopii
 `ytmd-settings`, więc stare kopie ustawień dalej się importują).
 
-Później tego samego dnia repo przemianowano na `KayZedd/oscilla`: adresy repo i strony
-zaproszeń (`https://kayzedd.github.io/oscilla/join/`) zaktualizowane. Stare zaproszenia
+Później tego samego dnia repo przemianowano na `KayZedd/Oscilla`: adresy repo i strony
+zaproszeń (`https://kayzedd.github.io/Oscilla/join/`) zaktualizowane. Stare zaproszenia
 z przyciskiem Discorda wskazujące `…/ytmd/join/` przestają działać (GitHub Pages nie
 przekierowuje po zmianie nazwy repo) — dotyczy tylko zaproszeń już wysłanych.

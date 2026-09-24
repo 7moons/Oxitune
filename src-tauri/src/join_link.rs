@@ -11,7 +11,7 @@ use parking_lot::Mutex;
 use tauri::{AppHandle, Emitter, Manager};
 
 /// Public landing page (GitHub Pages, `docs/join/index.html`).
-pub const INVITE_PAGE: &str = "https://kayzedd.github.io/oscilla/join/";
+pub const INVITE_PAGE: &str = "https://kayzedd.github.io/Oscilla/join/";
 
 /// A current (protocol 3) room code; see `sync_crypto::parse_room_code`.
 pub fn is_valid_room_code(code: &str) -> bool {

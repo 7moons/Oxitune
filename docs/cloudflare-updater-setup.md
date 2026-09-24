@@ -5,10 +5,10 @@
 The updater endpoint currently in `src-tauri/tauri.conf.json` is:
 
 ```
-https://github.com/KayZedd/oscilla/releases/latest/download/latest.json
+https://github.com/KayZedd/Oscilla/releases/latest/download/latest.json
 ```
 
-That URL only works for a **public** repo. While `KayZedd/oscilla` is private,
+That URL only works for a **public** repo. While `KayZedd/Oscilla` is private,
 GitHub returns 404 for unauthenticated requests to release assets — so the
 in-app updater can never see a release, no matter how many you publish.
 
@@ -45,7 +45,7 @@ other HTTPS endpoint.
 GitHub → Settings → Developer settings → **Fine-grained personal access
 tokens** → Generate new token:
 
-- Repository access: **Only select repositories** → `KayZedd/oscilla`
+- Repository access: **Only select repositories** → `KayZedd/Oscilla`
 - Permissions: **Contents** → Read-only (this alone covers releases and
   release assets). Leave everything else on "No access".
 - Set an expiration you're comfortable rotating on (e.g. 1 year).
@@ -146,7 +146,7 @@ of GitHub directly.
 ## Reverting once the repo is public
 
 1. `src-tauri/tauri.conf.json` → set the endpoint back to
-   `https://github.com/KayZedd/oscilla/releases/latest/download/latest.json`.
+   `https://github.com/KayZedd/Oscilla/releases/latest/download/latest.json`.
 2. `bunx wrangler delete` inside `worker/` (optional — or just leave it
    running unused, it costs nothing idle).
 3. Revoke the fine-grained PAT from step 1, since nothing needs it anymore.
