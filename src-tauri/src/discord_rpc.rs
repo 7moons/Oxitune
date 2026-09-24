@@ -425,7 +425,7 @@ pub async fn run_presence_loop<T: PresenceTransport>(
                         retry_at = None;
                     }
                     Err(e) => {
-                        log::debug!("[YTMD Discord RPC] {e}; retrying in {:?}", cfg.retry_after);
+                        log::debug!("[Oscilla Discord RPC] {e}; retrying in {:?}", cfg.retry_after);
                         shown = None;
                         retry_at = Some(now + cfg.retry_after);
                     }
@@ -531,7 +531,7 @@ impl Connection {
                 OP_CLOSE => return Err(format!("Discord closed the connection: {body}")),
                 _ if body.get("nonce").and_then(Value::as_str) == Some(nonce) => {
                     if body.get("evt").and_then(Value::as_str) == Some("ERROR") {
-                        log::warn!("[YTMD Discord RPC] Discord rejected the activity: {}", body["data"]);
+                        log::warn!("[Oscilla Discord RPC] Discord rejected the activity: {}", body["data"]);
                     }
                     return Ok(());
                 }
@@ -566,7 +566,7 @@ impl PresenceTransport for IpcTransport {
             Err(e) => Err(e),
         };
         if let Err(e) = &result {
-            log::warn!("[YTMD Discord RPC] Connection lost: {e}");
+            log::warn!("[Oscilla Discord RPC] Connection lost: {e}");
             self.conn = None;
         }
         result
@@ -608,11 +608,11 @@ async fn connect_discord() -> Option<Connection> {
             let deadline = Instant::now() + Duration::from_secs(2);
             match conn.next_frame(deadline).await {
                 Ok(Some((opcode, body))) if is_ready_frame(opcode, &body) => {
-                    log::info!("[YTMD Discord RPC] Connected to {path} with client ID {client_id}");
+                    log::info!("[Oscilla Discord RPC] Connected to {path} with client ID {client_id}");
                     return Some(conn);
                 }
                 other => {
-                    log::debug!("[YTMD Discord RPC] Handshake rejected on {path} for client ID {client_id}: {other:?}");
+                    log::debug!("[Oscilla Discord RPC] Handshake rejected on {path} for client ID {client_id}: {other:?}");
                 }
             }
         }
@@ -795,8 +795,8 @@ mod tests {
     #[test]
     fn test_invite_adds_listen_along_and_party() {
         let invite = crate::join_link::DiscordInvite {
-            url: crate::join_link::invite_url("YTMD-ABCDEFGH23"),
-            party_id: crate::join_link::party_id("YTMD-ABCDEFGH23"),
+            url: crate::join_link::invite_url("OSC-ABCDEFGH23"),
+            party_id: crate::join_link::party_id("OSC-ABCDEFGH23"),
             members: 3,
             max_members: 16,
         };

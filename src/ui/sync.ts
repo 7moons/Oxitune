@@ -126,7 +126,7 @@ async function invokeSync(cmd: string, args: Record<string, unknown>): Promise<b
     await window.__TAURI__.core.invoke(cmd, args);
     return true;
   } catch (e) {
-    console.error(`[YTMD Sync] ${cmd} failed:`, e);
+    console.error(`[Oscilla Sync] ${cmd} failed:`, e);
     showToast(errorMessage(e));
     return false;
   }
@@ -519,7 +519,7 @@ document.addEventListener('DOMContentLoaded', () => {
       activeRoom = room;
       renderRoomView(room);
     } catch (e) {
-      console.error('[YTMD Sync] Failed to create room:', e);
+      console.error('[Oscilla Sync] Failed to create room:', e);
       showFormError('host-error', errorMessage(e));
     } finally {
       createInFlight = false;
@@ -567,7 +567,7 @@ document.addEventListener('DOMContentLoaded', () => {
       activeRoom = room;
       renderRoomView(room);
     } catch (e) {
-      console.error('[YTMD Sync] Failed to join room:', e);
+      console.error('[Oscilla Sync] Failed to join room:', e);
       showFormError('guest-error', errorMessage(e));
     } finally {
       joinInFlight = false;
@@ -589,7 +589,7 @@ document.addEventListener('DOMContentLoaded', () => {
       await navigator.clipboard.writeText(activeRoom.room_code);
       showToast(tr('sync.copied'));
     } catch (e) {
-      console.error('[YTMD Sync] Copy failed:', e);
+      console.error('[Oscilla Sync] Copy failed:', e);
       showToast(tr('common.unknownError'));
     }
   });
@@ -604,7 +604,7 @@ document.addEventListener('DOMContentLoaded', () => {
       activeRoom = null;
       renderRoomView(null);
     } catch (e) {
-      console.error('[YTMD Sync] Failed to leave room:', e);
+      console.error('[Oscilla Sync] Failed to leave room:', e);
       showFormError('leave-room-error', tr('sync.error.leave', { reason: errorMessage(e) }));
     } finally {
       leaveBtn.disabled = false;
@@ -633,7 +633,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // A `ytmd://join/<code>` link: fill in the code, the user still joins.
+  // An `oscilla://join/<code>` (or older `ytmd://`) link: fill in the code, the user still joins.
   const useJoinLink = (code: string | null | undefined) => {
     if (!code || activeRoom || !joinCode) return;
     selectTab(false);

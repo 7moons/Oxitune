@@ -73,7 +73,7 @@ function run(action: WindowAction): void {
     .then((maximized) => {
       if (action === 'toggle_maximize') renderMaximized(maximized);
     })
-    .catch((e: unknown) => console.error('[YTMD] Window action failed:', e));
+    .catch((e: unknown) => console.error('[Oscilla] Window action failed:', e));
 }
 
 /** True when a press on `target` should move the window rather than click something. */

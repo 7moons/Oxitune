@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "apiVersion": 1,
   "description": "Removes ad scheduling data from YouTube Music's responses, and mutes, hides and skips anything that slips through. Never touches playback timing.",
-  "author": "YTMD",
+  "author": "Oscilla",
   "homepage": "https://github.com/KayZedd/oscilla-plugins",
   "matches": ["https://music.youtube.com/*"],
   "runAt": "document-start",

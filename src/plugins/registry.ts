@@ -101,12 +101,12 @@ export class PluginRegistry {
   }
 
   private failed(plugin: YTMDPlugin, what: string, error: unknown): void {
-    console.error(`[YTMD] Error in plugin ${plugin.id} ${what}:`, error);
+    console.error(`[Oscilla] Error in plugin ${plugin.id} ${what}:`, error);
     const count = (this.errors.get(plugin.id) ?? 0) + 1;
     this.errors.set(plugin.id, count);
     this.onError(plugin, error);
     if (count >= MAX_PLUGIN_ERRORS && this.enabledPlugins.has(plugin.id)) {
-      console.warn(`[YTMD] ${plugin.id} switched off after ${count} errors`);
+      console.warn(`[Oscilla] ${plugin.id} switched off after ${count} errors`);
       void this.disable(plugin.id);
     }
   }

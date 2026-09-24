@@ -53,13 +53,13 @@ function subscribe(): void {
       try {
         handler({ payload: msg.payload });
       } catch (e) {
-        console.error(`[YTMD] ${msg.event} handler failed:`, e);
+        console.error(`[Oscilla] ${msg.event} handler failed:`, e);
       }
     }
   };
   core.invoke('ytmd_subscribe', { channel }).catch((e: unknown) => {
     subscribed = false;
-    console.error('[YTMD] Event feed unavailable:', e);
+    console.error('[Oscilla] Event feed unavailable:', e);
   });
 }
 

@@ -1,5 +1,5 @@
 /**
- * YTMD's entry point in YouTube Music's top bar: one round icon button next
+ * Oscilla's entry point in YouTube Music's top bar: one round icon button next
  * to YTM's own cast/avatar buttons that opens a YTM-style menu, plus a
  * "listening together" chip that only exists while in a sync room.
  */

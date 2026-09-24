@@ -1,13 +1,13 @@
 [package]
-name = "ytmd"
+name = "oscilla"
 version = "0.2.0"
-description = "YTMD - desktop client for YouTube Music, powered by Tauri v2"
+description = "Oscilla - desktop client for YouTube Music, powered by Tauri v2"
 authors = ["KayZed"]
 license = "MIT"
 edition = "2021"
 
 [lib]
-name = "ytmd_lib"
+name = "oscilla_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
@@ -39,7 +39,7 @@ lofty = "0.25.1"
 tauri-plugin-updater = "2.0.0"
 tauri-plugin-single-instance = { version = "2.0.0", features = ["deep-link"] }
 tauri-plugin-deep-link = "2"
-# Log files in ~/.ytmd/logs (a release build has no console to log to).
+# Log files in ~/.oscilla/logs (a release build has no console to log to).
 tauri-plugin-log = "2"
 # Settings: open the logs folder, pick files for settings backup.
 tauri-plugin-opener = "2"
@@ -76,7 +76,7 @@ zbus = { version = "5", default-features = false, features = ["async-io"] }
 
 [target.'cfg(windows)'.dependencies]
 webview2-com = "0.38"
-windows = { version = "0.61", features = ["Win32_System_Com", "Win32_System_Power", "Win32_System_RemoteDesktop", "Win32_Foundation", "Win32_Globalization", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi"] }
+windows = { version = "0.61", features = ["Win32_System_Com", "Win32_System_Power", "Win32_System_RemoteDesktop", "Win32_Foundation", "Win32_Globalization", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_System_Registry"] }
 
 [dev-dependencies]
 # The mock runtime, to test the IPC permissions (acl_tests.rs).

@@ -18,7 +18,7 @@ export const NotificationsPlugin: YTMDPlugin = {
         artist: track.artist
       });
     } catch (e) {
-      console.warn('[YTMD] Notification dispatch failed:', e);
+      console.warn('[Oscilla] Notification dispatch failed:', e);
     }
   }
 };

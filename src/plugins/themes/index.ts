@@ -76,7 +76,7 @@ export const ThemeEnginePlugin: YTMDPlugin = {
       unlistenPromises.forEach((p) => p.then((unlisten) => unlisten()));
     };
 
-    console.log('[YTMD] Theme engine active.');
+    console.log('[Oscilla] Theme engine active.');
   },
 
   onDestroy() {

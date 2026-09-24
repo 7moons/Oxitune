@@ -5,7 +5,7 @@
 //! address bar. Every request must carry that cookie (or `?t=`), and a
 //! `Host` that is an IP literal or `localhost` on our port: a DNS-rebinding
 //! page always sends its own domain name there. The token lives in
-//! `~/.ytmd/remote_token` so a saved phone bookmark survives restarts;
+//! `~/.oscilla/remote_token` so a saved phone bookmark survives restarts;
 //! "Revoke paired phones" in Settings replaces it and drops every open
 //! connection.
 //!
@@ -198,7 +198,7 @@ pub fn load_or_create_token(path: &Path) -> String {
     }
     let token = generate_token();
     if let Err(e) = write_token(path, &token) {
-        log::warn!("[YTMD Remote] Couldn't save the pairing token: {e}");
+        log::warn!("[Oscilla Remote] Couldn't save the pairing token: {e}");
     }
     token
 }
@@ -635,9 +635,9 @@ fn security_headers(res: &mut Response, host: &str) {
 
 fn forbidden() -> Response {
     let body = "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'>\
-        <title>YTMD</title><body style='font:16px Roboto,Arial,sans-serif;background:#030303;color:#fff;padding:16px'>\
-        <p>Scan the QR code in YTMD again (menu → Phone remote).</p>\
-        <p style='color:#aaa'>Zeskanuj ponownie kod QR w YTMD (menu → Pilot w telefonie).</p>";
+        <title>Oscilla</title><body style='font:16px Roboto,Arial,sans-serif;background:#030303;color:#fff;padding:16px'>\
+        <p>Scan the QR code in Oscilla again (menu → Phone remote).</p>\
+        <p style='color:#aaa'>Zeskanuj ponownie kod QR w Oscilla (menu → Pilot w telefonie).</p>";
     (StatusCode::FORBIDDEN, [(header::CONTENT_TYPE, "text/html; charset=utf-8")], body).into_response()
 }
 
@@ -720,8 +720,8 @@ async fn guard(State(ctx): State<Arc<ServerCtx>>, req: Request, next: Next) -> R
 struct RemoteAssets;
 
 const NOT_BUILT_PAGE: &str = "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'>\
-    <title>YTMD</title><body style='font:16px Roboto,Arial,sans-serif;background:#030303;color:#fff;padding:16px'>\
-    <p>The phone remote wasn't built into this copy of YTMD (run <code>bun run build</code>).</p>";
+    <title>Oscilla</title><body style='font:16px Roboto,Arial,sans-serif;background:#030303;color:#fff;padding:16px'>\
+    <p>The phone remote wasn't built into this copy of Oscilla (run <code>bun run build</code>).</p>";
 
 fn embedded(path: &str) -> Option<Response> {
     let file = RemoteAssets::get(path)?;
@@ -812,7 +812,7 @@ async fn ws_session(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
                     if budget.take_at(std::time::Instant::now()) {
                         handle_incoming(&ctx, text.as_str(), &reply_tx);
                     } else {
-                        log::debug!("[YTMD Remote] Dropping a phone message over the rate limit");
+                        log::debug!("[Oscilla Remote] Dropping a phone message over the rate limit");
                     }
                 }
                 Some(Ok(Message::Close(_))) | None | Some(Err(_)) => return,
@@ -840,7 +840,7 @@ fn handle_incoming(ctx: &Arc<ServerCtx>, text: &str, reply_tx: &mpsc::Sender<Ser
     let msg: ClientMsg = match serde_json::from_str(text) {
         Ok(m) => m,
         Err(e) => {
-            log::debug!("[YTMD Remote] Ignoring a malformed phone message: {e}");
+            log::debug!("[Oscilla Remote] Ignoring a malformed phone message: {e}");
             return;
         }
     };
@@ -1067,7 +1067,7 @@ fn follow_app_events(app: &AppHandle, status: &Arc<RemoteServerStatus>) {
 async fn serve(listener: tokio::net::TcpListener, ctx: Arc<ServerCtx>) {
     let app = router(ctx).into_make_service_with_connect_info::<SocketAddr>();
     if let Err(e) = axum::serve(listener, app).await {
-        log::warn!("[YTMD Remote] Server stopped: {e}");
+        log::warn!("[Oscilla Remote] Server stopped: {e}");
     }
 }
 
@@ -1093,12 +1093,12 @@ pub fn start_remote_server(app_handle: AppHandle, port: u16, bind: &str, status:
     tauri::async_runtime::spawn(async move {
         let listener = match tokio::net::TcpListener::bind(addr).await {
             Ok(l) => {
-                log::info!("[YTMD Remote] Server listening on http://{addr}");
+                log::info!("[Oscilla Remote] Server listening on http://{addr}");
                 status.mark_bound(port);
                 l
             }
             Err(e) => {
-                log::warn!("[YTMD Remote] Failed to bind port {port}: {e}");
+                log::warn!("[Oscilla Remote] Failed to bind port {port}: {e}");
                 return;
             }
         };
@@ -1257,7 +1257,7 @@ mod tests {
     fn test_room_view_and_queue_from_room_state() {
         use crate::sync_room::{MemberRole, QueueItem, RoomMember, RoomState};
         let room = RoomState {
-            room_code: "YTMD-SECRET".into(),
+            room_code: "OSC-SECRET".into(),
             is_host: false,
             current_user_id: "m2".into(),
             members: vec![
@@ -1287,7 +1287,7 @@ mod tests {
         assert_eq!(view.members[1].role, "listener");
         assert_eq!(view.votes_needed, 2);
         let text = serde_json::to_string(&view).unwrap();
-        assert!(!text.contains("YTMD-SECRET"), "the room code (also its key) never goes to phones");
+        assert!(!text.contains("OSC-SECRET"), "the room code (also its key) never goes to phones");
         let queue = snap.queue().unwrap();
         assert!(queue.shared);
         assert_eq!(queue.items[0].id, "q1");

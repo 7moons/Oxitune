@@ -35,7 +35,7 @@ export class SkipSilenceController {
         this.consecutiveSilentTicks++;
         // If silence persists for 2 consecutive ticks, fast-forward 1s
         if (this.consecutiveSilentTicks >= 2 && currentTimeSecs < 12) {
-          console.log(`[YTMD Skip Silence] Intro silence detected (${powerDb.toFixed(1)} dB). Fast forwarding...`);
+          console.log(`[Oscilla Skip Silence] Intro silence detected (${powerDb.toFixed(1)} dB). Fast forwarding...`);
           video.currentTime += 1.0;
           this.consecutiveSilentTicks = 0;
         }
@@ -53,7 +53,7 @@ export class SkipSilenceController {
       if (powerDb < this.silenceThresholdDb) {
         this.consecutiveSilentTicks++;
         if (this.consecutiveSilentTicks >= 3) {
-          console.log(`[YTMD Skip Silence] Outro silence detected (${powerDb.toFixed(1)} dB). Advancing to next track...`);
+          console.log(`[Oscilla Skip Silence] Outro silence detected (${powerDb.toFixed(1)} dB). Advancing to next track...`);
           this.consecutiveSilentTicks = 0;
           PlayerBridge.next();
         }

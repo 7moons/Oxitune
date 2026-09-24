@@ -42,14 +42,14 @@ pub struct AppState {
     pub discord_rpc: Mutex<Option<DiscordRpcHandle>>,
     pub mpris: Mutex<Option<MprisManager>>,
     pub current_track: Mutex<Option<TrackPayload>>,
-    /// Listen Together invites: `ytmd://join` links and the Discord button.
+    /// Listen Together invites: `oscilla://join` (and older `ytmd://join`) links and the Discord button.
     pub invites: join_link::InviteState,
     pub sync_room: Arc<SyncRoomManager>,
     pub power_manager: PowerManager,
     pub remote_status: Arc<remote_server::RemoteServerStatus>,
-    /// Where tauri-plugin-log writes (`~/.ytmd/logs`).
+    /// Where tauri-plugin-log writes (`~/.oscilla/logs`).
     pub logs_dir: std::path::PathBuf,
-    /// Last song and position, for resume on launch (`~/.ytmd/session.json`).
+    /// Last song and position, for resume on launch (`~/.oscilla/session.json`).
     pub session: session::SessionStore,
     pub lyrics: lyrics::LyricsState,
 }
@@ -176,11 +176,11 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             tray::show_main_window(app);
         }))
-        // `ytmd://join/<code>` links (the Discord "Listen along" page). With
+        // `oscilla://join/<code>` links (and `ytmd://` from before the rename) (the Discord "Listen along" page). With
         // single-instance's `deep-link` feature a link opened while we run
         // arrives through `on_open_url` below, not as a second process.
         .plugin(tauri_plugin_deep_link::init())
-        // Every log::info!/warn!/error! goes to ~/.ytmd/logs/ytmd.log (and the
+        // Every log::info!/warn!/error! goes to ~/.oscilla/logs/oscilla.log (and the
         // console in dev): a release build has no console, so without files
         // a user's "it doesn't work" left nothing to look at.
         .plugin(
@@ -189,7 +189,7 @@ pub fn run() {
                 .target(tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout))
                 .target(tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Folder {
                     path: logs_dir,
-                    file_name: Some("ytmd".into()),
+                    file_name: Some("oscilla".into()),
                 }))
                 .level(log::LevelFilter::Info)
                 .level_for("rumqttc", log::LevelFilter::Warn)
@@ -226,7 +226,7 @@ pub fn run() {
             let handle = app.handle().clone();
 
             // The local library plays files through the asset protocol,
-            // opened to the library folder when it's scanned. YTMD's own
+            // opened to the library folder when it's scanned. Oscilla's own
             // folder (config, room identity, remote token) is never
             // servable, even if the library is set to the home folder.
             if let Some(dir) = app_state_for_setup.config_manager.config_path().parent() {
@@ -260,6 +260,7 @@ pub fn run() {
             }
 
             // The login item follows the setting (e.g. after a config edit).
+            commands::remove_legacy_autostart();
             commands::apply_autostart(&handle, initial_autostart);
 
             // Global shortcuts, as configured in Settings.
@@ -290,7 +291,7 @@ pub fn run() {
                 // have to do it themselves.
                 #[cfg(any(target_os = "linux", all(debug_assertions, windows)))]
                 if let Err(e) = app.deep_link().register_all() {
-                    log::warn!("couldn't register the ytmd:// link scheme: {e}");
+                    log::warn!("couldn't register the oscilla:// link schemes: {e}");
                 }
                 if let Ok(Some(urls)) = app.deep_link().get_current() {
                     join_link::handle_urls(&handle, urls.iter().map(|u| u.as_str()));
@@ -307,7 +308,7 @@ pub fn run() {
                 "main",
                 WebviewUrl::External(start_url.parse().expect("valid youtube music url")),
             )
-            .title("YTMD")
+            .title("Oscilla")
             .inner_size(1280.0, 820.0)
             // YouTube Music's own UI isn't built for anything much narrower than this: its
             // right-side flyout panels (queue, "up next") are a fixed ~400-460px wide and
@@ -334,7 +335,7 @@ pub fn run() {
             .on_navigation(|url| {
                 let ok = nav_policy::is_allowed_navigation(url);
                 if !ok {
-                    log::warn!("[YTMD] blocked navigation of the main window to {}", url.origin().ascii_serialization());
+                    log::warn!("[Oscilla] blocked navigation of the main window to {}", url.origin().ascii_serialization());
                 }
                 ok
             })
@@ -345,7 +346,7 @@ pub fn run() {
                     if nav_policy::opens_in_browser(&url) {
                         use tauri_plugin_opener::OpenerExt;
                         if let Err(e) = handle.opener().open_url(url.as_str(), None::<&str>) {
-                            log::warn!("[YTMD] couldn't open a link in the browser: {e}");
+                            log::warn!("[Oscilla] couldn't open a link in the browser: {e}");
                         }
                     }
                     tauri::webview::NewWindowResponse::Deny
@@ -363,11 +364,11 @@ pub fn run() {
                 if payload.event() == tauri::webview::PageLoadEvent::Finished
                     && first_load.swap(false, std::sync::atomic::Ordering::SeqCst)
                 {
-                    log::info!("[YTMD] first page loaded {} ms after start", started.elapsed().as_millis());
+                    log::info!("[Oscilla] first page loaded {} ms after start", started.elapsed().as_millis());
                 }
             });
             let main_win = main_builder.build()?;
-            log::info!("[YTMD] main window created {} ms after start", started.elapsed().as_millis());
+            log::info!("[Oscilla] main window created {} ms after start", started.elapsed().as_millis());
             connectivity::watch_startup(handle.clone());
             plugins::commands::start_update_checks(handle.clone(), plugins_for_setup.clone());
 

@@ -1,8 +1,8 @@
-# YTMD Plugin API (version 1)
+# Oscilla Plugin API (version 1)
 
-Plugins extend YTMD inside the YouTube Music page: restyle it, react to
+Plugins extend Oscilla inside the YouTube Music page: restyle it, react to
 what's playing, control the player, keep their own settings and data. Every
-plugin, including YTMD's own built-in ones, goes through the same API: a
+plugin, including Oscilla's own built-in ones, goes through the same API: a
 `manifest.json` that says what it is and what it may do, and a context that
 gives it exactly that.
 
@@ -13,7 +13,7 @@ gives it exactly that.
   in developer mode.
 - The example to start from: [`_plugins-export/plugins/app.ytmd.example-theme`](../_plugins-export/plugins/app.ytmd.example-theme).
   The ad blocker and SponsorBlock in the same folder are real-world plugins
-  (they used to be part of YTMD).
+  (they used to be part of Oscilla).
 
 ## A plugin
 
@@ -59,7 +59,7 @@ ytmd.player.onTrackChange((track) => {
 | `version` | yes | Semver. Compared to decide updates. |
 | `apiVersion` | yes | `1`. A plugin for another API version is refused. |
 | `homepage` | no | `https://` URL. |
-| `matches` | yes | `https://music.youtube.com/…` patterns (YTMD only runs plugins there). |
+| `matches` | yes | `https://music.youtube.com/…` patterns (Oscilla only runs plugins there). |
 | `runAt` | no | `document-idle` (default) or `document-start` (before YouTube Music's own scripts). |
 | `permissions` | no | From the closed set below. |
 | `hosts` | with `network` | Plain host names the plugin may fetch from (`api.example.com`), https only. |
@@ -81,7 +81,7 @@ A whole plugin is at most 5 MB and 200 files.
 | `ui` | `ytmd.ui`: toasts, styles; the manifest's `styles` | Show messages and restyle YouTube Music |
 | `media:save` | `ytmd.media`: save a song (by video id) with yt-dlp into the user's folder for saved songs | Save songs to your folder for saved songs (with yt-dlp) |
 
-`internal:*` permissions exist for YTMD's built-in plugins (config, lyrics,
+`internal:*` permissions exist for Oscilla's built-in plugins (config, lyrics,
 Listen Together, phone remote, power, windows, notifications) and are
 refused in any other manifest.
 
@@ -140,7 +140,7 @@ interface Ytmd {
     onProgress(fn: (p: MediaProgress) => void): () => void;
     tools(): Promise<{ ytdlp: 'managed' | 'system' | 'missing'; ffmpeg: 'managed' | 'system' | 'missing';
                        ytdlpVersion: string | null; installable: boolean; installing: boolean }>;
-    installTools(): Promise<'done' | 'declined' | 'failed'>;   // YTMD asks the user first
+    installTools(): Promise<'done' | 'declined' | 'failed'>;   // Oscilla asks the user first
     onToolsProgress(fn: (p: { state: string; tool: string | null; percent: number; error: string | null }) => void): () => void;
   };
 }
@@ -177,15 +177,15 @@ falls back to `default`.
 
 ### Saving songs (`media:save`)
 
-YTMD runs yt-dlp for the plugin; the plugin never runs anything itself.
-yt-dlp and ffmpeg come from the system, or YTMD installs them into
-`~/.ytmd/tools/` when the plugin calls `installTools()` **and the user
-agrees in a dialog YTMD shows itself** (or presses Install in Settings):
+Oscilla runs yt-dlp for the plugin; the plugin never runs anything itself.
+yt-dlp and ffmpeg come from the system, or Oscilla installs them into
+`~/.oscilla/tools/` when the plugin calls `installTools()` **and the user
+agrees in a dialog Oscilla shows itself** (or presses Install in Settings):
 from yt-dlp's latest GitHub release and yt-dlp's FFmpeg-Builds, https to
 GitHub hosts only, checked against the SHA-256 checksum file published with
 each release; only `ffmpeg`/`ffprobe` are taken from the archive, under
-fixed names. YTMD refreshes its yt-dlp weekly. The user picks the folder in Settings → Plugins (default: the system's music folder
-+ `YTMD`). The plugin supplies only an 11-character video id and a format
+fixed names. Oscilla refreshes its yt-dlp weekly. The user picks the folder in Settings → Plugins (default: the system's music folder
++ `Oscilla`). The plugin supplies only an 11-character video id and a format
 from `formats`; the command line is fixed (`--ignore-config`, no shell, the
 URL is always `music.youtube.com/watch?v=<id>`, files go only into that
 folder, existing files are never overwritten). Two songs are saved at a
@@ -198,7 +198,7 @@ it off or removing it cancels them. The example is
 - An enabled plugin's code runs once per page load, at `runAt`.
 - **Switching a plugin off** takes effect right away: `onUnload` callbacks
   run, its styles are removed and it stops receiving events.
-- **Switching on, installing and updating** take effect after YTMD restarts
+- **Switching on, installing and updating** take effect after Oscilla restarts
   (Settings shows a Restart button; the song resumes where it was). The
   plugin's code is added to the page when the main window is created, which
   is also how it runs before YouTube Music's own scripts.
@@ -213,13 +213,13 @@ Installed plugins run **in the YouTube Music page** — the same JavaScript
 realm as YouTube's own scripts, like a browser user script. That has
 consequences plugin users and authors should know:
 
-- The real security boundary is what the page itself can do. YTMD gives the
+- The real security boundary is what the page itself can do. Oscilla gives the
   YouTube Music page only a narrow bridge (player state and control,
   lyrics, Listen Together as a member, the phone remote's view): no files,
   no settings, no updater, no shell (see `src-tauri/src/bridge.rs` and
   `capabilities/main.json`). A plugin can never do more than that, whatever
   its manifest says.
-- Within that, the manifest is enforced where YTMD can enforce it: storage
+- Within that, the manifest is enforced where Oscilla can enforce it: storage
   and network are checked in the backend against the plugin's install
   (enabled, granted, `hosts`), and `ytmd` only has the granted groups.
   Inside the page, a malicious plugin can still reach page-level things
@@ -227,8 +227,8 @@ consequences plugin users and authors should know:
   script YouTube runs could. Permissions describe and limit a
   well-behaved plugin; **trust comes from the registry you added**.
 - The Tauri globals are shadowed in the plugin's scope and plugins get no
-  API to the rest of YTMD, but that's hygiene, not a sandbox.
-- Registries: YTMD has the official one built in (its key is compiled in;
+  API to the rest of Oscilla, but that's hygiene, not a sandbox.
+- Registries: Oscilla has the official one built in (its key is compiled in;
   the user can remove it) and the user can add others. A registry's
   `index.json` must be signed (minisign, Ed25519) by that registry's key; each archive
   must match the SHA-256 in that signed index, and the manifest inside
@@ -252,21 +252,21 @@ A registry is a static site with:
 repository: plugins, the index builder, and a GitHub Actions workflow that
 builds, hashes, signs and publishes on every tag.
 
-YTMD checks every registry for updates shortly after start and then every
+Oscilla checks every registry for updates shortly after start and then every
 6/12/24 hours (Settings → Plugins; 0 = never).
 
 ## Developing a plugin
 
 1. Write `manifest.json` and `main.js` in a folder.
 2. Settings → Plugins → Developer → **Choose folder**, read the warning,
-   pick the folder, switch the plugin on, restart YTMD.
-3. Edit, restart YTMD to reload. Logs from `ytmd.log` appear in the page's
+   pick the folder, switch the plugin on, restart Oscilla.
+3. Edit, restart Oscilla to reload. Logs from `oscilla.log` appear in the page's
    console (developer tools in a debug build).
 4. To publish, open a pull request against a registry repository.
 
 ## Built-in plugins
 
-YTMD's own features (lyrics, equalizer, ambient lighting, Listen Together,
+Oscilla's own features (lyrics, equalizer, ambient lighting, Listen Together,
 phone remote, …) are plugins with manifests in `src/plugins/*/manifest.json`
 (ids `app.ytmd.*`), written in TypeScript against `PluginContext` in
 `src/plugins/types.ts`: the same hooks (`onInit`, `onTrackChange`,
@@ -277,5 +277,5 @@ backend command or listens to an event its permissions don't cover.
 ## Versioning
 
 `apiVersion` changes only for breaking changes; additions (new optional
-groups, fields, events) keep it. YTMD refuses plugins for an API version it
-doesn't speak and tells the user a newer YTMD is needed.
+groups, fields, events) keep it. Oscilla refuses plugins for an API version it
+doesn't speak and tells the user a newer Oscilla is needed.

@@ -6,12 +6,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
-/// The plugin API this YTMD speaks. A manifest asking for another is
-/// refused (and says which YTMD it needs).
+/// The plugin API this Oscilla speaks. A manifest asking for another is
+/// refused (and says which Oscilla it needs).
 pub const API_VERSION: u32 = 1;
 
 /// The closed set of permissions. `external` ones can be granted to any
-/// plugin; the rest belong to YTMD's built-in plugins only.
+/// plugin; the rest belong to Oscilla's built-in plugins only.
 pub const PERMISSIONS: &[(&str, bool)] = &[
     ("player:read", true),
     ("player:control", true),
@@ -201,7 +201,7 @@ impl Manifest {
             return Err(format!("id {:?} is not reverse-DNS (e.g. com.example.my-plugin)", self.id));
         }
         if self.api_version != API_VERSION {
-            return Err(format!("needs plugin API {}, this YTMD has {API_VERSION}", self.api_version));
+            return Err(format!("needs plugin API {}, this Oscilla has {API_VERSION}", self.api_version));
         }
         semver::Version::parse(&self.version).map_err(|_| format!("version {:?} is not semver", self.version))?;
         Text::Plain(self.name.clone()).validate("name")?;
@@ -223,7 +223,7 @@ impl Manifest {
             }
             match PERMISSIONS.iter().find(|(name, _)| name == p) {
                 None => return Err(format!("unknown permission {p}")),
-                Some((_, false)) if !builtin => return Err(format!("{p} is only for YTMD's built-in plugins")),
+                Some((_, false)) if !builtin => return Err(format!("{p} is only for Oscilla's built-in plugins")),
                 _ => {}
             }
         }
@@ -393,7 +393,7 @@ pub(crate) mod tests {
 mod builtin_tests {
     use super::*;
 
-    /// YTMD's own plugins (src/plugins/*/manifest.json) pass the same checks,
+    /// Oscilla's own plugins (src/plugins/*/manifest.json) pass the same checks,
     /// with the built-in permissions allowed.
     #[test]
     fn test_builtin_manifests_are_valid() {

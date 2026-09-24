@@ -791,7 +791,7 @@ mod tests {
             join_window: Duration::from_millis(300),
         };
         let manager = Arc::new(SyncRoomManager::new());
-        let cipher = Arc::new(crate::sync_crypto::test_cipher("YTMD-NOPE"));
+        let cipher = Arc::new(crate::sync_crypto::test_cipher("OSC-NOPE"));
 
         let started = Instant::now();
         let res = join_room_via(&manager, noop_sink(), cipher, "G".into(), Vec::new(), brokers, timeouts).await;

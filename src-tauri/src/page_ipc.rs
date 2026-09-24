@@ -199,7 +199,7 @@ mod tests {
     #[test]
     fn test_page_room_hides_the_code() {
         let room: RoomState = serde_json::from_value(serde_json::json!({
-            "room_code": "YTMD-SECRET", "is_host": true, "current_user_id": "u", "members": [],
+            "room_code": "OSC-SECRET", "is_host": true, "current_user_id": "u", "members": [],
             "playback_state": null, "banned": [{ "client_hash": "h", "nickname": "n" }]
         }))
         .unwrap();
@@ -207,7 +207,7 @@ mod tests {
         let text = page.to_string();
         assert!(!text.contains("SECRET"));
         assert!(page.get("banned").is_none());
-        assert_eq!(page["room_id"], crate::join_link::party_id("YTMD-SECRET"));
+        assert_eq!(page["room_id"], crate::join_link::party_id("OSC-SECRET"));
     }
 
     #[test]

@@ -233,11 +233,28 @@ impl Default for ConfigManager {
     }
 }
 
+/// The app's data folder under `base` (the home folder): `.oscilla`. On the
+/// first launch after the rename, YTMD's `.ytmd` is moved there in one
+/// rename (same disk), so the config, the session, the Listen Together
+/// identity, plugins and caches all come along. If that fails, the old
+/// folder stays in use: nothing is lost or half-copied.
+pub fn app_dir_in(base: &std::path::Path) -> PathBuf {
+    let dir = base.join(".oscilla");
+    let old = base.join(".ytmd");
+    if !dir.exists() && old.is_dir() {
+        if let Err(e) = fs::rename(&old, &dir) {
+            // Logging isn't set up yet this early.
+            eprintln!("couldn't move {} to {}: {e}; keeping the old folder", old.display(), dir.display());
+            return old;
+        }
+    }
+    dir
+}
+
 impl ConfigManager {
     pub fn new() -> Self {
-        let app_dir = dirs::home_dir()
-            .map(|h| h.join(".ytmd"))
-            .unwrap_or_else(|| dirs::config_dir().unwrap_or_else(|| PathBuf::from(".")).join(".ytmd"));
+        let base = dirs::home_dir().unwrap_or_else(|| dirs::config_dir().unwrap_or_else(|| PathBuf::from(".")));
+        let app_dir = app_dir_in(&base);
 
         // Owner-only: it holds the config, the room identity, the remote
         // token, the last session and the logs.
@@ -246,7 +263,8 @@ impl ConfigManager {
         }
         let config_path = app_dir.join("config.json");
 
-        // If new config at ~/.ytmd/config.json does not exist yet, check legacy ~/.config/ytmd/config.json
+        // No config yet: take the one from ~/.config/ytmd/config.json (an
+        // even older layout), if any.
         if !config_path.exists() {
             if let Some(legacy_dir) = dirs::config_dir() {
                 let legacy_path = legacy_dir.join("ytmd").join("config.json");
@@ -305,6 +323,27 @@ impl ConfigManager {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn test_old_data_folder_moves_to_the_new_name() {
+        let home = tempfile::tempdir().unwrap();
+        std::fs::create_dir(home.path().join(".ytmd")).unwrap();
+        std::fs::write(home.path().join(".ytmd/config.json"), b"{}").unwrap();
+        let dir = app_dir_in(home.path());
+        assert_eq!(dir, home.path().join(".oscilla"));
+        assert!(dir.join("config.json").is_file(), "everything comes along");
+        assert!(!home.path().join(".ytmd").exists());
+        // Later launches just use it; an old folder showing up again is left alone.
+        std::fs::create_dir(home.path().join(".ytmd")).unwrap();
+        assert_eq!(app_dir_in(home.path()), dir);
+        assert!(home.path().join(".ytmd").exists());
+    }
+
+    #[test]
+    fn test_fresh_install_uses_the_new_folder() {
+        let home = tempfile::tempdir().unwrap();
+        assert_eq!(app_dir_in(home.path()), home.path().join(".oscilla"));
+    }
+
     use super::*;
 
     #[test]
@@ -381,7 +420,7 @@ mod tests {
     #[test]
     fn test_config_manager_new_initializes_path() {
         let manager = ConfigManager::new();
-        assert!(manager.config_path().to_string_lossy().contains(".ytmd"));
+        assert!(manager.config_path().to_string_lossy().contains(".oscilla") || manager.config_path().to_string_lossy().contains(".ytmd"));
         assert!(manager.config_path().to_string_lossy().ends_with("config.json"));
     }
 
@@ -537,7 +576,7 @@ mod tests {
     fn test_config_with_removed_download_fields_still_loads() {
         let mut saved = serde_json::to_value(AppConfig { crossfade_seconds: 3.0, ..AppConfig::default() }).unwrap();
         let obj = saved.as_object_mut().unwrap();
-        obj.insert("download_dir".into(), serde_json::json!("/home/me/Music/YTMD"));
+        obj.insert("download_dir".into(), serde_json::json!("/home/me/Music/Oscilla"));
         obj.insert("download_format".into(), serde_json::json!("flac"));
         obj.insert("embed_lyrics".into(), serde_json::json!(true));
         let loaded: AppConfig = serde_json::from_value(saved).expect("old config still loads");

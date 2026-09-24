@@ -77,7 +77,7 @@ pub fn with_shortcut(
 /// another running application at the OS level).
 pub fn apply(app: &AppHandle, shortcuts: &BTreeMap<String, String>) -> Vec<String> {
     if let Err(e) = app.global_shortcut().unregister_all() {
-        log::warn!("[YTMD Shortcuts] Couldn't clear shortcuts: {e}");
+        log::warn!("[Oscilla Shortcuts] Couldn't clear shortcuts: {e}");
     }
     let mut failed = Vec::new();
     for (action, accelerator) in shortcuts {
@@ -90,7 +90,7 @@ pub fn apply(app: &AppHandle, shortcuts: &BTreeMap<String, String>) -> Vec<Strin
         let shortcut = match parse(accelerator) {
             Ok(s) => s,
             Err(_) => {
-                log::error!("[YTMD Shortcuts] Invalid shortcut '{accelerator}' for '{action}'");
+                log::error!("[Oscilla Shortcuts] Invalid shortcut '{accelerator}' for '{action}'");
                 failed.push(action.clone());
                 continue;
             }
@@ -104,7 +104,7 @@ pub fn apply(app: &AppHandle, shortcuts: &BTreeMap<String, String>) -> Vec<Strin
         });
         if let Err(e) = registered {
             log::warn!(
-                "[YTMD Shortcuts] Could not register '{accelerator}' for '{action}': {e} \
+                "[Oscilla Shortcuts] Could not register '{accelerator}' for '{action}': {e} \
                  (likely already bound by another running application)."
             );
             failed.push(action.clone());

@@ -219,11 +219,11 @@ async fn run_one(p: &dyn LyricsProvider, q: &Query, timeout: Duration) -> Option
     match tokio::time::timeout(timeout, p.search(q)).await {
         Ok(Ok(found)) => Some(found),
         Ok(Err(e)) => {
-            log::debug!("[YTMD Lyrics] {} failed: {e}", p.id().as_str());
+            log::debug!("[Oscilla Lyrics] {} failed: {e}", p.id().as_str());
             None
         }
         Err(_) => {
-            log::debug!("[YTMD Lyrics] {} timed out", p.id().as_str());
+            log::debug!("[Oscilla Lyrics] {} timed out", p.id().as_str());
             None
         }
     }
@@ -313,10 +313,10 @@ pub struct LyricsState {
 }
 
 impl LyricsState {
-    /// `data_dir` is `~/.ytmd`.
+    /// `data_dir` is `~/.oscilla`.
     pub fn new(data_dir: PathBuf) -> Self {
         let http = reqwest::Client::builder()
-            .user_agent("YTMD-Desktop/1.0 (https://github.com/dachluczaj/ytmd)")
+            .user_agent(concat!("Oscilla/", env!("CARGO_PKG_VERSION"), " (https://github.com/KayZedd/ytmd)"))
             .timeout(Duration::from_secs(10))
             .build()
             .unwrap_or_default();

@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "apiVersion": 1,
   "description": "Listen together with friends in real-time synchronized listening rooms",
-  "author": "YTMD",
+  "author": "Oscilla",
   "matches": [
     "https://music.youtube.com/*"
   ],

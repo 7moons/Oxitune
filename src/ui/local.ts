@@ -134,7 +134,7 @@ function playTrack(track: LocalTrack, fromList: LocalTrack[]) {
 
   // asset://localhost/... on Linux/macOS, http://asset.localhost/... on Windows.
   audio.src = window.__TAURI__?.core ? window.__TAURI__.core.convertFileSrc(track.file_path) : track.file_path;
-  audio.play().catch((e) => console.error('[YTMD Local] Playback failed:', e));
+  audio.play().catch((e) => console.error('[Oscilla Local] Playback failed:', e));
   updatePlayingRow();
 }
 
@@ -171,7 +171,7 @@ async function loadTracks() {
     allTracks = tracks || [];
     setEmptyState(null);
   } catch (e) {
-    console.error('[YTMD Local] Failed to scan directory:', e);
+    console.error('[Oscilla Local] Failed to scan directory:', e);
     allTracks = [];
     const reason = typeof e === 'string' ? e : e instanceof Error ? e.message : tr('common.unknownError');
     setEmptyState(tr('local.scanFailed', { reason }));
@@ -225,7 +225,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (visibleTracks[0]) playTrack(visibleTracks[0], visibleTracks);
       return;
     }
-    if (audio.paused) audio.play().catch((e) => console.error('[YTMD Local] Playback failed:', e));
+    if (audio.paused) audio.play().catch((e) => console.error('[Oscilla Local] Playback failed:', e));
     else audio.pause();
   });
   $('prev-track-btn')?.addEventListener('click', () => step(-1));

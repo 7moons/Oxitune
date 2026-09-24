@@ -128,7 +128,7 @@ pub async fn plugins_available(plugins: Plugins<'_>) -> Result<Vec<Available>, S
         let index = match super::registry::fetch_index(reg).await {
             Ok(i) => i,
             Err(e) => {
-                log::info!("[YTMD Plugins] {}: {e}", reg.url);
+                log::info!("[Oscilla Plugins] {}: {e}", reg.url);
                 continue;
             }
         };
@@ -212,7 +212,7 @@ fn tools_emitter(app: &AppHandle) -> super::media_tools::EmitInstall {
     })
 }
 
-/// For a plugin's request: YTMD's own dialog first (the page can't answer
+/// For a plugin's request: Oscilla's own dialog first (the page can't answer
 /// it), then the install. Everything is reported as `plugin-media-tools`.
 pub fn ask_and_install_tools(app: AppHandle, plugins: Arc<PluginManager>, plugin_name: String) {
     use super::media_tools::{InstallProgress, InstallState};
@@ -259,7 +259,7 @@ pub fn plugins_set_update_interval(plugins: Plugins<'_>, hours: u32) {
     plugins.set_update_interval(hours);
 }
 
-/// Restarts YTMD so newly enabled or updated plugins load (the song and
+/// Restarts Oscilla so newly enabled or updated plugins load (the song and
 /// position come back through resume on launch).
 #[tauri::command]
 pub fn restart_app(app: AppHandle) {

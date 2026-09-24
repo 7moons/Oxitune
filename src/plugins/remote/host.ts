@@ -235,7 +235,7 @@ export function startRemoteHost(ctx: PluginContext): void {
         },
         (e: unknown) => {
           const error = e instanceof Error ? e.message : String(e);
-          console.warn('[YTMD Remote] action failed:', payload.action.kind, error);
+          console.warn('[Oscilla Remote] action failed:', payload.action.kind, error);
           if (payload.id != null) ctx.invoke('remote_reply', { id: payload.id, ok: false, error }).catch(() => undefined);
         }
       );

@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "YTMD",
+  "productName": "Oscilla",
   "version": "0.2.0",
   "identifier": "com.ytmd.desktop",
   "build": {
@@ -48,15 +48,45 @@
     "copyright": "Copyright © 2026 KayZed. MIT License.",
     "category": "Music",
     "shortDescription": "Desktop client for YouTube Music",
-    "longDescription": "YTMD is a lightweight desktop client for YouTube Music with media keys, Discord status, synced lyrics, an equalizer, a phone remote and Listen Together sessions.",
+    "longDescription": "Oscilla is a lightweight desktop client for YouTube Music with media keys, Discord status, synced lyrics, an equalizer, a phone remote and Listen Together sessions.",
     "homepage": "https://github.com/KayZedd/ytmd",
     "license": "MIT",
-    "licenseFile": "../LICENSE"
+    "licenseFile": "../LICENSE",
+    "linux": {
+      "deb": {
+        "conflicts": [
+          "ytmd"
+        ],
+        "replaces": [
+          "ytmd"
+        ],
+        "provides": [
+          "ytmd"
+        ]
+      },
+      "rpm": {
+        "conflicts": [
+          "ytmd"
+        ],
+        "obsoletes": [
+          "ytmd"
+        ],
+        "provides": [
+          "ytmd"
+        ]
+      }
+    },
+    "windows": {
+      "nsis": {
+        "installerHooks": "./windows/hooks.nsh"
+      }
+    }
   },
   "plugins": {
     "deep-link": {
       "desktop": {
         "schemes": [
+          "oscilla",
           "ytmd"
         ]
       }
@@ -67,5 +97,6 @@
         "https://ytmd-updates.kayzed.workers.dev/latest.json"
       ]
     }
-  }
+  },
+  "mainBinaryName": "oscilla"
 }

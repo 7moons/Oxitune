@@ -30,7 +30,7 @@ export const PowerPlugin: YTMDPlugin = {
       inhibited = inhibit;
       ctx.invoke('set_inhibit_sleep', { inhibit }).catch((e) => {
         inhibited = !inhibit;
-        console.error('[YTMD Power] set_inhibit_sleep failed:', e);
+        console.error('[Oscilla Power] set_inhibit_sleep failed:', e);
       });
     };
 

@@ -13,7 +13,7 @@ pub fn install_panic_hook(logs_dir: PathBuf, version: String) {
         let backtrace = std::backtrace::Backtrace::force_capture();
         let thread = std::thread::current();
         let report = format!(
-            "YTMD {version} crashed\nthread: {}\n{info}\n\nbacktrace:\n{backtrace}\n",
+            "Oscilla {version} crashed\nthread: {}\n{info}\n\nbacktrace:\n{backtrace}\n",
             thread.name().unwrap_or("<unnamed>")
         );
         log::error!("{report}");
@@ -53,7 +53,7 @@ mod tests {
         assert!(take_unreported(dir.path()).is_none());
         std::fs::write(dir.path().join("crash-100.log"), "x").unwrap();
         std::fs::write(dir.path().join("crash-200.log"), "y").unwrap();
-        std::fs::write(dir.path().join("ytmd.log"), "not a crash").unwrap();
+        std::fs::write(dir.path().join("oscilla.log"), "not a crash").unwrap();
         assert_eq!(take_unreported(dir.path()).unwrap().file_name().unwrap(), "crash-200.log");
         assert!(take_unreported(dir.path()).is_none(), "already reported");
         std::fs::write(dir.path().join("crash-300.log"), "z").unwrap();

@@ -144,7 +144,7 @@ pub(crate) mod tests {
 
     pub(crate) fn sample_plugin() -> Vec<u8> {
         let manifest = serde_json::to_vec(&super::super::manifest::tests::sample()).unwrap();
-        tar_gz(&[("manifest.json", &manifest), ("main.js", b"ytmd.log.info('hi');"), ("theme.css", b"body{}")])
+        tar_gz(&[("manifest.json", &manifest), ("main.js", b"oscilla.log.info('hi');"), ("theme.css", b"body{}")])
     }
 
     #[test]

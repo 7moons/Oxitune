@@ -1,8 +1,10 @@
-# YTMD
+# Oscilla
 
 A desktop client for YouTube Music built with **Tauri v2**, **Rust** and **TypeScript**, for Linux and Windows.
 
-YTMD wraps music.youtube.com with what a desktop player should have: media keys and system media controls, Discord status, synced lyrics, an equalizer, a phone remote, a local library, Listen Together sessions with friends, and plugins.
+Oscilla wraps music.youtube.com with what a desktop player should have: media keys and system media controls, Discord status, synced lyrics, an equalizer, a phone remote, a local library, Listen Together sessions with friends, and plugins.
+
+*Formerly YTMD.* Updating from YTMD keeps everything: `~/.ytmd` moves to `~/.oscilla` on first launch, you stay signed in to YouTube Music, `ytmd://` links still open, and the Windows installer removes the old YTMD install. Listen Together codes now start with `OSC-`; people on YTMD 0.2 are told to update.
 
 ---
 
@@ -28,9 +30,9 @@ YTMD wraps music.youtube.com with what a desktop player should have: media keys 
 ### Listen Together
 - Play the same music at the same time as friends, on the same network or over the internet (public MQTT brokers, all tried at once).
 - Roles (host, moderator, DJ, listener), join approval, removing people, vote to skip, emoji reactions, a shared queue in place of YouTube Music's "Up next", host handoff when the host leaves.
-- **Security** (protocol 3): the session code is `YTMD-` plus 26 characters (130 random bits); the key and the public topic id are derived from it with HKDF-SHA256; every message is encrypted (AES-256-GCM) and **signed by its sender's install key** (Ed25519), with replay protection. Only the host's key can speak for the session and nobody can act under another member's id. Brokers and the local network see an opaque topic id, message sizes and timing, and IP addresses — not the code, the songs or the people.
+- **Security** (protocol 3): the session code is `OSC-` plus 26 characters (130 random bits); the key and the public topic id are derived from it with HKDF-SHA256; every message is encrypted (AES-256-GCM) and **signed by its sender's install key** (Ed25519), with replay protection. Only the host's key can speak for the session and nobody can act under another member's id. Brokers and the local network see an opaque topic id, message sizes and timing, and IP addresses — not the code, the songs or the people.
 - **Limits worth knowing**: the code is the session's secret: anyone who has it can read along and ask to join (turn on join approval for codes shared widely; the Discord button turns it on for you). A removed member who kept the code can keep reading until the session ends — start a new session to cut them off. A first-time guest trusts the first host that answers with the code; after that the host's key is pinned.
-- Everyone needs YTMD 0.3 or newer; older versions are told to update.
+- Everyone needs Oscilla 0.3 or newer; older versions are told to update.
 
 ### Phone remote
 - Control playback, volume, the queue and search from a phone's browser on the same Wi-Fi, by scanning a QR code in **Settings → Phone remote**.
@@ -46,11 +48,11 @@ YTMD wraps music.youtube.com with what a desktop player should have: media keys 
 ### Plugins
 - A versioned plugin API ([`docs/PLUGIN_API.md`](docs/PLUGIN_API.md)): a manifest with a closed set of permissions, shown before you install and again before any update that asks for more; per-plugin settings, storage and network access limited to the hosts it lists; errors isolated per plugin, repeatedly failing plugins switched off.
 - Install from the built-in **official registry** or **registries you add**: every registry's index must be signed with that registry's key, every archive must match its signed checksum, installs are atomic. Updates are checked automatically (configurable). Developer mode loads a plugin from a folder, with a warning.
-- **Saving songs** is an add-on too (`app.ytmd.downloader` in the official registry): a player-bar button that saves the current song with yt-dlp into a folder you choose. If yt-dlp or ffmpeg is missing, one click (and your OK in YTMD's own dialog) installs them from their official GitHub releases, checked against the published checksums; YTMD keeps its yt-dlp up to date. The add-on only says which song; YTMD runs yt-dlp with a fixed command line.
-- YTMD's own features are built-in plugins on the same API. A ready-to-publish registry with an example theme, an ad blocker and SponsorBlock lives in [`_plugins-export/`](_plugins-export).
+- **Saving songs** is an add-on too (`app.ytmd.downloader` in the official registry): a player-bar button that saves the current song with yt-dlp into a folder you choose. If yt-dlp or ffmpeg is missing, one click (and your OK in Oscilla's own dialog) installs them from their official GitHub releases, checked against the published checksums; Oscilla keeps its yt-dlp up to date. The add-on only says which song; Oscilla runs yt-dlp with a fixed command line.
+- Oscilla's own features are built-in plugins on the same API. A ready-to-publish registry with an example theme, an ad blocker and SponsorBlock lives in [`_plugins-export/`](_plugins-export).
 
 ### Settings, data and logs
-- Everything is in `~/.ytmd/` (owner-only): `config.json`, the last session, the Listen Together identity, the remote's pairing token, installed plugins, caches and `logs/` (rotated, 5 × 2 MB). Settings → System opens the logs folder.
+- Everything is in `~/.oscilla/` (owner-only): `config.json`, the last session, the Listen Together identity, the remote's pairing token, installed plugins, caches and `logs/` (rotated, 5 × 2 MB). Settings → System opens the logs folder.
 - Settings backup: export everything to one file, import it elsewhere. An import never changes your folders or turns on the phone remote.
 
 ---

@@ -34,7 +34,7 @@ import { invokeBackend, pageEvents } from './bridgeClient';
  * toast rather than left as an unhandled rejection. */
 const runAction = (cmd: string) => {
   invokeBackend(cmd).catch((e) => {
-    console.error(`[YTMD] ${cmd} failed:`, e);
+    console.error(`[Oscilla] ${cmd} failed:`, e);
     showToast(t().actionFailed);
   });
 };
@@ -77,7 +77,7 @@ const CONFIG_QUICK_TRIES = 4;
 const CONFIG_RETRY_MS = 2000;
 
 async function initYTMD() {
-  console.log('[YTMD] Initializing desktop integration bridge...');
+  console.log('[Oscilla] Initializing desktop integration bridge...');
 
   const config: Record<string, unknown> = {};
 
@@ -113,7 +113,7 @@ async function initYTMD() {
       const loaded = await invokeBackend('get_config', {}, { timeoutMs });
       return loaded && typeof loaded === 'object' ? (loaded as Record<string, unknown>) : null;
     } catch (e) {
-      console.warn('[YTMD] Loading config failed, retrying:', e);
+      console.warn('[Oscilla] Loading config failed, retrying:', e);
       return null;
     }
   };
@@ -170,7 +170,7 @@ async function initYTMD() {
   try {
     await registry.initAll(configToggleMap(config));
   } catch (e) {
-    console.error('[YTMD] Registry init error:', e);
+    console.error('[Oscilla] Registry init error:', e);
   }
 
   // Initialize Player Observer
@@ -199,7 +199,7 @@ async function initYTMD() {
         }
       });
     } catch (e) {
-      console.error('[YTMD] Failed to sync track info to backend:', e);
+      console.error('[Oscilla] Failed to sync track info to backend:', e);
     }
   }
 
@@ -312,11 +312,11 @@ async function initYTMD() {
     for (const [pluginId, shouldBeEnabled] of Object.entries(toggles)) {
       if (shouldBeEnabled) {
         registry.enable(pluginId).catch((e) =>
-          console.error(`[YTMD] Failed to enable plugin ${pluginId}:`, e)
+          console.error(`[Oscilla] Failed to enable plugin ${pluginId}:`, e)
         );
       } else {
         registry.disable(pluginId).catch((e) =>
-          console.error(`[YTMD] Failed to disable plugin ${pluginId}:`, e)
+          console.error(`[Oscilla] Failed to disable plugin ${pluginId}:`, e)
         );
       }
     }
@@ -326,7 +326,7 @@ async function initYTMD() {
   });
 
   if (!configLoaded) {
-    console.error('[YTMD] Config not loaded yet; plugins run on defaults until it is.');
+    console.error('[Oscilla] Config not loaded yet; plugins run on defaults until it is.');
     const retry = setInterval(() => {
       void loadConfig(CONFIG_RETRY_MS).then((loaded) => {
         if (!loaded || configLoaded) return;
@@ -345,7 +345,7 @@ async function initYTMD() {
     }
   });
 
-  console.log('[YTMD] Integration successfully activated.');
+  console.log('[Oscilla] Integration successfully activated.');
 }
 
 // Tauri's initialization_script runs in every frame of the webview, including

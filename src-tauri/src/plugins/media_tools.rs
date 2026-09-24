@@ -1,7 +1,7 @@
 //! yt-dlp and ffmpeg for `media:save`, installed on request into
-//! `~/.ytmd/tools/`.
+//! `~/.oscilla/tools/`.
 //!
-//! Only when the user agrees (a dialog YTMD shows itself, or the button in
+//! Only when the user agrees (a dialog Oscilla shows itself, or the button in
 //! Settings), only from the projects' own GitHub releases (yt-dlp's latest
 //! release, and yt-dlp's FFmpeg-Builds), over https to GitHub hosts only,
 //! and only if the file matches the SHA-256 in the checksum file published
@@ -104,7 +104,7 @@ struct Installed {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Found {
-    /// Installed by YTMD.
+    /// Installed by Oscilla.
     Managed,
     /// Found on the system's PATH.
     System,
@@ -171,7 +171,7 @@ fn find_in_path(name: &str) -> Option<PathBuf> {
 }
 
 impl Tools {
-    /// `dir` is `~/.ytmd/tools`.
+    /// `dir` is `~/.oscilla/tools`.
     pub fn new(dir: PathBuf) -> Self {
         Self { dir, installing: AtomicBool::new(false) }
     }
@@ -250,7 +250,7 @@ impl Tools {
         match &result {
             Ok(()) => emit(InstallProgress { state: InstallState::Done, tool: None, percent: 100.0, error: None }),
             Err(e) => {
-                log::warn!("[YTMD Plugins] installing media tools failed: {e}");
+                log::warn!("[Oscilla Plugins] installing media tools failed: {e}");
                 emit(InstallProgress { state: InstallState::Failed, tool: None, percent: 0.0, error: Some(e.clone()) })
             }
         }
@@ -344,7 +344,7 @@ fn client() -> Result<reqwest::Client, String> {
         .redirect(policy)
         .connect_timeout(std::time::Duration::from_secs(20))
         .timeout(std::time::Duration::from_secs(30 * 60))
-        .user_agent(concat!("YTMD/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("Oscilla/", env!("CARGO_PKG_VERSION")))
         .build()
         .map_err(|e| e.to_string())
 }

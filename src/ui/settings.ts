@@ -128,7 +128,7 @@ async function emitLiveEvent(event: string, payload: unknown) {
   try {
     await window.__TAURI__?.event.emit(event, payload);
   } catch (e) {
-    console.error(`[YTMD] Failed to emit ${event}:`, e);
+    console.error(`[Oscilla] Failed to emit ${event}:`, e);
   }
 }
 
@@ -410,7 +410,7 @@ async function loadSettings() {
   try {
     applyConfig((await window.__TAURI__.core.invoke('get_config')) as AppConfig);
   } catch (e) {
-    console.error('[YTMD] Failed to load settings:', e);
+    console.error('[Oscilla] Failed to load settings:', e);
     showToast(tr('settings.loadFailed', { reason: errorMessage(e) }), { durationMs: 8000 });
     renderEqSliders();
   }
@@ -530,7 +530,7 @@ async function saveSettings() {
       }, 1500);
     }
   } catch (e) {
-    console.error('[YTMD] Failed to save settings:', e);
+    console.error('[Oscilla] Failed to save settings:', e);
     showToast(tr('settings.saveFailed', { reason: errorMessage(e) }), { durationMs: 8000 });
   }
 }
@@ -580,7 +580,7 @@ async function checkForUpdates(userInitiated: boolean) {
       showToast(tr('settings.update.upToDate'));
     }
   } catch (e) {
-    console.error('[YTMD] Update check failed:', e);
+    console.error('[Oscilla] Update check failed:', e);
     if (userInitiated) showToast(tr('settings.update.checkFailed', { reason: errorMessage(e) }), { durationMs: 8000 });
   } finally {
     setBusy(btn, null, tr('settings.update.check'));
@@ -595,7 +595,7 @@ async function installUpdate() {
     // On success the app restarts itself; this promise never resolves.
     await window.__TAURI__.core.invoke('install_update');
   } catch (e) {
-    console.error('[YTMD] Update install failed:', e);
+    console.error('[Oscilla] Update install failed:', e);
     showToast(tr('settings.update.installFailed', { reason: errorMessage(e) }), { durationMs: 8000 });
     setBusy(btn, null, tr('settings.update.install'));
   }
@@ -634,7 +634,7 @@ function initSectionNav() {
 
 /** A backup's custom CSS is applied only if the user says so: it runs
  * inside YouTube Music and can load outside resources (fonts, images,
- * `@import`), which tells that server you use YTMD and when. */
+ * `@import`), which tells that server you use Oscilla and when. */
 function confirmImportedCss(css: string) {
   const preview = document.createElement('pre');
   preview.className = 'css-preview';

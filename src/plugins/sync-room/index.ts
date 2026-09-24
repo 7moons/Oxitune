@@ -509,13 +509,13 @@ export class RoomSyncController {
       invoke('vote_sync_skip')
         .then(() => this.notify(t().syncVotedSkip))
         .catch((e) => {
-          console.error('[YTMD Room Sync] vote failed:', e);
+          console.error('[Oscilla Room Sync] vote failed:', e);
           this.notify(t().actionFailed);
         });
       return;
     }
     invoke('send_sync_control', { action }).catch((e) => {
-      console.error('[YTMD Room Sync] control request failed:', e);
+      console.error('[Oscilla Room Sync] control request failed:', e);
       this.notify(t().actionFailed);
     });
   }
@@ -593,7 +593,7 @@ export class RoomSyncController {
         this.notify(t().syncFromQueue(next.title, next.added_by));
       })
       .catch((e) => {
-        console.error('[YTMD Room Sync] playing from the shared queue failed:', e);
+        console.error('[Oscilla Room Sync] playing from the shared queue failed:', e);
         fallback();
       });
     return true;
@@ -631,7 +631,7 @@ export class RoomSyncController {
         is_playing: !video.paused,
         timestamp_ms: now
       }
-    }).catch((e) => console.error('[YTMD Room Sync] broadcast failed:', e));
+    }).catch((e) => console.error('[Oscilla Room Sync] broadcast failed:', e));
   }
 }
 
@@ -655,7 +655,7 @@ function refreshQueuePanel() {
   const track = currentTrack;
   const act = (cmd: string) => (itemId: string) => {
     invoke(cmd, { itemId }).catch((e) => {
-      console.error(`[YTMD Room Sync] ${cmd} failed:`, e);
+      console.error(`[Oscilla Room Sync] ${cmd} failed:`, e);
       showToast(t().actionFailed);
     });
   };
@@ -674,7 +674,7 @@ function refreshQueuePanel() {
       remove: act('sync_queue_remove'),
       move: (itemId, toIndex) => {
         invoke('sync_queue_move', { itemId, toIndex }).catch((e) => {
-          console.error('[YTMD Room Sync] sync_queue_move failed:', e);
+          console.error('[Oscilla Room Sync] sync_queue_move failed:', e);
           showToast(t().actionFailed);
         });
       }
@@ -701,7 +701,7 @@ function addToSharedQueue(add: { videoId: string | null; next: boolean }, invoke
   invoke('sync_queue_add', { input: add.videoId, next: add.next })
     .then(() => showToast(add.next ? t().syncQueuedNext : t().syncQueued))
     .catch((e) => {
-      console.error('[YTMD Room Sync] adding to the shared queue failed:', e);
+      console.error('[Oscilla Room Sync] adding to the shared queue failed:', e);
       showToast(t().actionFailed);
     });
 }
@@ -877,7 +877,7 @@ export const SyncRoomPlugin: YTMDPlugin = {
           controller.handleRemotePlayback(room.playback_state, ctx.getVideoElement());
         }
       })
-      .catch((e) => console.error('[YTMD Room Sync] failed to restore room state:', e));
+      .catch((e) => console.error('[Oscilla Room Sync] failed to restore room state:', e));
 
     cleanup = () => {
       unlistenPromises.forEach((p) => p.then((unlisten) => unlisten()));

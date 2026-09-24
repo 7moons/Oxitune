@@ -340,7 +340,7 @@ export async function refreshPlugins(): Promise<void> {
   try {
     overview = (await invoke('plugins_list')) as Overview;
   } catch (e) {
-    console.error('[YTMD] plugins_list failed:', e);
+    console.error('[Oscilla] plugins_list failed:', e);
     return;
   }
   const refresh = () => void refreshPlugins();

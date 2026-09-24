@@ -1,6 +1,6 @@
 //! End-to-end protection for Listen Together (sync protocol 3).
 //!
-//! **Room secret.** A room code is `YTMD-` plus 26 characters of a 32-letter
+//! **Room secret.** A room code is `OSC-` plus 26 characters of a 32-letter
 //! alphabet: 130 random bits (`generate_room_code`). HKDF-SHA256 derives the
 //! room key (AES-256-GCM) and the public topic id from it with separate
 //! labels, so the topic id that brokers and the LAN see says nothing usable
@@ -9,7 +9,7 @@
 //! offline from the public topic id) are refused with `sync.error.oldCode`.
 //!
 //! **Who sent it.** Every install has its own Ed25519 identity
-//! (`~/.ytmd/sync_identity`, owner-only). Every message is signed and the
+//! (`~/.oscilla/sync_identity`, owner-only). Every message is signed and the
 //! signature covers the room's topic id, the sender's key, a per-session id,
 //! a counter and a timestamp, then the whole thing is sealed with the room
 //! key (AES-GCM, fresh random 96-bit nonce, AAD = protocol + topic id). A
@@ -55,7 +55,10 @@ const REPLAY_WINDOW: u64 = 1024;
 /// Distinct senders tracked per room before the oldest are forgotten.
 const MAX_TRACKED_SENDERS: usize = 256;
 
-pub const CODE_PREFIX: &str = "YTMD-";
+pub const CODE_PREFIX: &str = "OSC-";
+/// Codes from before the rename (YTMD 0.2 and older), only recognized to
+/// say they are outdated.
+const LEGACY_CODE_PREFIX: &str = "YTMD-";
 pub const CODE_ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 pub const CODE_LEN: usize = 26;
 const LEGACY_CODE_LEN: usize = 10;
@@ -82,16 +85,23 @@ pub fn generate_room_code() -> String {
 }
 
 /// The canonical code in `input` (any case, spaces and dashes inside
-/// ignored). Errors are i18n keys: a 10-character code is from YTMD 0.2 or
-/// older (`sync.error.oldCode`), anything else is `sync.error.badCode`.
+/// ignored). Errors are i18n keys: a `OSC-` code is from YTMD 0.2 or older,
+/// before the rename (`sync.error.oldCode`); anything else that isn't a
+/// code is `sync.error.badCode`.
 pub fn parse_room_code(input: &str) -> Result<String, &'static str> {
     let upper = input.trim().to_ascii_uppercase();
-    let rest = upper.strip_prefix(CODE_PREFIX).ok_or("sync.error.badCode")?;
+    let (rest, legacy) = if let Some(rest) = upper.strip_prefix(CODE_PREFIX) {
+        (rest, false)
+    } else if let Some(rest) = upper.strip_prefix(LEGACY_CODE_PREFIX) {
+        (rest, true)
+    } else {
+        return Err("sync.error.badCode");
+    };
     let body: String = rest.chars().filter(|c| !c.is_whitespace() && *c != '-').collect();
     let valid_chars = body.bytes().all(|b| CODE_ALPHABET.contains(&b));
-    match body.len() {
-        CODE_LEN if valid_chars => Ok(format!("{CODE_PREFIX}{body}")),
-        LEGACY_CODE_LEN if valid_chars => Err("sync.error.oldCode"),
+    match (legacy, body.len()) {
+        (false, CODE_LEN) if valid_chars => Ok(format!("{CODE_PREFIX}{body}")),
+        (true, LEGACY_CODE_LEN) if valid_chars => Err("sync.error.oldCode"),
         _ => Err("sync.error.badCode"),
     }
 }
@@ -419,7 +429,7 @@ impl RoomCipher {
 
 /// The protocol-2 cipher (PBKDF2 of the code, no signatures). A v3 host
 /// derives it from its own code only to answer an old client's `Join` with
-/// `Rejected { Outdated }`, which that client shows as "update YTMD".
+/// `Rejected { Outdated }`, which that client shows as "update Oscilla".
 pub(crate) struct LegacyCipher {
     key: LessSafeKey,
     topic_id: String,
@@ -490,7 +500,7 @@ impl LegacyCipher {
 mod tests {
     use super::*;
 
-    const CODE: &str = "YTMD-ABCDEFGHJKLMNPQRSTUVWXYZ";
+    const CODE: &str = "OSC-ABCDEFGHJKLMNPQRSTUVWXYZ";
 
     fn cipher(code: &str, who: &str) -> RoomCipher {
         RoomCipher::new(code, Arc::new(Identity::for_test(who)))
@@ -507,7 +517,8 @@ mod tests {
         assert_eq!(parse_room_code(&code), Ok(code.clone()));
         let spaced = format!("  {}  ", code.to_lowercase());
         assert_eq!(parse_room_code(&spaced), Ok(code.clone()));
-        let grouped = format!("YTMD-{}-{}", &code[5..18], &code[18..]);
+        let p = CODE_PREFIX.len();
+        let grouped = format!("{CODE_PREFIX}{}-{}", &code[p..p + 13], &code[p + 13..]);
         assert_eq!(parse_room_code(&grouped), Ok(code.clone()));
         assert_ne!(generate_room_code(), code);
         // Every alphabet letter is used with equal weight (32 = 2^5).
@@ -517,9 +528,11 @@ mod tests {
     #[test]
     fn test_old_and_malformed_codes_are_refused() {
         assert_eq!(parse_room_code("YTMD-ABCDEFGHJK"), Err("sync.error.oldCode"));
-        assert_eq!(parse_room_code("YTMD-ABC"), Err("sync.error.badCode"));
+        assert_eq!(parse_room_code("OSC-ABC"), Err("sync.error.badCode"));
+        assert_eq!(parse_room_code("YTMD-ABCDEFGHJKLMNPQRSTUVWXYZ"), Err("sync.error.badCode"), "never issued");
+        assert_eq!(parse_room_code("osc-abcdefghjklmnpqrstuvwxyz23").unwrap(), "OSC-ABCDEFGHJKLMNPQRSTUVWXYZ23");
         assert_eq!(parse_room_code("ABCDEFGHJKLMNPQRSTUVWXYZ23"), Err("sync.error.badCode"));
-        assert_eq!(parse_room_code("YTMD-ABCDEFGHJKLMNPQRSTUVWXY0"), Err("sync.error.badCode"), "0 is not in the alphabet");
+        assert_eq!(parse_room_code("OSC-ABCDEFGHJKLMNPQRSTUVWXY0"), Err("sync.error.badCode"), "0 is not in the alphabet");
     }
 
     #[test]
@@ -537,7 +550,7 @@ mod tests {
     #[test]
     fn test_other_room_tampered_or_truncated_does_not_open() {
         let a = cipher(CODE, "a");
-        let other = cipher("YTMD-ZZZZZZZZZZZZZZZZZZZZZZZZZZ", "b");
+        let other = cipher("OSC-ZZZZZZZZZZZZZZZZZZZZZZZZZZ", "b");
         let mut sealed = a.seal_msg(&hb("x")).unwrap();
         assert!(other.open_msg(&sealed).is_none(), "wrong room");
         let last = sealed.len() - 1;

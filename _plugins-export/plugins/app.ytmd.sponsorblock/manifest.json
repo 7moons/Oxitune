@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "apiVersion": 1,
   "description": "Skips non-music parts of music videos (intros, outros, sponsor segments) using the community SponsorBlock database.",
-  "author": "YTMD",
+  "author": "Oscilla",
   "homepage": "https://github.com/KayZedd/oscilla-plugins",
   "matches": ["https://music.youtube.com/*"],
   "runAt": "document-idle",

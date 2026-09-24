@@ -1,4 +1,4 @@
-//! Owner-only files and folders for what YTMD keeps in `~/.ytmd`: the
+//! Owner-only files and folders for what Oscilla keeps in `~/.oscilla`: the
 //! config, the room identity, the remote token, the session, logs. On unix
 //! files are created 0600 and the folder 0700; elsewhere the user's profile
 //! folder already limits access.

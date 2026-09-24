@@ -673,7 +673,7 @@ pub struct SyncRoomManager {
     /// Whether rooms also use the internet (MQTT) transport. Only turned off
     /// by tests that must not depend on public brokers.
     internet_enabled: bool,
-    /// This install's signing key in rooms (`~/.ytmd/sync_identity`).
+    /// This install's signing key in rooms (`~/.oscilla/sync_identity`).
     identity: Arc<Identity>,
     host_book: Mutex<HostBook>,
 }
@@ -1930,7 +1930,7 @@ async fn discover_host_on_port(
 ) -> Result<(SocketAddr, String), String> {
     use base64::Engine;
     let sock = UdpSocket::bind(("0.0.0.0", discovery_port)).await.map_err(|_| {
-        format!("Couldn't listen for the host on port {discovery_port}: another YTMD may be searching already.")
+        format!("Couldn't listen for the host on port {discovery_port}: another Oscilla may be searching already.")
     })?;
     let deadline = Instant::now() + timeout_budget;
     let mut buf = [0u8; MAX_BEACON_BYTES];
@@ -2251,7 +2251,7 @@ mod tests {
 
     fn room_with(members: &[(&str, bool)]) -> RoomState {
         RoomState {
-            room_code: "YTMD-TEST03".to_string(),
+            room_code: "OSC-TEST03".to_string(),
             is_host: true,
             current_user_id: "host".to_string(),
             members: members
@@ -2310,9 +2310,9 @@ mod tests {
     #[test]
     fn test_generate_room_code_format() {
         let code = generate_room_code();
-        assert!(code.starts_with("YTMD-"));
-        assert_eq!(code.len(), 31);
-        assert!(code[5..].chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit()));
+        assert!(code.starts_with("OSC-"));
+        assert_eq!(code.len(), 30);
+        assert!(code[4..].chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit()));
         assert_ne!(generate_room_code(), code);
     }
 
@@ -2780,7 +2780,7 @@ mod tests {
 
         assert!(wait_until(|| heir.get_room_state().is_some_and(|r| r.is_host), Duration::from_secs(2)).await);
         let now = heir.get_room_state().unwrap();
-        assert_eq!(now.room_code, "YTMD-TEST03");
+        assert_eq!(now.room_code, "OSC-TEST03");
         assert_eq!(now.members.len(), 1);
         assert_eq!(now.queue.len(), 1);
         assert_eq!(now.banned.len(), 1);

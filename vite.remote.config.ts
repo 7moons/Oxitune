@@ -20,8 +20,8 @@ function remoteManifest(): Plugin {
         fileName: 'manifest.webmanifest',
         source: JSON.stringify(
           {
-            name: 'YTMD remote',
-            short_name: 'YTMD',
+            name: 'Oscilla remote',
+            short_name: 'Oscilla',
             start_url: '/',
             scope: '/',
             display: 'standalone',

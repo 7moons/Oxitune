@@ -64,7 +64,7 @@ export class AudioEngine {
     try {
       const AudioCtxClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       if (!AudioCtxClass) {
-        console.warn('[YTMD DSP] Web Audio API is not supported in this environment');
+        console.warn('[Oscilla DSP] Web Audio API is not supported in this environment');
         return;
       }
 
@@ -125,9 +125,9 @@ export class AudioEngine {
       document.addEventListener('click', resume, { once: true });
 
       this.isInitialized = true;
-      console.log('[YTMD DSP] AudioEngine & DSP pipeline initialized successfully.');
+      console.log('[Oscilla DSP] AudioEngine & DSP pipeline initialized successfully.');
     } catch (e) {
-      console.error('[YTMD DSP] Failed to initialize AudioEngine:', e);
+      console.error('[Oscilla DSP] Failed to initialize AudioEngine:', e);
     }
   }
 
@@ -172,7 +172,7 @@ export class AudioEngine {
       // Route to destination (speakers)
       this.analyserNode.connect(this.audioCtx.destination);
     } catch (e) {
-      console.error('[YTMD DSP] Graph rebuild error:', e);
+      console.error('[Oscilla DSP] Graph rebuild error:', e);
     }
   }
 

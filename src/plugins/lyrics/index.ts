@@ -348,7 +348,7 @@ async function migrateOffsets(ctx: PluginContext) {
     await ctx.invoke('import_lyrics_offsets', { entries });
     storage?.removeItem?.(OFFSETS_STORAGE_KEY);
   } catch (e) {
-    console.warn('[YTMD Lyrics] Offset migration failed, will retry next start:', e);
+    console.warn('[Oscilla Lyrics] Offset migration failed, will retry next start:', e);
   }
 }
 
@@ -547,7 +547,7 @@ function buildFooter(ctx: PluginContext, withOffset: boolean): HTMLElement {
     const valDisplay = createEl('span', { className: 'ytmd-lyrics-offset-value', text: formatOffset(lyrics.offset_secs) });
     const shift = (delta: number | null) => {
       const next = delta === null ? 0 : Math.round((lyrics.offset_secs + delta) * 10) / 10;
-      ctx.invoke('set_lyrics_offset', { offsetSecs: next }).catch((e) => console.warn('[YTMD Lyrics] offset:', e));
+      ctx.invoke('set_lyrics_offset', { offsetSecs: next }).catch((e) => console.warn('[Oscilla Lyrics] offset:', e));
     };
     // Positive offset = lyrics run ahead of the audio (see highlight()).
     footer.append(

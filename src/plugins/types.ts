@@ -1,5 +1,5 @@
 /**
- * YTMD Plugin API, version 1 (docs/PLUGIN_API.md).
+ * Oscilla Plugin API, version 1 (docs/PLUGIN_API.md).
  *
  * Every plugin, built-in or installed, has a manifest and gets a context
  * scoped to the permissions it lists: what it isn't granted is missing or
@@ -217,9 +217,9 @@ export interface YtmdApi {
     save(videoId: string, options?: { format?: MediaFormat }): Promise<string>;
     cancel(job: string): Promise<void>;
     onProgress(fn: (progress: MediaProgress) => void): Unlisten;
-    /** Whether yt-dlp/ffmpeg are there (YTMD's own copies or the system's). */
+    /** Whether yt-dlp/ffmpeg are there (Oscilla's own copies or the system's). */
     tools(): Promise<MediaToolStatus>;
-    /** Asks the user (in a YTMD dialog) to install yt-dlp and ffmpeg, then
+    /** Asks the user (in an Oscilla dialog) to install yt-dlp and ffmpeg, then
      * installs them; resolves with how it ended. */
     installTools(): Promise<'done' | 'declined' | 'failed'>;
     onToolsProgress(fn: (progress: MediaToolsProgress) => void): Unlisten;

@@ -37,8 +37,8 @@ export const PipPlugin: YTMDPlugin = {
               await ctx.invoke('toggle_mini_player');
             }
           } catch (e) {
-            console.warn('[YTMD PiP] Could not enter PiP:', e);
-            await ctx.invoke('toggle_mini_player').catch((err) => console.error('[YTMD PiP] Mini player fallback failed:', err));
+            console.warn('[Oscilla PiP] Could not enter PiP:', e);
+            await ctx.invoke('toggle_mini_player').catch((err) => console.error('[Oscilla PiP] Mini player fallback failed:', err));
           }
         });
 

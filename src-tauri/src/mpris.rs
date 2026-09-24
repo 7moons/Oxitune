@@ -48,7 +48,7 @@ impl MprisManager {
 
         let config = PlatformConfig {
             dbus_name: "ytmd",
-            display_name: "YTMD",
+            display_name: "Oscilla",
             hwnd,
         };
 

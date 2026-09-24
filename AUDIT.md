@@ -1,5 +1,8 @@
 # AUDIT.md — YTMD przed wydaniem publicznym
 
+> **24.09.2026: projekt nazywa się teraz Oscilla** (§10). Poniższy tekst to zapis audytu i
+> zostawia nazwę YTMD tam, gdzie opisuje stan z tamtej chwili.
+
 Dokument prowadzony w trakcie prac. Sekcje: stan wyjściowy → rozbieżności README/kod →
 problemy z priorytetami → poprawki (z commitami) → pomiary → nowe funkcje → zależności →
 decyzje do zatwierdzenia → rzeczy niezrobione.
@@ -336,3 +339,36 @@ googlesyndication (bez tego YTM się nie ładuje — to nie blokowanie, tylko po
   `MINISIGN_PASSWORD` trzeba wkleić w jego ustawieniach. Do tego czasu wbudowany rejestr
   jest nieosiągalny i Ustawienia po prostu nie pokażą z niego wtyczek.
 - `rustls-webpki 0.102.8` w drzewie przez `rumqttc` (zignorowane z uzasadnieniem, §7).
+
+---
+
+## 10. Zmiana nazwy na Oscilla (24.09.2026)
+
+Na polecenie: wszędzie, gdzie widzi to użytkownik, „YTMD” → „Oscilla” (UI PL/EN z odmianą:
+Oscilli/Oscillę/Oscillą, zasobnik, powiadomienia, okna dialogowe, pilot w telefonie, strona
+zaproszeń, README/dokumentacja, metadane instalatora, `productName`, binarka `oscilla`, crate
+`oscilla`, pakiet npm, User-Agent, logi `oscilla.log`). Przed zmianą nazwy scaliłem `main`
+(12 commitów), m.in. pasek tytułu z paska nawigacji YTM — jego przyciski idą teraz przez
+nową komendę mostu `window_action` (strona YTM nie ma uprawnień okna).
+
+**Migracje (nic nie ginie):**
+- `~/.ytmd` → `~/.oscilla` jednym `rename` przy pierwszym starcie (`config::app_dir_in`, testy);
+  jeśli się nie uda, zostaje stary folder.
+- `identifier` **bez zmian** (`com.ytmd.desktop`): pod nim są dane WebView (zalogowanie do
+  YouTube), stan okien i blokada jednej instancji — zmiana wylogowałaby wszystkich.
+- Linki: `oscilla://` + nadal `ytmd://`. Kody sesji: `OSC-` + 26 znaków (protokół 3 nie był
+  jeszcze wydany, więc bez łamania kompatybilności); stare kody `YTMD-` dają komunikat „ze
+  starej wersji”.
+- Autostart: wpis pod starą nazwą (`~/.config/autostart/YTMD.desktop`, `HKCU\…\Run\YTMD`)
+  usuwany przy starcie; nowy rejestrowany jak dotąd, gdy opcja jest włączona.
+- Windows: hak NSIS (`src-tauri/windows/hooks.nsh`) po cichu odinstalowuje starą instalację
+  „YTMD” przed instalacją Oscilli. **Niesprawdzone na prawdziwym Windowsie** — przed wydaniem
+  zainstalować 0.2.0, zaktualizować i sprawdzić: jedna aplikacja, zalogowanie zostało,
+  `~/.oscilla` na miejscu.
+- Linux: pakiety deb/rpm `oscilla` zastępują `ytmd` (`replaces`/`conflicts`/`obsoletes`).
+- Domyślny folder zapisanych utworów: `~/Music/Oscilla` (albo istniejący `~/Music/YTMD`).
+
+**Świadomie bez zmian:** repo GitHub i adresy Pages/updatera, identyfikatory wewnętrzne
+(`ytmd_bridge`, klasy/zdarzenia `ytmd-*`), obiekt `ytmd` w API pluginów i id `app.ytmd.*`
+(zależą od nich zainstalowane pluginy), stałe protokołu (etykiety HKDF, znacznik kopii
+`ytmd-settings`, więc stare kopie ustawień dalej się importują).

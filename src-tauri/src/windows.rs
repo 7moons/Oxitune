@@ -23,7 +23,7 @@ pub struct WindowSpec {
 pub const COMPANIONS: &[WindowSpec] = &[
     WindowSpec {
         label: "miniplayer",
-        title: "YTMD Mini Player",
+        title: "Oscilla Mini Player",
         page: "miniplayer.html",
         size: (320.0, 420.0),
         min_size: (260.0, 320.0),
@@ -32,7 +32,7 @@ pub const COMPANIONS: &[WindowSpec] = &[
     },
     WindowSpec {
         label: "settings",
-        title: "YTMD Preferences",
+        title: "Oscilla Preferences",
         page: "settings.html",
         size: (780.0, 640.0),
         min_size: (540.0, 440.0),
@@ -41,7 +41,7 @@ pub const COMPANIONS: &[WindowSpec] = &[
     },
     WindowSpec {
         label: "local",
-        title: "YTMD Local Music Library",
+        title: "Oscilla Local Music Library",
         page: "local.html",
         size: (900.0, 650.0),
         min_size: (600.0, 450.0),
@@ -50,7 +50,7 @@ pub const COMPANIONS: &[WindowSpec] = &[
     },
     WindowSpec {
         label: "sync",
-        title: "YTMD Listen Together",
+        title: "Oscilla Listen Together",
         page: "sync.html",
         size: (640.0, 520.0),
         min_size: (480.0, 380.0),
@@ -90,7 +90,7 @@ pub fn ensure(app: &AppHandle, label: &str, fragment: Option<&str>) -> Option<We
     match builder.build() {
         Ok(win) => Some(win),
         Err(e) => {
-            log::warn!("[YTMD] couldn't open the {label} window: {e}");
+            log::warn!("[Oscilla] couldn't open the {label} window: {e}");
             None
         }
     }

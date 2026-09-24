@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex">
   <meta name="referrer" content="no-referrer">
-  <title>Listen along · YTMD</title>
+  <title>Listen along · Oscilla</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
   <style>
@@ -86,13 +86,13 @@
 
     <section id="ok" hidden>
       <h1 data-t="title">Listen along</h1>
-      <p data-t="body">Someone invited you to a Listen Together session in YTMD.</p>
+      <p data-t="body">Someone invited you to a Listen Together session in Oscilla.</p>
       <code class="code" id="code"></code>
       <div class="actions">
-        <a class="btn btn-filled" id="open" href="#" data-t="open">Open in YTMD</a>
+        <a class="btn btn-filled" id="open" href="#" data-t="open">Open in Oscilla</a>
         <button class="btn btn-tonal" id="copy" type="button" data-t="copy">Copy code</button>
       </div>
-      <p class="hint" data-t="hint">If nothing opens, open YTMD, go to Listen Together, choose “Join with a code” and paste the code.</p>
+      <p class="hint" data-t="hint">If nothing opens, open Oscilla, go to Listen Together, choose “Join with a code” and paste the code.</p>
     </section>
 
     <section id="bad" hidden>
@@ -105,18 +105,18 @@
     (function () {
       var PL = {
         title: 'Słuchaj razem',
-        body: 'Ktoś zaprasza Cię do wspólnego słuchania w YTMD.',
-        open: 'Otwórz w YTMD',
+        body: 'Ktoś zaprasza Cię do wspólnego słuchania w Oscilli.',
+        open: 'Otwórz w Oscilli',
         copy: 'Kopiuj kod',
         copied: 'Skopiowano',
-        hint: 'Jeśli nic się nie otworzy, uruchom YTMD, wejdź w Słuchaj razem, wybierz „Dołącz z kodem” i wklej kod.',
+        hint: 'Jeśli nic się nie otworzy, uruchom Oscillę, wejdź w Słuchaj razem, wybierz „Dołącz z kodem” i wklej kod.',
         badTitle: 'To zaproszenie nie działa',
         badBody: 'W linku brakuje kodu sesji. Poproś o nowe zaproszenie.'
       };
       var pl = /^pl\b/i.test(navigator.language || '');
       if (pl) {
         document.documentElement.lang = 'pl';
-        document.title = PL.title + ' · YTMD';
+        document.title = PL.title + ' · Oscilla';
         document.querySelectorAll('[data-t]').forEach(function (el) {
           var text = PL[el.getAttribute('data-t')];
           if (text) el.textContent = text;
@@ -130,12 +130,12 @@
       } catch (e) {
         code = '';
       }
-      if (!/^YTMD-[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{26}$/.test(code)) {
+      if (!/^OSC-[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{26}$/.test(code)) {
         document.getElementById('bad').hidden = false;
         return;
       }
 
-      var deepLink = 'ytmd://join/' + code;
+      var deepLink = 'oscilla://join/' + code;
       document.getElementById('code').textContent = code;
       document.getElementById('open').href = deepLink;
       document.getElementById('ok').hidden = false;

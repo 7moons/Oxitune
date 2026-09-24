@@ -9,7 +9,7 @@ export const LocalFilesPlugin: YTMDPlugin = {
   defaultEnabled: true,
 
   onInit(_ctx: PluginContext) {
-    // Local Files window is accessible via the central YTMD Menu and shortcuts
-    console.log('[YTMD] Local files module ready.');
+    // Local Files window is accessible via the central Oscilla Menu and shortcuts
+    console.log('[Oscilla] Local files module ready.');
   }
 };

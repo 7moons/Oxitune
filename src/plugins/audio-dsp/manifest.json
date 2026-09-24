@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "apiVersion": 1,
   "description": "Parametric 10-band equalizer, loudness normalization, crossfade, silence skipping, and speed/pitch control",
-  "author": "YTMD",
+  "author": "Oscilla",
   "matches": [
     "https://music.youtube.com/*"
   ],

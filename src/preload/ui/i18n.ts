@@ -1,10 +1,10 @@
 /**
- * Strings for every piece of UI YTMD injects into YouTube Music. Picked to
+ * Strings for every piece of UI Oscilla injects into YouTube Music. Picked to
  * match the language YTM itself is rendered in (`<html lang>`), so our
  * controls never read as a foreign add-on next to YTM's own labels.
  */
 const en = {
-  menuLabel: 'YTMD',
+  menuLabel: 'Oscilla',
   menuSettings: 'Settings & equalizer',
   menuLocal: 'Local music',
   menuSync: 'Listen together',
@@ -77,7 +77,7 @@ const en = {
 type Strings = typeof en;
 
 const pl: Strings = {
-  menuLabel: 'YTMD',
+  menuLabel: 'Oscilla',
   menuSettings: 'Ustawienia i korektor',
   menuLocal: 'Muzyka lokalna',
   menuSync: 'Słuchaj razem',

@@ -150,7 +150,7 @@ export const AudioDspPlugin: YTMDPlugin = {
       skipSilenceRef = null;
     };
 
-    console.log('[YTMD] Audio DSP, Equalizer, Crossfade & Speed controls active.');
+    console.log('[Oscilla] Audio DSP, Equalizer, Crossfade & Speed controls active.');
   },
 
   onTrackChange(track: TrackInfo) {

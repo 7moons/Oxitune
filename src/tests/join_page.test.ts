@@ -12,13 +12,13 @@ describe('Discord "Listen along" landing page', () => {
   test('accepts exactly the room-code alphabet the app generates', () => {
     expect(alphabet).toBeTruthy();
     expect(length).toBe('26');
-    expect(page).toContain(`/^YTMD-[${alphabet}]{${length}}$/`);
+    expect(page).toContain(`/^OSC-[${alphabet}]{${length}}$/`);
   });
 
-  test('reads the code only from the # part and opens the ytmd:// link', () => {
+  test('reads the code only from the # part and opens the oscilla:// link', () => {
     expect(page).toContain('location.hash');
     expect(page).not.toContain('location.search');
-    expect(page).toContain("'ytmd://join/' + code");
+    expect(page).toContain("'oscilla://join/' + code");
   });
 
   test('is the page the app links to', () => {

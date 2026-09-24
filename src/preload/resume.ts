@@ -135,7 +135,7 @@ export function startResume(): void {
       }, POLL_MS);
     })
     .catch((e) => {
-      console.error('[YTMD] Resume failed:', e);
+      console.error('[Oscilla] Resume failed:', e);
       release();
     });
 }

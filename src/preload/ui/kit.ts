@@ -1,5 +1,5 @@
 /**
- * The shared building blocks for every piece of UI YTMD injects into
+ * The shared building blocks for every piece of UI Oscilla injects into
  * YouTube Music: icon buttons, menus, toasts, dialogs, tooltips and chips.
  *
  * Everything is sized and colored after YTM's own components (Roboto 14px,

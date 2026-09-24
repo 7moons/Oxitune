@@ -109,7 +109,7 @@ mod tests {
             "http://music.youtube.com/",
             "file:///etc/passwd",
             "javascript:alert(1)",
-            "ytmd://join/YTMD-X",
+            "ytmd://join/OSC-X",
             "http://127.0.0.1:9863/",
         ] {
             assert!(!allowed(u), "{u}");

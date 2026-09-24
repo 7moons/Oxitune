@@ -62,8 +62,29 @@ pub fn save_config(app_handle: AppHandle, state: State<'_, Arc<AppState>>, confi
     Ok(())
 }
 
-/// Registers or removes YTMD from the system's login items to match the
-/// setting (off by default). Launched that way, YTMD starts in the tray.
+/// Removes the login item YTMD registered under its old name (the
+/// autostart plugin names entries after the product), so it can't start
+/// the old binary; `apply_autostart` registers Oscilla's own if it's on.
+pub fn remove_legacy_autostart() {
+    #[cfg(target_os = "linux")]
+    if let Some(dir) = dirs::config_dir() {
+        let old = dir.join("autostart").join("YTMD.desktop");
+        if old.is_file() {
+            let _ = std::fs::remove_file(old);
+        }
+    }
+    #[cfg(windows)]
+    {
+        use windows::core::w;
+        use windows::Win32::System::Registry::{RegDeleteKeyValueW, HKEY_CURRENT_USER};
+        // SAFETY: constant, NUL-terminated wide strings; a missing value
+        // only returns an error code, which is fine.
+        let _ = unsafe { RegDeleteKeyValueW(HKEY_CURRENT_USER, w!("Software\\Microsoft\\Windows\\CurrentVersion\\Run"), w!("YTMD")) };
+    }
+}
+
+/// Registers or removes Oscilla from the system's login items to match the
+/// setting (off by default). Launched that way, Oscilla starts in the tray.
 pub fn apply_autostart(app_handle: &AppHandle, enabled: bool) {
     use tauri_plugin_autostart::ManagerExt;
     let launcher = app_handle.autolaunch();
@@ -73,7 +94,7 @@ pub fn apply_autostart(app_handle: &AppHandle, enabled: bool) {
         _ => Ok(()),
     };
     if let Err(e) = result {
-        log::warn!("[YTMD] couldn't change autostart: {e}");
+        log::warn!("[Oscilla] couldn't change autostart: {e}");
     }
 }
 
@@ -116,7 +137,7 @@ pub fn open_logs_folder(app_handle: AppHandle, state: State<'_, Arc<AppState>>) 
         .map_err(|e| e.to_string())
 }
 
-/// What a settings backup file holds. `kind` tells a YTMD backup from any
+/// What a settings backup file holds. `kind` tells an Oscilla backup from any
 /// other JSON someone picks by mistake.
 #[derive(Serialize, serde::Deserialize)]
 struct SettingsBackup {
@@ -187,7 +208,7 @@ pub async fn export_settings(app_handle: AppHandle, state: State<'_, Arc<AppStat
         handle
             .dialog()
             .file()
-            .add_filter("YTMD", &["json"])
+            .add_filter("Oscilla", &["json"])
             .set_file_name("ytmd-settings.json")
             .blocking_save_file()
     })
@@ -211,7 +232,7 @@ pub async fn import_settings(
     use tauri_plugin_dialog::DialogExt;
     let handle = app_handle.clone();
     let picked = tauri::async_runtime::spawn_blocking(move || {
-        handle.dialog().file().add_filter("YTMD", &["json"]).blocking_pick_file()
+        handle.dialog().file().add_filter("Oscilla", &["json"]).blocking_pick_file()
     })
     .await
     .map_err(|e| e.to_string())?;
@@ -332,7 +353,7 @@ pub async fn scan_local_music(
     // whose scope starts empty (tauri.conf.json); open it to exactly the
     // configured library, never the whole filesystem.
     if let Err(e) = app_handle.asset_protocol_scope().allow_directory(&library_root, true) {
-        log::warn!("[YTMD] couldn't allow asset access to the music library: {e}");
+        log::warn!("[Oscilla] couldn't allow asset access to the music library: {e}");
     }
 
     let target_dir = match directory {
@@ -341,7 +362,7 @@ pub async fn scan_local_music(
             if crate::local_files::is_within_root(&library_root, &requested_path) {
                 requested_path
             } else {
-                log::warn!("[YTMD] scan_local_music rejected a directory outside the configured library root");
+                log::warn!("[Oscilla] scan_local_music rejected a directory outside the configured library root");
                 library_root
             }
         }
@@ -542,7 +563,7 @@ pub fn get_discord_invite(state: State<'_, Arc<AppState>>) -> bool {
     state.invites.current(state.sync_room.get_room_state().as_ref()).is_some()
 }
 
-/// A room code from a `ytmd://join/...` link that arrived before the Listen
+/// A room code from an `oscilla://join/...` link that arrived before the Listen
 /// Together window was ready.
 #[tauri::command]
 pub fn take_pending_join_code(state: State<'_, Arc<AppState>>) -> Option<String> {

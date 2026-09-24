@@ -27,10 +27,10 @@ async function closeWindow(): Promise<void> {
     try {
       await hook();
     } catch (e) {
-      console.error('[YTMD] before-close hook failed:', e);
+      console.error('[Oscilla] before-close hook failed:', e);
     }
   }
-  await window.__TAURI__?.core.invoke('close_window').catch((e: unknown) => console.error('[YTMD] close_window failed:', e));
+  await window.__TAURI__?.core.invoke('close_window').catch((e: unknown) => console.error('[Oscilla] close_window failed:', e));
 }
 
 export function initWindowChrome(): void {
@@ -40,7 +40,7 @@ export function initWindowChrome(): void {
   ensureKitStyles();
 
   const invoke = (cmd: string) => {
-    window.__TAURI__?.core.invoke(cmd).catch((e: unknown) => console.error(`[YTMD] ${cmd} failed:`, e));
+    window.__TAURI__?.core.invoke(cmd).catch((e: unknown) => console.error(`[Oscilla] ${cmd} failed:`, e));
   };
   document.getElementById('win-min-btn')?.addEventListener('click', () => invoke('minimize_window'));
   document.getElementById('win-max-btn')?.addEventListener('click', () => invoke('toggle_maximize_window'));

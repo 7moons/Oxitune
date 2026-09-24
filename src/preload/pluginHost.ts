@@ -95,7 +95,7 @@ export class ExternalPlugin implements YTMDPlugin {
 
   /** Reports a failure; the backend counts it and may switch us off. */
   report(where: string, error: unknown): void {
-    console.error(`[YTMD plugin ${this.id}] ${where}:`, error);
+    console.error(`[Oscilla plugin ${this.id}] ${where}:`, error);
     const message = `${where}: ${error instanceof Error ? error.message : String(error)}`;
     invokeBackend('plugin_error', { id: this.id, message })
       .then((switchedOff) => {

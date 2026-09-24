@@ -1,7 +1,7 @@
 //! Plugin registries: an `index.json` signed with minisign (Ed25519) by the
 //! registry's own key, listing each plugin's archive URL and SHA-256.
 //!
-//! YTMD comes with one registry, the official one (`official()`, its key
+//! Oscilla comes with one registry, the official one (`official()`, its key
 //! built in; the user can hide it), and the user can add others (URL +
 //! public key). Nothing from a registry is used unless the signature checks
 //! out with that key, and no archive is unpacked unless its SHA-256 matches

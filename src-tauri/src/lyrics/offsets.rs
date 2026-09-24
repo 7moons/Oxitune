@@ -1,4 +1,4 @@
-//! Per-song lyrics timing corrections: `~/.ytmd/lyrics_offsets.json`, a
+//! Per-song lyrics timing corrections: `~/.oscilla/lyrics_offsets.json`, a
 //! JSON array of `[key, seconds]` pairs, oldest first. Keys are video ids;
 //! entries imported from the page's old localStorage store use its
 //! `"title - artist"` keys and are still found through that fallback.

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://ytmd.local/schemas/remote_v1.json",
-  "title": "YTMD phone remote protocol, version 1",
+  "title": "Oscilla phone remote protocol, version 1",
   "description": "JSON text frames on the phone remote's /ws WebSocket. Mirrored by src-tauri/src/remote_server/protocol.rs and src/remote/protocol.ts; both are tested against this file. A breaking change is a new file (remote_v2.json) and a bump of PROTOCOL_VERSION.",
   "$defs": {
     "RequestId": { "type": "integer", "minimum": 0, "maximum": 4294967295 },

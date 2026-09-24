@@ -1,5 +1,5 @@
 //! Texts the backend shows itself (tray menu, notifications, the crash
-//! dialog), in Polish or English like the rest of YTMD. The language comes
+//! dialog), in Polish or English like the rest of Oscilla. The language comes
 //! from the system locale; the windows pick theirs in `src/ui/i18n.ts`.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -78,21 +78,21 @@ pub fn tr(lang: Lang, text: Text) -> &'static str {
         (Lang::Pl, TrayMiniPlayer) => "Miniodtwarzacz",
         (Lang::En, TraySettings) => "Settings",
         (Lang::Pl, TraySettings) => "Ustawienia",
-        (Lang::En, TrayShowHide) => "Show/Hide YTMD",
-        (Lang::Pl, TrayShowHide) => "Pokaż/ukryj YTMD",
+        (Lang::En, TrayShowHide) => "Show/Hide Oscilla",
+        (Lang::Pl, TrayShowHide) => "Pokaż/ukryj Oscillę",
         (Lang::En, TrayQuit) => "Quit",
         (Lang::Pl, TrayQuit) => "Zakończ",
-        (Lang::En, UpdateTitle) => "YTMD update available",
-        (Lang::Pl, UpdateTitle) => "Dostępna aktualizacja YTMD",
+        (Lang::En, UpdateTitle) => "Oscilla update available",
+        (Lang::Pl, UpdateTitle) => "Dostępna aktualizacja Oscilli",
         (Lang::En, NowPlaying) => "Now playing",
         (Lang::Pl, NowPlaying) => "Teraz gra",
-        (Lang::En, CrashTitle) => "YTMD closed unexpectedly",
-        (Lang::Pl, CrashTitle) => "YTMD zamknął się niespodziewanie",
+        (Lang::En, CrashTitle) => "Oscilla closed unexpectedly",
+        (Lang::Pl, CrashTitle) => "Oscilla zamknęła się niespodziewanie",
         (Lang::En, CrashBody) => {
-            "YTMD crashed last time. A crash report was saved in the logs folder; attaching it to a bug report helps fix the problem."
+            "Oscilla crashed last time. A crash report was saved in the logs folder; attaching it to a bug report helps fix the problem."
         }
         (Lang::Pl, CrashBody) => {
-            "Ostatnio YTMD uległ awarii. Raport został zapisany w folderze logów; dołączenie go do zgłoszenia błędu pomoże go naprawić."
+            "Ostatnio Oscilla uległa awarii. Raport został zapisany w folderze logów; dołączenie go do zgłoszenia błędu pomoże go naprawić."
         }
         (Lang::En, CrashOpenLogs) => "Open logs folder",
         (Lang::Pl, CrashOpenLogs) => "Otwórz folder logów",
@@ -115,15 +115,15 @@ pub fn update_body(version: &str) -> String {
     }
 }
 
-/// The consent dialog before YTMD downloads yt-dlp/ffmpeg for a plugin.
+/// The consent dialog before Oscilla downloads yt-dlp/ffmpeg for a plugin.
 pub fn tools_body(plugin: &str) -> String {
     let size = if cfg!(windows) { "~170 MB" } else { "~140 MB" };
     match lang() {
         Lang::En => format!(
-            "\"{plugin}\" needs yt-dlp and ffmpeg to save songs. YTMD will download them ({size}) from their official GitHub releases, check them against the published checksums and keep them in its own folder. yt-dlp is updated weekly."
+            "\"{plugin}\" needs yt-dlp and ffmpeg to save songs. Oscilla will download them ({size}) from their official GitHub releases, check them against the published checksums and keep them in its own folder. yt-dlp is updated weekly."
         ),
         Lang::Pl => format!(
-            "„{plugin}” potrzebuje yt-dlp i ffmpeg, żeby zapisywać utwory. YTMD pobierze je ({size}) z ich oficjalnych wydań na GitHubie, sprawdzi sumy kontrolne i zachowa we własnym folderze. yt-dlp będzie aktualizowany co tydzień."
+            "„{plugin}” potrzebuje yt-dlp i ffmpeg, żeby zapisywać utwory. Oscilla pobierze je ({size}) z ich oficjalnych wydań na GitHubie, sprawdzi sumy kontrolne i zachowa we własnym folderze. yt-dlp będzie aktualizowany co tydzień."
         ),
     }
 }

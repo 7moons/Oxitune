@@ -74,7 +74,7 @@ pub fn watch_startup(app: AppHandle) {
         if app.state::<Arc<PageAlive>>().is_alive() {
             return;
         }
-        log::warn!("[YTMD] YouTube Music unreachable, showing the offline screen");
+        log::warn!("[Oscilla] YouTube Music unreachable, showing the offline screen");
         if let (Some(win), Some(url)) = (app.get_webview_window("main"), app_page_url(&app, OFFLINE_PAGE)) {
             let _ = win.navigate(url);
         }

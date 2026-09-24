@@ -95,10 +95,11 @@ pub fn start_url(session: Option<&SessionSnapshot>) -> String {
     url.to_string()
 }
 
-/// Whether this launch came from a `ytmd://` link (a room invite); such a
+/// Whether this launch came from an `oscilla://` (or older `ytmd://`) link
+/// (a room invite); such a
 /// launch has its own place to go and must not resume the last song.
 pub fn launched_from_link<I: IntoIterator<Item = String>>(args: I) -> bool {
-    args.into_iter().skip(1).any(|a| a.starts_with("ytmd://"))
+    args.into_iter().skip(1).any(|a| a.starts_with("oscilla://") || a.starts_with("ytmd://"))
 }
 
 /// Whether a new snapshot should be written now.
@@ -165,7 +166,7 @@ impl SessionStore {
         if crate::secure_fs::write_private(&self.path, json.as_bytes()).is_ok() {
             *self.last_write.lock() = Some((now, snapshot.video_id.clone()));
         } else {
-            log::warn!("[YTMD Session] Could not save {}", self.path.display());
+            log::warn!("[Oscilla Session] Could not save {}", self.path.display());
         }
     }
 
@@ -248,7 +249,8 @@ mod tests {
     #[test]
     fn test_launched_from_link_ignores_the_program_path() {
         let args = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        assert!(launched_from_link(args(&["ytmd", "ytmd://join/YTMD-ABC"])));
+        assert!(launched_from_link(args(&["oscilla", "oscilla://join/OSC-ABC"])));
+        assert!(launched_from_link(args(&["oscilla", "ytmd://join/OSC-ABC"])));
         assert!(!launched_from_link(args(&["ytmd"])));
         assert!(!launched_from_link(args(&["ytmd://weird-binary-name"])));
     }

@@ -1,14 +1,14 @@
 //! Runtime plugins (docs/PLUGIN_API.md).
 //!
 //! A plugin is a folder with `manifest.json`, one entry script and optional
-//! styles. External plugins live in `~/.ytmd/plugins/installed/<id>/`, come
+//! styles. External plugins live in `~/.oscilla/plugins/installed/<id>/`, come
 //! from registries the user added (signed index, SHA-256 per archive) or,
 //! in developer mode, straight from a local folder. They run in the YouTube
 //! Music page (like a user script), each as its own initialization script,
 //! and reach the app only through the page bridge; what the manifest grants
 //! is enforced there (storage, network hosts) and by the page's plugin host.
 //!
-//! State (`~/.ytmd/plugins/state.json`): what is installed, enabled,
+//! State (`~/.oscilla/plugins/state.json`): what is installed, enabled,
 //! granted, auto-disabled after repeated errors, each plugin's settings,
 //! the registries, and the update interval.
 
@@ -139,12 +139,12 @@ pub struct PluginManager {
     /// Something changed that the page only picks up on reload.
     reload_needed: std::sync::atomic::AtomicBool,
     pub media: std::sync::Arc<media_save::MediaJobs>,
-    /// yt-dlp and ffmpeg we installed (`~/.ytmd/tools`).
+    /// yt-dlp and ffmpeg we installed (`~/.oscilla/tools`).
     pub tools: std::sync::Arc<media_tools::Tools>,
 }
 
 impl PluginManager {
-    /// `root` is `~/.ytmd/plugins`.
+    /// `root` is `~/.oscilla/plugins`.
     pub fn new(root: PathBuf) -> Self {
         let state = std::fs::read(root.join("state.json"))
             .ok()
@@ -172,7 +172,7 @@ impl PluginManager {
         let _ = crate::secure_fs::ensure_private_dir(&self.root);
         if let Ok(json) = serde_json::to_vec_pretty(state) {
             if let Err(e) = crate::secure_fs::write_private(&self.root.join("state.json"), &json) {
-                log::warn!("[YTMD Plugins] couldn't save plugin state: {e}");
+                log::warn!("[Oscilla Plugins] couldn't save plugin state: {e}");
             }
         }
     }
@@ -257,7 +257,7 @@ impl PluginManager {
                     Some((p, values))
                 }
                 Err(e) => {
-                    log::warn!("[YTMD Plugins] not loading {id}: {e}");
+                    log::warn!("[Oscilla Plugins] not loading {id}: {e}");
                     None
                 }
             })
@@ -311,7 +311,7 @@ impl PluginManager {
     /// Records an error from the page; returns true when this one switched
     /// the plugin off.
     pub fn report_error(&self, id: &str, message: &str) -> bool {
-        log::warn!("[YTMD Plugins] {id}: {}", message.chars().take(300).collect::<String>());
+        log::warn!("[Oscilla Plugins] {id}: {}", message.chars().take(300).collect::<String>());
         self.update_state(|s| {
             let Some(inst) = s.installed.get_mut(id) else { return false };
             inst.errors += 1;
@@ -319,7 +319,7 @@ impl PluginManager {
                 inst.auto_disabled = true;
                 inst.enabled = false;
                 self.media.cancel_all(id);
-                log::warn!("[YTMD Plugins] {id} switched off after {MAX_ERRORS} errors");
+                log::warn!("[Oscilla Plugins] {id} switched off after {MAX_ERRORS} errors");
                 return true;
             }
             false
@@ -601,7 +601,7 @@ impl PluginManager {
             let index = match registry::fetch_index(reg).await {
                 Ok(i) => i,
                 Err(e) => {
-                    log::info!("[YTMD Plugins] registry {} unavailable: {e}", reg.url);
+                    log::info!("[Oscilla Plugins] registry {} unavailable: {e}", reg.url);
                     continue;
                 }
             };
@@ -629,7 +629,7 @@ impl PluginManager {
                 }
                 match self.install_entry(&reg.url, &entry, inst.granted.clone()).await {
                     Ok(_) => installed += 1,
-                    Err(e) => log::warn!("[YTMD Plugins] update of {} failed: {e}", entry.id),
+                    Err(e) => log::warn!("[Oscilla Plugins] update of {} failed: {e}", entry.id),
                 }
             }
         }
@@ -641,9 +641,16 @@ impl PluginManager {
     }
 }
 
-/// `~/Music/YTMD` (the system's music folder).
+/// `~/Music/Oscilla` (the system's music folder), or `~/Music/YTMD` when
+/// that already exists from before the rename and the new one doesn't.
 pub fn default_media_dir() -> PathBuf {
-    dirs::audio_dir().unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join("Music")).join("YTMD")
+    let music = dirs::audio_dir().unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join("Music"));
+    let (new, old) = (music.join("Oscilla"), music.join("YTMD"));
+    if !new.exists() && old.is_dir() {
+        old
+    } else {
+        new
+    }
 }
 
 /// The page's initialization scripts for the enabled plugins: one per
@@ -818,7 +825,7 @@ mod tests {
         let scripts = page_scripts(&[(loaded, Map::new())]);
         assert_eq!(scripts.len(), 1);
         assert!(scripts[0].contains("function(ytmd,window,globalThis,self,document,__TAURI__,__TAURI_INTERNALS__)"));
-        assert!(scripts[0].contains("ytmd.log.info('hi');"));
+        assert!(scripts[0].contains("oscilla.log.info('hi');"));
     }
 
     /// The whole registry path with real minisign output: signed index →

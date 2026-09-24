@@ -25,7 +25,7 @@ mod imp {
     const ID_PREV: u32 = 1;
     const ID_PLAY: u32 = 2;
     const ID_NEXT: u32 = 3;
-    const SUBCLASS_ID: usize = 0x5954_4d44; // "YTMD"
+    const SUBCLASS_ID: usize = 0x5954_4d44; // "Oscilla"
     const SIZE: i32 = 16;
 
     struct State {
@@ -158,7 +158,7 @@ mod imp {
         };
         match result {
             Ok(()) => state.added = true,
-            Err(e) => log::debug!("[YTMD] thumbnail buttons: {e}"),
+            Err(e) => log::debug!("[Oscilla] thumbnail buttons: {e}"),
         }
     }
 

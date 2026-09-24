@@ -358,14 +358,14 @@ mod tests {
 
     #[test]
     fn test_the_command_line_is_fixed() {
-        let args = ytdlp_args(Path::new("/music/YTMD"), "dQw4w9WgXcQ", "opus", None);
+        let args = ytdlp_args(Path::new("/music/Oscilla"), "dQw4w9WgXcQ", "opus", None);
         let args: Vec<String> = args.iter().map(|a| a.to_string_lossy().into_owned()).collect();
         assert_eq!(args[0], "--ignore-config", "no config file can add --exec or change paths");
         assert!(!args.iter().any(|a| a.starts_with("--exec") || a == "--batch-file" || a == "--config-location"));
         let n = args.len();
         assert_eq!(&args[n - 2..], ["--", "https://music.youtube.com/watch?v=dQw4w9WgXcQ"]);
         let p = args.iter().position(|a| a == "-P").unwrap();
-        assert_eq!(args[p + 1], "/music/YTMD");
+        assert_eq!(args[p + 1], "/music/Oscilla");
         assert!(!args.contains(&"--embed-thumbnail".to_string()), "only for mp3");
         let mp3: Vec<String> = ytdlp_args(Path::new("/m"), "dQw4w9WgXcQ", "mp3", Some(Path::new("/tools"))).iter().map(|a| a.to_string_lossy().into_owned()).collect();
         assert!(mp3.contains(&"--embed-thumbnail".to_string()));
@@ -379,7 +379,7 @@ mod tests {
         assert_eq!(parse_line("ytmd-progress:NA/NA"), Line::Other);
         assert_eq!(parse_line("ytmd-progress:10/0"), Line::Other);
         assert_eq!(parse_line("ytmd-progress:300/200"), Line::Progress(1.0));
-        assert_eq!(parse_line("ytmd-file:/music/YTMD/Artist - Song.mp3"), Line::File("Artist - Song.mp3".into()));
+        assert_eq!(parse_line("ytmd-file:/music/Oscilla/Artist - Song.mp3"), Line::File("Artist - Song.mp3".into()));
         assert_eq!(parse_line("[download] something"), Line::Other);
     }
 

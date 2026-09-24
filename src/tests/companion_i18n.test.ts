@@ -25,7 +25,7 @@ describe('companion window translations', () => {
   test('no user-facing English left untagged in the markup', () => {
     // Visible text nodes must come from data-i18n; brand names and numeric
     // chip labels are the only literals allowed.
-    const allowed = new Set(['#', 'YTMD', 'YouTube Music', '0:00', '/', '—', '60%', '0.0 dB', 'Off', '1.00×', '0.8×', '1.25×', '1.5×', 'YTMD-']);
+    const allowed = new Set(['#', 'Oscilla', 'OSC-', 'YouTube Music', '0:00', '/', '—', '60%', '0.0 dB', 'Off', '1.00×', '0.8×', '1.25×', '1.5×', 'YTMD-']);
     const offenders: string[] = [];
     for (const page of PAGES) {
       const html = readFileSync(join(root, page), 'utf8').replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>|<svg[\s\S]*?<\/svg>/g, '');

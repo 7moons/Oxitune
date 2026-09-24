@@ -202,7 +202,7 @@ describe('phone remote translations', () => {
   });
 
   test('no user-facing text left untagged in the markup', () => {
-    const allowed = new Set(['YTMD', '0:00']);
+    const allowed = new Set(['Oscilla', '0:00']);
     const stripped = html.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>|<svg[\s\S]*?<\/svg>/g, '');
     const offenders: string[] = [];
     for (const m of stripped.matchAll(/<([a-z0-9]+)([^>]*)>([^<]+)</g)) {

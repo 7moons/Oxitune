@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "apiVersion": 1,
   "description": "The smallest useful plugin: tints YouTube Music's progress bar and buttons with an accent you pick.",
-  "author": "YTMD",
+  "author": "Oscilla",
   "homepage": "https://github.com/KayZedd/oscilla-plugins",
   "matches": ["https://music.youtube.com/*"],
   "runAt": "document-idle",

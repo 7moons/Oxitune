@@ -1,4 +1,4 @@
-//! Listen Together invites: `ytmd://join/<code>` deep links and the
+//! Listen Together invites: `oscilla://join/<code>` deep links (and `ytmd://` from before the rename) and the
 //! "Listen along" button on the host's Discord status.
 //!
 //! The room code is also the room's encryption key (`sync_crypto.rs`), so the
@@ -18,10 +18,12 @@ pub fn is_valid_room_code(code: &str) -> bool {
     crate::sync_crypto::parse_room_code(code).is_ok_and(|c| c == code)
 }
 
-/// The room code in a `ytmd://join/<code>` link, or `None` for anything
+/// The room code in an `oscilla://join/<code>` (or `ytmd://join/<code>`) link, or `None` for anything
 /// else (the OS hands us whatever argv holds, so every part is checked).
 pub fn parse_join_link(url: &str) -> Option<String> {
-    let rest = url.trim().strip_prefix("ytmd://join/")?;
+    let url = url.trim();
+    // `ytmd://` from before the rename still works.
+    let rest = url.strip_prefix("oscilla://join/").or_else(|| url.strip_prefix("ytmd://join/"))?;
     let code = rest.trim_end_matches('/').to_ascii_uppercase();
     if code.len() > 64 || !code.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') {
         return None;
@@ -103,17 +105,20 @@ pub fn handle_urls<'a>(app: &AppHandle, urls: impl IntoIterator<Item = &'a str>)
 mod tests {
     use super::*;
 
-    const C: &str = "YTMD-ABCDEFGHJKLMNPQRSTUVWXYZ23";
+    const C: &str = "OSC-ABCDEFGHJKLMNPQRSTUVWXYZ23";
 
     #[test]
     fn test_parse_join_link_accepts_only_room_codes() {
         assert_eq!(parse_join_link(&format!("ytmd://join/{C}")), Some(C.into()));
         assert_eq!(parse_join_link(&format!("ytmd://join/{}/", C.to_lowercase())), Some(C.into()));
-        assert_eq!(parse_join_link("ytmd://join/YTMD-ABC"), None);
+        assert_eq!(parse_join_link(&format!("oscilla://join/{C}")).as_deref(), Some(C));
+        assert_eq!(parse_join_link(&format!("ytmd://join/{C}")).as_deref(), Some(C), "the old scheme still works");
+        assert_eq!(parse_join_link(&format!("https://join/{C}")), None);
+        assert_eq!(parse_join_link("ytmd://join/OSC-ABC"), None);
         // Old 10-character codes (protocol 2) aren't joinable any more.
-        assert_eq!(parse_join_link("ytmd://join/YTMD-ABCDEFGH23"), None);
+        assert_eq!(parse_join_link("ytmd://join/OSC-ABCDEFGH23"), None);
         // I, O, 0 and 1 are never in a code.
-        assert_eq!(parse_join_link("ytmd://join/YTMD-ABCDEFGHJKLMNPQRSTUVWXYI0"), None);
+        assert_eq!(parse_join_link("ytmd://join/OSC-ABCDEFGHJKLMNPQRSTUVWXYI0"), None);
         assert_eq!(parse_join_link(&format!("ytmd://join/{C}?x=1")), None);
         assert_eq!(parse_join_link(&format!("https://evil.example/join/{C}")), None);
         assert_eq!(parse_join_link("--flag"), None);
@@ -128,18 +133,18 @@ mod tests {
 
     #[test]
     fn test_invite_url_keeps_the_code_after_the_hash() {
-        let url = invite_url("YTMD-ABCDEFGHJKLMNPQRSTUVWXYZ23");
+        let url = invite_url("OSC-ABCDEFGHJKLMNPQRSTUVWXYZ23");
         let (page, fragment) = url.split_once('#').unwrap();
         assert!(page.starts_with("https://"));
-        assert!(!page.contains("YTMD-"), "the code must never be in the part sent to the server");
-        assert_eq!(fragment, "YTMD-ABCDEFGHJKLMNPQRSTUVWXYZ23");
+        assert!(!page.contains("OSC-"), "the code must never be in the part sent to the server");
+        assert_eq!(fragment, "OSC-ABCDEFGHJKLMNPQRSTUVWXYZ23");
     }
 
     #[test]
     fn test_party_id_is_stable_and_does_not_contain_the_code() {
-        let a = party_id("YTMD-ABCDEFGHJKLMNPQRSTUVWXYZ23");
-        assert_eq!(a, party_id("YTMD-ABCDEFGHJKLMNPQRSTUVWXYZ23"));
-        assert_ne!(a, party_id("YTMD-ABCDEFGHJKLMNPQRSTUVWXYZ24"));
+        let a = party_id("OSC-ABCDEFGHJKLMNPQRSTUVWXYZ23");
+        assert_eq!(a, party_id("OSC-ABCDEFGHJKLMNPQRSTUVWXYZ23"));
+        assert_ne!(a, party_id("OSC-ABCDEFGHJKLMNPQRSTUVWXYZ24"));
         assert_eq!(a.len(), 32);
         assert!(!a.to_uppercase().contains("ABCDEFGHJKLMNPQRSTUVWXYZ23"));
     }
@@ -158,15 +163,15 @@ mod tests {
     #[test]
     fn test_invite_only_for_the_hosted_room_it_was_turned_on_for() {
         let s = InviteState::default();
-        assert_eq!(s.current(Some(&room("YTMD-ABCDEFGHJKLMNPQRSTUVWXYZ23", true))), None);
+        assert_eq!(s.current(Some(&room("OSC-ABCDEFGHJKLMNPQRSTUVWXYZ23", true))), None);
 
-        s.set_published(Some("YTMD-ABCDEFGHJKLMNPQRSTUVWXYZ23".into()));
-        let invite = s.current(Some(&room("YTMD-ABCDEFGHJKLMNPQRSTUVWXYZ23", true))).unwrap();
-        assert_eq!(invite.url, invite_url("YTMD-ABCDEFGHJKLMNPQRSTUVWXYZ23"));
+        s.set_published(Some("OSC-ABCDEFGHJKLMNPQRSTUVWXYZ23".into()));
+        let invite = s.current(Some(&room("OSC-ABCDEFGHJKLMNPQRSTUVWXYZ23", true))).unwrap();
+        assert_eq!(invite.url, invite_url("OSC-ABCDEFGHJKLMNPQRSTUVWXYZ23"));
         assert_eq!(invite.max_members, crate::sync_room::MAX_MEMBERS);
 
-        assert_eq!(s.current(Some(&room("YTMD-ABCDEFGHJKLMNPQRSTUVWXYZ23", false))), None, "guests never publish");
-        assert_eq!(s.current(Some(&room("YTMD-ZZZZZZZZZZZZZZZZZZZZZZZZZZ", true))), None, "a later room starts off");
+        assert_eq!(s.current(Some(&room("OSC-ABCDEFGHJKLMNPQRSTUVWXYZ23", false))), None, "guests never publish");
+        assert_eq!(s.current(Some(&room("OSC-ZZZZZZZZZZZZZZZZZZZZZZZZZZ", true))), None, "a later room starts off");
         assert_eq!(s.current(None), None);
     }
 }

@@ -1,4 +1,4 @@
-//! Per-song lyrics cache: `~/.ytmd/lyrics_cache/<video_id>.json`.
+//! Per-song lyrics cache: `~/.oscilla/lyrics_cache/<video_id>.json`.
 //!
 //! Found lyrics are kept 30 days, "not found" 1 day (a provider may add
 //! them), a user's pick until evicted. The folder is held under 50 MB by

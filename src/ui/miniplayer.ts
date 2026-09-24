@@ -192,7 +192,7 @@ function initMiniPlayer() {
   }, 200);
 
   const send = (cmd: string) => {
-    tauri?.event.emit('player-command', cmd).catch((e: unknown) => console.error('[YTMD Mini] command failed:', e));
+    tauri?.event.emit('player-command', cmd).catch((e: unknown) => console.error('[Oscilla Mini] command failed:', e));
   };
   $('prev-btn')?.addEventListener('click', () => send('previous'));
   $('play-pause-btn')?.addEventListener('click', () => send('play_pause'));
@@ -229,7 +229,7 @@ function initMiniPlayer() {
     try {
       await tauri?.window?.getCurrentWindow().setAlwaysOnTop(isAlwaysOnTop);
     } catch (e) {
-      console.error('[YTMD Mini] setAlwaysOnTop failed:', e);
+      console.error('[Oscilla Mini] setAlwaysOnTop failed:', e);
     }
   });
 }

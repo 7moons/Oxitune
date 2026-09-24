@@ -7,7 +7,7 @@ use walkdir::WalkDir;
 
 /// What a previous scan learned about each file, so a rescan reads tags
 /// only for files that are new or changed (size or modification time).
-/// Kept in `~/.ytmd/library_cache.json`.
+/// Kept in `~/.oscilla/library_cache.json`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LibraryCache {
     #[serde(default)]
@@ -39,7 +39,7 @@ impl LibraryCache {
     pub fn save(&self, path: &Path) {
         if let Ok(json) = serde_json::to_vec(self) {
             if let Err(e) = crate::secure_fs::write_private(path, &json) {
-                log::warn!("[YTMD] couldn't save the library cache: {e}");
+                log::warn!("[Oscilla] couldn't save the library cache: {e}");
             }
         }
     }

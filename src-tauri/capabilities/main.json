@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main-page",
-  "description": "The music.youtube.com page in the main window: only the narrow YTMD bridge (bridge.rs). No events, shell, windows or plugins.",
+  "description": "The music.youtube.com page in the main window: only the narrow Oscilla bridge (bridge.rs). No events, shell, windows or plugins.",
   "windows": [
     "main"
   ],

@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "apiVersion": 1,
   "description": "Adjust volume by scrolling over the player bar or, when enabled, the main player panel",
-  "author": "YTMD",
+  "author": "Oscilla",
   "matches": [
     "https://music.youtube.com/*"
   ],

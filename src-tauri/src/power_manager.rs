@@ -47,18 +47,18 @@ impl PowerManager {
         if inhibit {
             match platform::Inhibitor::acquire() {
                 Some(inhibitor) => {
-                    log::info!("[YTMD Power] Sleep inhibited during active playback.");
+                    log::info!("[Oscilla Power] Sleep inhibited during active playback.");
                     guard.inhibitor = Some(inhibitor);
                 }
                 None => {
-                    log::warn!("[YTMD Power] Could not inhibit sleep — it will NOT be prevented during playback.");
+                    log::warn!("[Oscilla Power] Could not inhibit sleep — it will NOT be prevented during playback.");
                 }
             }
         } else {
             if let Some(inhibitor) = guard.inhibitor.take() {
                 inhibitor.release();
             }
-            log::info!("[YTMD Power] Sleep inhibition released.");
+            log::info!("[Oscilla Power] Sleep inhibition released.");
         }
     }
 
@@ -118,7 +118,7 @@ mod platform {
         Command::new(program)
             .args([
                 "--what=sleep:idle",
-                "--who=YTMD",
+                "--who=Oscilla",
                 "--why=Music is playing",
                 "--mode=block",
                 "sleep",

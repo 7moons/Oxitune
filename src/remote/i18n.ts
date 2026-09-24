@@ -6,14 +6,14 @@
  */
 
 const en = {
-  'app.title': 'YTMD remote',
+  'app.title': 'Oscilla remote',
   'tab.player': 'Now playing',
   'tab.lyrics': 'Lyrics',
   'tab.queue': 'Up next',
   'tab.search': 'Search',
   'tab.room': 'Listen together',
 
-  'status.offline': 'Not connected to YTMD. Reconnecting…',
+  'status.offline': 'Not connected to Oscilla. Reconnecting…',
   'status.nothing': 'Nothing is playing',
 
   'player.play': 'Play',
@@ -45,7 +45,7 @@ const en = {
   'search.add': 'Add to queue',
   'search.added': 'Added to queue',
 
-  'room.none': "You're not in a Listen Together session. Start or join one in YTMD.",
+  'room.none': "You're not in a Listen Together session. Start or join one in Oscilla.",
   'room.members': '{count} listening',
   'room.host': 'Host',
   'room.moderator': 'Moderator',
@@ -58,7 +58,7 @@ const en = {
   'room.listenerNote': 'As a listener you can react and vote to skip.',
 
   'error.failed': "Couldn't do that. Try again.",
-  'error.timeout': "YTMD didn't answer. Is YouTube Music open?",
+  'error.timeout': "Oscilla didn't answer. Is YouTube Music open?",
   'error.noRoom': "You're not in a Listen Together session",
   'error.noQueue': 'Open the player in YouTube Music first',
   'error.gone': 'That song is no longer in the queue',
@@ -69,14 +69,14 @@ const en = {
 export type RemoteKey = keyof typeof en;
 
 const pl: Record<RemoteKey, string> = {
-  'app.title': 'Pilot YTMD',
+  'app.title': 'Pilot Oscilla',
   'tab.player': 'Odtwarzane',
   'tab.lyrics': 'Tekst',
   'tab.queue': 'Następne',
   'tab.search': 'Szukaj',
   'tab.room': 'Wspólne słuchanie',
 
-  'status.offline': 'Brak połączenia z YTMD. Łączenie ponownie…',
+  'status.offline': 'Brak połączenia z Oscillą. Łączenie ponownie…',
   'status.nothing': 'Nic nie jest odtwarzane',
 
   'player.play': 'Odtwórz',
@@ -108,7 +108,7 @@ const pl: Record<RemoteKey, string> = {
   'search.add': 'Dodaj do kolejki',
   'search.added': 'Dodano do kolejki',
 
-  'room.none': 'Nie jesteś w sesji wspólnego słuchania. Rozpocznij ją lub dołącz w YTMD.',
+  'room.none': 'Nie jesteś w sesji wspólnego słuchania. Rozpocznij ją lub dołącz w Oscilli.',
   'room.members': 'Słucha: {count}',
   'room.host': 'Gospodarz',
   'room.moderator': 'Moderator',
@@ -121,7 +121,7 @@ const pl: Record<RemoteKey, string> = {
   'room.listenerNote': 'Jako słuchacz możesz reagować i głosować za pominięciem.',
 
   'error.failed': 'Nie udało się. Spróbuj ponownie.',
-  'error.timeout': 'YTMD nie odpowiada. Czy YouTube Music jest otwarte?',
+  'error.timeout': 'Oscilla nie odpowiada. Czy YouTube Music jest otwarte?',
   'error.noRoom': 'Nie jesteś w sesji wspólnego słuchania',
   'error.noQueue': 'Najpierw otwórz odtwarzacz w YouTube Music',
   'error.gone': 'Tego utworu nie ma już w kolejce',

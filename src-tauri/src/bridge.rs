@@ -391,7 +391,7 @@ bridge_commands! {
         plugin_manager(h).media_cancel(&p.id, &p.job)?;
         Ok(Value::Null)
     }
-    // Asks the user (a dialog YTMD shows itself, not the page) and, if they
+    // Asks the user (a dialog Oscilla shows itself, not the page) and, if they
     // agree, installs yt-dlp/ffmpeg; progress and the outcome arrive as
     // `plugin-media-tools`.
     "plugin_media_install_tools" => |h, state, args| {
