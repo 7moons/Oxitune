@@ -161,11 +161,10 @@ async function initYTMD() {
   let lastSyncedPosition = 0;
   let lastSyncRealTime = Date.now();
 
-  observer.onTrackChange(async (track) => {
-    currentActiveTrack = track;
-    lastSyncedPosition = track.currentTimeSecs || 0;
-    lastSyncRealTime = Date.now();
-    registry.handleTrackChange(track);
+  /** Reports the track to the backend (Discord, MPRIS, companion windows).
+   * `sampled_at_ms` pins when the position was read, so the song's start
+   * time doesn't drift by however long the update takes to get there. */
+  async function sendTrackInfo(track: TrackInfo, positionSecs: number, isPlaying: boolean): Promise<void> {
     try {
       await invokeBackend('update_track_info', {
         track: {
@@ -174,14 +173,23 @@ async function initYTMD() {
           album: track.album || null,
           cover_url: track.coverUrl || null,
           duration_secs: Math.round(track.durationSecs || 0),
-          current_time_secs: Math.round(track.currentTimeSecs || 0),
-          is_playing: track.isPlaying,
-          video_id: track.videoId || null
+          current_time_secs: Math.round(positionSecs),
+          is_playing: isPlaying,
+          video_id: track.videoId || null,
+          sampled_at_ms: Date.now()
         }
       });
     } catch (e) {
       console.error('[YTMD] Failed to sync track info to backend:', e);
     }
+  }
+
+  observer.onTrackChange(async (track) => {
+    currentActiveTrack = track;
+    lastSyncedPosition = track.currentTimeSecs || 0;
+    lastSyncRealTime = Date.now();
+    registry.handleTrackChange(track);
+    await sendTrackInfo(track, track.currentTimeSecs || 0, track.isPlaying);
   });
 
   observer.onPlaybackChange(async (isPlaying) => {
@@ -191,22 +199,7 @@ async function initYTMD() {
       track.isPlaying = isPlaying;
       lastSyncedPosition = track.currentTimeSecs || 0;
       lastSyncRealTime = Date.now();
-      try {
-        await invokeBackend('update_track_info', {
-          track: {
-            title: track.title,
-            artist: track.artist,
-            album: track.album || null,
-            cover_url: track.coverUrl || null,
-            duration_secs: Math.round(track.durationSecs || 0),
-            current_time_secs: Math.round(track.currentTimeSecs || 0),
-            is_playing: isPlaying,
-            video_id: track.videoId || null
-          }
-        });
-      } catch (e) {
-        console.error('[YTMD] Failed to sync playback status:', e);
-      }
+      await sendTrackInfo(track, track.currentTimeSecs || 0, isPlaying);
     }
   });
 
@@ -226,18 +219,7 @@ async function initYTMD() {
       lastSyncedPosition = positionSecs;
       lastSyncRealTime = now;
       track.currentTimeSecs = Math.round(positionSecs);
-      invokeBackend('update_track_info', {
-        track: {
-          title: track.title,
-          artist: track.artist,
-          album: track.album || null,
-          cover_url: track.coverUrl || null,
-          duration_secs: Math.round(track.durationSecs || 0),
-          current_time_secs: Math.round(positionSecs),
-          is_playing: true,
-          video_id: track.videoId || null
-        }
-      }).catch((e) => console.error('[YTMD] Failed to sync seek/progress to backend:', e));
+      void sendTrackInfo(track, positionSecs, true);
     }
   });
 

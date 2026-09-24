@@ -218,6 +218,19 @@
 
           <div class="setting-row">
             <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.discordPause.title">Hide from Discord when paused</span>
+              <span class="setting-desc" data-i18n="settings.discordPause.desc">Clears your status after the song stays paused this long</span>
+            </div>
+            <select id="discord_clear_after_pause_min" class="select" data-i18n-label="settings.discordPause.title">
+              <option value="1" data-i18n="settings.discordPause.1">After 1 minute</option>
+              <option value="5" data-i18n="settings.discordPause.5">After 5 minutes</option>
+              <option value="15" data-i18n="settings.discordPause.15">After 15 minutes</option>
+              <option value="0" data-i18n="settings.discordPause.never">Never</option>
+            </select>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-text">
               <span class="setting-title" data-i18n="settings.mpris.title">Media keys & system controls</span>
               <span class="setting-desc" data-i18n="settings.mpris.desc">Control playback from your keyboard and desktop</span>
             </div>

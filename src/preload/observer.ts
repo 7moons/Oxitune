@@ -17,7 +17,46 @@ type MoviePlayerElement = HTMLElement & {
   isAdPlaying?: () => boolean;
   getDuration?: () => number;
   getCurrentTime?: () => number;
+  getVideoData?: () => { video_id?: string; title?: string } | undefined;
 };
+
+/** How long a new song id may disagree with the MediaSession title before
+ * the pair is reported anyway. Both switch on a song change, but not in the
+ * same frame; reporting the half-switched pair put the old title next to the
+ * new song's link (and the old song's duration) on Discord. */
+export const METADATA_SETTLE_MS = 1500;
+
+const normalizeTitle = (s: string) => s.trim().replace(/\s+/g, ' ').toLowerCase();
+
+/** Whether the player's title and MediaSession's title describe the same
+ * song. Unknown on either side counts as agreeing. */
+export function titlesAgree(playerTitle: string | undefined, sessionTitle: string | undefined): boolean {
+  if (!playerTitle?.trim() || !sessionTitle?.trim()) return true;
+  return normalizeTitle(playerTitle) === normalizeTitle(sessionTitle);
+}
+
+/** A different song (`new`), better details for the same song (`metadata`),
+ * or nothing worth announcing. The song id decides identity when both sides
+ * have one; the URL's `v` used to, and it changes at a different moment
+ * than the title. */
+export function classifyTrackUpdate(prev: TrackInfo | null, next: TrackInfo): 'new' | 'metadata' | null {
+  if (!prev) return 'new';
+  if (prev.videoId && next.videoId) {
+    if (prev.videoId !== next.videoId) return 'new';
+  } else if (prev.title !== next.title || prev.artist !== next.artist) {
+    return 'new';
+  }
+  const improved =
+    prev.title !== next.title ||
+    prev.artist !== next.artist ||
+    (!prev.videoId && !!next.videoId) ||
+    (!prev.coverUrl && !!next.coverUrl) ||
+    (!prev.album && !!next.album) ||
+    // A duration read in the first frames of a song can still be the
+    // previous song's; before, only a 0 duration was ever corrected.
+    (next.durationSecs > 0 && Math.abs(next.durationSecs - prev.durationSecs) > 1);
+  return improved ? 'metadata' : null;
+}
 
 /** A fallback tick is only needed when `timeupdate` hasn't produced one
  * for longer than its normal ~250ms cadence. */
@@ -37,6 +76,7 @@ export class PlayerObserver {
   private attachedVideo: HTMLVideoElement | null = null;
   private observedTarget: Element | null = null;
   private lastTickMs = 0;
+  private titleMismatch: { videoId: string; sinceMs: number } | null = null;
 
   // Named instance methods (not per-call anonymous closures) so
   // detachVideoListeners can remove the exact same listener reference that
@@ -234,9 +274,17 @@ export class PlayerObserver {
       coverUrl = coverUrl.replace(/=w\d+-h\d+[^=]*/, '=w512-h512-l90-rj');
     }
 
-    // Extract Video ID from URL
-    const urlParams = new URLSearchParams(window.location.search);
-    const videoId = urlParams.get('v') || undefined;
+    // The player's own song id; the URL's `v` only as a fallback (it is
+    // missing while browsing other pages and switches at another moment).
+    const videoData = moviePlayer?.getVideoData?.();
+    const videoId = videoData?.video_id || new URLSearchParams(window.location.search).get('v') || undefined;
+    if (videoId && !titlesAgree(videoData?.title, msMeta?.title)) {
+      const now = Date.now();
+      if (this.titleMismatch?.videoId !== videoId) this.titleMismatch = { videoId, sinceMs: now };
+      if (now - this.titleMismatch.sinceMs < METADATA_SETTLE_MS) return null;
+    } else {
+      this.titleMismatch = null;
+    }
 
     let durationSecs = 0;
     let currentTimeSecs = 0;
@@ -311,25 +359,13 @@ export class PlayerObserver {
     const track = this.extractTrackInfo();
     if (!track) return;
 
-    const isNewTrack =
-      !this.currentTrack ||
-      this.currentTrack.title !== track.title ||
-      this.currentTrack.artist !== track.artist ||
-      this.currentTrack.videoId !== track.videoId;
-
-    const metadataUpdated =
-      this.currentTrack !== null &&
-      ((!this.currentTrack.durationSecs && track.durationSecs > 0) ||
-        (!this.currentTrack.coverUrl && !!track.coverUrl) ||
-        (!this.currentTrack.album && !!track.album) ||
-        (!this.currentTrack.videoId && !!track.videoId));
-
+    const change = classifyTrackUpdate(this.currentTrack, track);
     const playStateChanged =
       this.currentTrack !== null && this.currentTrack.isPlaying !== track.isPlaying;
 
     this.currentTrack = track;
 
-    if (isNewTrack || metadataUpdated) {
+    if (change) {
       if (this.pauseDebounceTimeout !== null) {
         clearTimeout(this.pauseDebounceTimeout);
         this.pauseDebounceTimeout = null;

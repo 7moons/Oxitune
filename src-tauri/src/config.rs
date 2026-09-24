@@ -9,6 +9,10 @@ pub struct AppConfig {
     pub minimize_to_tray: bool,
     pub close_to_tray: bool,
     pub discord_rpc_enabled: bool,
+    /// Minutes a song may stay paused before its Discord status is cleared;
+    /// 0 keeps it for as long as the song is paused.
+    #[serde(default = "default_discord_clear_after_pause_min")]
+    pub discord_clear_after_pause_min: u32,
     pub mpris_enabled: bool,
     pub notifications_enabled: bool,
     pub adblock_enabled: bool,
@@ -50,6 +54,10 @@ pub struct AppConfig {
     pub shortcuts: BTreeMap<String, String>,
 }
 
+fn default_discord_clear_after_pause_min() -> u32 {
+    5
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CustomEqPreset {
     /// `user-` followed by a few lowercase letters/digits.
@@ -88,6 +96,7 @@ impl Default for AppConfig {
             minimize_to_tray: true,
             close_to_tray: true,
             discord_rpc_enabled: true,
+            discord_clear_after_pause_min: default_discord_clear_after_pause_min(),
             mpris_enabled: true,
             notifications_enabled: false,
             adblock_enabled: true,
@@ -151,6 +160,7 @@ impl AppConfig {
         self.crossfade_seconds = clamp(self.crossfade_seconds, 0.0, 30.0, 0.0);
         self.playback_speed = clamp(self.playback_speed, 0.25, 4.0, 1.0);
         self.ambient_intensity = clamp(self.ambient_intensity, 0.0, 1.0, 0.6);
+        self.discord_clear_after_pause_min = self.discord_clear_after_pause_min.min(24 * 60);
 
         self.equalizer_gains.truncate(32);
         for gain in self.equalizer_gains.iter_mut() {
@@ -299,6 +309,7 @@ mod tests {
             download_dir: "".to_string(),
             local_music_dir: "   ".to_string(),
             equalizer_gains: vec![1000.0; 5000],
+            discord_clear_after_pause_min: u32::MAX,
             ..AppConfig::default()
         };
 
@@ -314,6 +325,7 @@ mod tests {
         assert_eq!(clean.local_music_dir, AppConfig::default().local_music_dir);
         assert_eq!(clean.equalizer_gains.len(), 32);
         assert!(clean.equalizer_gains.iter().all(|g| *g == 24.0));
+        assert_eq!(clean.discord_clear_after_pause_min, 24 * 60);
     }
 
     #[test]
@@ -369,6 +381,7 @@ mod tests {
     fn test_default_config_values() {
         let config = AppConfig::default();
         assert!(config.discord_rpc_enabled);
+        assert_eq!(config.discord_clear_after_pause_min, 5);
         assert!(config.mpris_enabled);
         assert!(config.adblock_enabled);
         assert!(config.sponsorblock_enabled);

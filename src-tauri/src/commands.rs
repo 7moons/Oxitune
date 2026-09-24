@@ -152,7 +152,9 @@ pub fn update_track_info(
             *rpc_lock = Some(crate::discord_rpc::DiscordRpcHandle::new());
         }
         if let Some(ref rpc) = *rpc_lock {
-            rpc.update(track.clone());
+            let clear_after_pause = (config.discord_clear_after_pause_min > 0)
+                .then(|| std::time::Duration::from_secs(u64::from(config.discord_clear_after_pause_min) * 60));
+            rpc.update(track.clone(), clear_after_pause);
         }
     } else {
         let mut rpc_lock = state.discord_rpc.lock();

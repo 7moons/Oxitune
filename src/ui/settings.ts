@@ -11,6 +11,7 @@ import { initWindowChrome } from './window';
 interface AppConfig {
   close_to_tray: boolean;
   discord_rpc_enabled: boolean;
+  discord_clear_after_pause_min: number;
   mpris_enabled: boolean;
   notifications_enabled: boolean;
   adblock_enabled: boolean;
@@ -415,6 +416,8 @@ function applyConfig(config: AppConfig) {
   if (port) port.value = String(config.remote_port || 9863);
   const format = $<HTMLSelectElement>('download_format');
   if (format) format.value = config.download_format || 'mp3';
+  const discordPause = $<HTMLSelectElement>('discord_clear_after_pause_min');
+  if (discordPause) discordPause.value = String(config.discord_clear_after_pause_min ?? 5);
   const downloadDir = $<HTMLInputElement>('download_dir');
   if (downloadDir) downloadDir.value = config.download_dir || '';
   const localDir = $<HTMLInputElement>('local_music_dir');
@@ -465,6 +468,8 @@ function collectConfig(config: AppConfig): AppConfig {
   const port = parseInt($<HTMLInputElement>('remote_port')?.value ?? '', 10);
   next.remote_port = Number.isFinite(port) && port >= 1024 && port <= 65535 ? port : config.remote_port || 9863;
   next.download_format = $<HTMLSelectElement>('download_format')?.value ?? next.download_format;
+  const discordPause = parseInt($<HTMLSelectElement>('discord_clear_after_pause_min')?.value ?? '', 10);
+  if (Number.isFinite(discordPause)) next.discord_clear_after_pause_min = discordPause;
   next.download_dir = $<HTMLInputElement>('download_dir')?.value ?? next.download_dir;
   next.local_music_dir = $<HTMLInputElement>('local_music_dir')?.value ?? next.local_music_dir;
   next.custom_css = $<HTMLTextAreaElement>('custom_css')?.value ?? next.custom_css;

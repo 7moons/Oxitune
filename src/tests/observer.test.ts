@@ -1,5 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import { parseTimeStrToSecs, shouldFallbackTick, FALLBACK_TICK_AFTER_MS } from '../preload/observer';
+import {
+  parseTimeStrToSecs,
+  shouldFallbackTick,
+  FALLBACK_TICK_AFTER_MS,
+  classifyTrackUpdate,
+  titlesAgree
+} from '../preload/observer';
+import type { TrackInfo } from '../plugins/types';
 
 describe('parseTimeStrToSecs (player bar "0:15 / 3:45" parts)', () => {
   test('m:ss and h:mm:ss', () => {
@@ -22,5 +29,56 @@ describe('shouldFallbackTick', () => {
   test('fallback tick once timeupdate has gone quiet', () => {
     expect(shouldFallbackTick(10_000 + FALLBACK_TICK_AFTER_MS, 10_000)).toBe(true);
     expect(shouldFallbackTick(5_000, 0)).toBe(true);
+  });
+});
+
+const song = (over: Partial<TrackInfo> = {}): TrackInfo => ({
+  title: 'Maniac',
+  artist: 'Carpenter Brut',
+  album: 'Trilogy',
+  coverUrl: 'https://lh3.googleusercontent.com/a',
+  durationSecs: 300,
+  currentTimeSecs: 10,
+  isPlaying: true,
+  videoId: 'aaaaaaaaaaa',
+  ...over
+});
+
+describe('classifyTrackUpdate', () => {
+  test('first track and a new song id are new songs', () => {
+    expect(classifyTrackUpdate(null, song())).toBe('new');
+    expect(classifyTrackUpdate(song(), song({ videoId: 'bbbbbbbbbbb', title: 'Turbo Killer' }))).toBe('new');
+  });
+
+  test('same id with a settled title is the same song, not a second change', () => {
+    // The title used to arrive a frame before the URL id, firing two changes.
+    expect(classifyTrackUpdate(song({ title: 'Old title' }), song())).toBe('metadata');
+  });
+
+  test('a stale duration is corrected, not only a zero one', () => {
+    expect(classifyTrackUpdate(song({ durationSecs: 187 }), song())).toBe('metadata');
+    expect(classifyTrackUpdate(song({ durationSecs: 0 }), song())).toBe('metadata');
+    expect(classifyTrackUpdate(song({ durationSecs: 301 }), song())).toBeNull();
+  });
+
+  test('without ids, title or artist decides', () => {
+    const noId = song({ videoId: undefined });
+    expect(classifyTrackUpdate(noId, song({ videoId: undefined, title: 'Other' }))).toBe('new');
+    expect(classifyTrackUpdate(noId, song())).toBe('metadata');
+  });
+
+  test('position and play state alone are not track changes', () => {
+    expect(classifyTrackUpdate(song(), song({ currentTimeSecs: 99, isPlaying: false }))).toBeNull();
+  });
+});
+
+describe('titlesAgree', () => {
+  test('case and spacing differences agree, different songs do not', () => {
+    expect(titlesAgree('Maniac', ' maniac ')).toBe(true);
+    expect(titlesAgree('Maniac', 'Turbo Killer')).toBe(false);
+  });
+  test('an unknown side never blocks', () => {
+    expect(titlesAgree(undefined, 'Maniac')).toBe(true);
+    expect(titlesAgree('Maniac', '')).toBe(true);
   });
 });
