@@ -178,16 +178,24 @@ pub fn run() {
                 .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(5))
                 .build(),
         )
-        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(app_state)
         .setup(move |app| {
             let handle = app.handle().clone();
+
+            // The local library plays files through the asset protocol,
+            // opened to the library folder when it's scanned. YTMD's own
+            // folder (config, room identity, remote token) is never
+            // servable, even if the library is set to the home folder.
+            if let Some(dir) = app_state_for_setup.config_manager.config_path().parent() {
+                if let Err(e) = app.asset_protocol_scope().forbid_directory(dir, true) {
+                    log::warn!("couldn't protect {}: {e}", dir.display());
+                }
+            }
 
             // Initialize Tray
             let _ = tray::setup_tray(&handle);

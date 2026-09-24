@@ -3,6 +3,7 @@ name = "ytmd"
 version = "0.2.0"
 description = "YTMD - desktop client for YouTube Music, powered by Tauri v2"
 authors = ["KayZed"]
+license = "MIT"
 edition = "2021"
 
 [lib]
@@ -16,16 +17,14 @@ tauri-build = { version = "2.0.0", features = [] }
 # Lyrics providers (all platforms) and the Linux screen-lock D-Bus stream.
 futures-util = "0.3"
 tauri = { version = "2.0.0", features = ["tray-icon", "image-ico", "image-png", "protocol-asset"] }
-tauri-plugin-shell = "2.0.0"
 tauri-plugin-global-shortcut = "2.0.0"
 tauri-plugin-notification = "2.0.0"
-tauri-plugin-store = "2.0.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.38", features = ["full"] }
 parking_lot = "0.12"
 souvlaki = "0.7"
-reqwest = { version = "0.12", features = ["json", "blocking"] }
+reqwest = { version = "0.12", features = ["json"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 dirs = "5.0"
 url = "2.5"
