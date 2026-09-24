@@ -1,6 +1,6 @@
 [package]
 name = "oscilla"
-version = "0.2.0"
+version = "0.3.0"
 description = "Oscilla - desktop client for YouTube Music, powered by Tauri v2"
 authors = ["KayZed"]
 license = "MIT"
