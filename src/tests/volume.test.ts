@@ -51,6 +51,7 @@ function createPage() {
   const video = Object.assign(new FakeElement(), { volume: 0.5, muted: false });
   video.rect = { left: 300, right: 1000, top: 150, bottom: 650, width: 700, height: 500 };
   let mode: 'song' | 'video' = 'song';
+  let fullscreen = false;
   let playerVolume = 50;
   const slider = new FakeSlider();
   const expandedSlider = new FakeSlider();
@@ -114,6 +115,7 @@ function createPage() {
         if (selector === 'ytmusic-player-page[video-mode], ytmusic-player-page ytmusic-player[video-mode]') {
           return mode === 'video' ? panel : null;
         }
+        if (selector === 'ytmusic-player-page[player-fullscreened]') return fullscreen ? panel : null;
         return null;
       },
       addEventListener: (name: string, handler: (event: Event) => void) => documentHandlers.set(name, handler),
@@ -142,6 +144,12 @@ function createPage() {
     setWheelStep(value: number) { ctx.config.wheel_volume_step = value; },
     get indicator() { return indicator; },
     setMode(value: 'song' | 'video') { mode = value; },
+    setFullscreen(value: boolean) { fullscreen = value; },
+    // A wheel target inside an element with the given tag that matches the popup/dialog filter.
+    targetInside(tagName: string) {
+      const container = Object.assign(new FakeElement(), { tagName });
+      return Object.assign(new FakeElement(), { closest: () => container });
+    },
     dispatchInput() { documentHandlers.get('input')?.({} as Event); },
     tick() { intervalHandler?.(); },
     expireBadge() {
@@ -150,14 +158,14 @@ function createPage() {
         handler();
       }
     },
-    wheelUp() {
+    wheelUp(clientX = 100, clientY = 100, target: unknown = null) {
       let prevented = false;
       wheelHandler?.({
         deltaY: -100,
         ctrlKey: false,
-        target: null,
-        clientX: 100,
-        clientY: 100,
+        target,
+        clientX,
+        clientY,
         preventDefault: () => { prevented = true; }
       } as WheelEvent);
       return prevented;
@@ -203,4 +211,24 @@ test('volume badge appears only after a change, follows media, then fades away',
   page.expireBadge();
   expect(page.indicator?.classes.has('ytmd-visible')).toBe(false);
   expect(KIT_CSS).toMatch(/#ytmd-volume-indicator\s*\{[^}]*transition:\s*opacity/s);
+});
+
+test('fullscreen player changes volume anywhere on screen, not only over the old main panel', () => {
+  const page = createPage();
+  expect(page.wheelUp(1200, 400)).toBe(false);
+  expect(page.video.volume).toBe(0.5);
+
+  page.setFullscreen(true);
+  expect(page.wheelUp(1200, 400)).toBe(true);
+  expect(page.video.volume).toBe(0.55);
+});
+
+test('fullscreen player marked role=dialog still takes the wheel, real popups do not', () => {
+  const page = createPage();
+  page.setFullscreen(true);
+  expect(page.wheelUp(600, 400, page.targetInside('YTMUSIC-PLAYER'))).toBe(true);
+  expect(page.video.volume).toBe(0.55);
+
+  expect(page.wheelUp(600, 400, page.targetInside('TP-YT-PAPER-DIALOG'))).toBe(false);
+  expect(page.video.volume).toBe(0.55);
 });

@@ -19,6 +19,13 @@ function visibleRect(element: Element | null): DOMRect | null {
   return rect;
 }
 
+// YTM's fullscreen player covers the whole window, and #main-panel keeps its
+// old (or a hidden) box underneath it, so it can't be used for hit-testing.
+function isPlayerFullscreen(): boolean {
+  return document.fullscreenElement != null ||
+    document.querySelector('ytmusic-player-page[player-fullscreened]') !== null;
+}
+
 export const VolumePlugin: YTMDPlugin = {
   id: 'volume',
   name: 'Wheel Volume Controller',
@@ -63,7 +70,8 @@ export const VolumePlugin: YTMDPlugin = {
       const changed = lastVolume !== null && volume !== lastVolume;
       lastVolume = volume;
       const panel = document.querySelector('ytmusic-player-page #main-panel');
-      if (!visibleRect(panel)) {
+      const fullscreen = isPlayerFullscreen();
+      if (!fullscreen && !visibleRect(panel)) {
         hideIndicator();
         return;
       }
@@ -123,7 +131,11 @@ export const VolumePlugin: YTMDPlugin = {
     const handleWheel = (e: WheelEvent) => {
       if (e.deltaY === 0 || e.ctrlKey) return;
       const target = e.target;
-      if (target instanceof Element && target.closest('ytmusic-menu-popup-renderer, tp-yt-paper-dialog, [role="menu"], [role="dialog"], input, textarea, select')) return;
+      const blocker = target instanceof Element
+        ? target.closest('ytmusic-menu-popup-renderer, tp-yt-paper-dialog, [role="menu"], [role="dialog"], input, textarea, select')
+        : null;
+      // The fullscreen player itself gets role="dialog"; only real popups should block the wheel.
+      if (blocker && blocker.tagName !== 'YTMUSIC-PLAYER') return;
 
       const containsPointer = (element: Element | null) => {
         if (!element) return false;
@@ -134,7 +146,7 @@ export const VolumePlugin: YTMDPlugin = {
       const overPlayerBar = containsPointer(document.querySelector('ytmusic-player-bar')) ||
         containsPointer(document.querySelector('#player-bar-background'));
       const overMainPanel = ctx.config.wheel_volume_on_player_page === true &&
-        containsPointer(document.querySelector('ytmusic-player-page #main-panel'));
+        (isPlayerFullscreen() || containsPointer(document.querySelector('ytmusic-player-page #main-panel')));
       if (!overPlayerBar && !overMainPanel) return;
 
       const video = ctx.getVideoElement();
@@ -148,7 +160,8 @@ export const VolumePlugin: YTMDPlugin = {
       syncIndicator();
     };
 
-    window.addEventListener('wheel', handleWheel, { passive: false });
+    // Capture phase, so a player handler that stops propagation can't swallow the wheel.
+    window.addEventListener('wheel', handleWheel, { passive: false, capture: true });
     window.addEventListener('resize', syncIndicator);
     document.addEventListener('scroll', syncIndicator, true);
     document.addEventListener('input', handleNativeVolumeInput, true);
@@ -162,7 +175,7 @@ export const VolumePlugin: YTMDPlugin = {
     }, 500);
 
     cleanup = () => {
-      window.removeEventListener('wheel', handleWheel);
+      window.removeEventListener('wheel', handleWheel, { capture: true });
       window.removeEventListener('resize', syncIndicator);
       document.removeEventListener('scroll', syncIndicator, true);
       document.removeEventListener('input', handleNativeVolumeInput, true);
