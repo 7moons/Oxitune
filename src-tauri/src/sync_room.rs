@@ -2936,13 +2936,22 @@ mod tests {
     /// Heartbeats keep a healthy guest in the room well past the timeout.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_heartbeats_keep_idle_guest_in_room() {
-        let host = fast_manager();
-        let guest = fast_manager();
+        // 30 heartbeats per timeout: a CI runner stalling for a few hundred
+        // ms must not look like a dead guest. FAST_LIVENESS's 5x margin
+        // (250 ms) evicted healthy guests on loaded runners.
+        let liveness = LivenessConfig {
+            heartbeat_interval: Duration::from_millis(20),
+            timeout: Duration::from_millis(600),
+            reconnect_for: Duration::from_millis(1200),
+        };
+        let host = Arc::new(SyncRoomManager::with_options(liveness, false));
+        let guest = Arc::new(SyncRoomManager::with_options(liveness, false));
         let (guest_sink, guest_dyn) = recording();
         create_room(&host, noop_sink(), "Host".to_string()).await.unwrap();
         lan_join(&guest, guest_dyn, &host, "Guest").await.unwrap();
 
-        tokio::time::sleep(FAST_LIVENESS.timeout * 4).await;
+        // Twice the timeout: without heartbeats the guest would be gone.
+        tokio::time::sleep(liveness.timeout * 2).await;
 
         assert_eq!(host.get_room_state().unwrap().members.len(), 2);
         assert!(guest.get_room_state().is_some_and(|r| !r.reconnecting));
