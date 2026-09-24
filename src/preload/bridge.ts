@@ -81,8 +81,10 @@ export class PlayerBridge {
   }
 
   static toggleLike(): void {
+    // `#button-shape-like` works in every UI language; the aria-label
+    // fallback only matched English.
     const likeBtn = document.querySelector<HTMLElement>(
-      'ytmusic-player-bar #like-button-renderer #button[aria-label*="Like"], ytmusic-like-button-renderer #button[aria-label*="Like"]'
+      'ytmusic-player-bar ytmusic-like-button-renderer #button-shape-like button, ytmusic-player-bar #like-button-renderer #button[aria-label*="Like"], ytmusic-like-button-renderer #button[aria-label*="Like"]'
     );
     if (likeBtn) {
       likeBtn.click();
@@ -91,11 +93,38 @@ export class PlayerBridge {
 
   static toggleDislike(): void {
     const dislikeBtn = document.querySelector<HTMLElement>(
-      'ytmusic-player-bar #like-button-renderer #button[aria-label*="Dislike"], ytmusic-like-button-renderer #button[aria-label*="Dislike"]'
+      'ytmusic-player-bar ytmusic-like-button-renderer #button-shape-dislike button, ytmusic-player-bar #like-button-renderer #button[aria-label*="Dislike"], ytmusic-like-button-renderer #button[aria-label*="Dislike"]'
     );
     if (dislikeBtn) {
       dislikeBtn.click();
     }
+  }
+
+  /** YTM's own like state for the playing song (`like-status` on the
+   * player bar's like renderer; read only). */
+  static getLikeStatus(): 'like' | 'dislike' | 'none' {
+    const status = document
+      .querySelector('ytmusic-player-bar ytmusic-like-button-renderer')
+      ?.getAttribute('like-status');
+    return status === 'LIKE' ? 'like' : status === 'DISLIKE' ? 'dislike' : 'none';
+  }
+
+  static getRepeatMode(): 'none' | 'all' | 'one' {
+    const mode = document.querySelector('ytmusic-player-bar')?.getAttribute('repeat-mode');
+    return mode === 'ALL' ? 'all' : mode === 'ONE' ? 'one' : 'none';
+  }
+
+  static isShuffleOn(): boolean {
+    return document.querySelector('ytmusic-player-bar')?.hasAttribute('shuffle-on') ?? false;
+  }
+
+  static toggleShuffle(): void {
+    document.querySelector<HTMLElement>('ytmusic-player-bar .shuffle, ytmusic-player-bar #shuffle-button')?.click();
+  }
+
+  /** Off → all → one → off, like YTM's own button. */
+  static cycleRepeat(): void {
+    document.querySelector<HTMLElement>('ytmusic-player-bar .repeat, ytmusic-player-bar #repeat-button')?.click();
   }
 
   static toggleMute(): void {

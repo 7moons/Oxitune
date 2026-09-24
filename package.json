@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "bun run build:preload && vite",
     "build:preload": "bun build src/preload/index.ts --outfile src-tauri/inject/preload.js --target browser --minify --format iife",
-    "build": "tsc && vite build && bun run build:preload",
+    "build": "tsc && vite build && bun run build:remote && bun run build:preload",
+    "build:remote": "vite build -c vite.remote.config.ts",
     "preview": "vite preview",
     "tauri": "tauri",
     "test": "bun test",

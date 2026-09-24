@@ -116,20 +116,6 @@ pub async fn lookup(
     Vec::new()
 }
 
-/// The best LRCLIB record as raw JSON (the phone remote's old API).
-pub async fn fetch_raw(artist: &str, title: &str, album: Option<&str>, duration: Option<f64>) -> Result<Value, String> {
-    let http = reqwest::Client::builder()
-        .user_agent("YTMD-Desktop/1.0 (https://github.com/dachluczaj/ytmd)")
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .map_err(|e| e.to_string())?;
-    lookup(&http, artist, title, album, duration)
-        .await
-        .into_iter()
-        .next()
-        .ok_or_else(|| "Lyrics not found in database".to_string())
-}
-
 impl LyricsProvider for Lrclib {
     fn id(&self) -> ProviderId {
         ProviderId::Lrclib

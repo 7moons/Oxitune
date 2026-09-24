@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#030303" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" type="image/png" href="/remote-icon.png" />
+    <link rel="apple-touch-icon" href="/remote-icon.png" />
+    <title>YTMD</title>
+  </head>
+  <body>
+    <img id="wash" class="wash" alt="" aria-hidden="true" />
+    <div class="veil" aria-hidden="true"></div>
+
+    <div id="offline" class="banner is-hidden" role="status" data-i18n="status.offline">Not connected to YTMD. Reconnecting…</div>
+
+    <main id="views">
+      <section id="view-player" class="view is-active" aria-labelledby="tab-player">
+        <div class="cover-wrap">
+          <img id="cover" class="cover" alt="" />
+        </div>
+        <div class="meta">
+          <div class="meta-text">
+            <h1 id="title" class="title" data-i18n="status.nothing">Nothing is playing</h1>
+            <p id="artist" class="artist"></p>
+          </div>
+          <div class="like-row">
+            <button id="btn-dislike" class="icon-btn" data-i18n-label="player.dislike" aria-pressed="false">
+              <svg viewBox="0 0 24 24"><path d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z"/></svg>
+            </button>
+            <button id="btn-like" class="icon-btn" data-i18n-label="player.like" aria-pressed="false">
+              <svg viewBox="0 0 24 24"><path d="M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="seek">
+          <input id="seek" class="range" type="range" min="0" max="1" step="0.1" value="0" data-i18n-label="player.seek" />
+          <div class="times"><span id="time-cur">0:00</span><span id="time-dur">0:00</span></div>
+        </div>
+
+        <div class="controls">
+          <button id="btn-shuffle" class="icon-btn" data-i18n-label="player.shuffle" aria-pressed="false">
+            <svg viewBox="0 0 24 24"><path d="M10.59 9.17 5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z"/></svg>
+          </button>
+          <button id="btn-prev" class="icon-btn icon-btn-lg" data-i18n-label="player.previous">
+            <svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg>
+          </button>
+          <button id="btn-play" class="play-btn" data-i18n-label="player.play">
+            <svg id="icon-play" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+            <svg id="icon-pause" class="is-hidden" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+          </button>
+          <button id="btn-next" class="icon-btn icon-btn-lg" data-i18n-label="player.next">
+            <svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+          </button>
+          <button id="btn-repeat" class="icon-btn" data-i18n-label="player.repeat" aria-pressed="false">
+            <svg id="icon-repeat" viewBox="0 0 24 24"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/></svg>
+            <svg id="icon-repeat-one" class="is-hidden" viewBox="0 0 24 24"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4zm-4-2V9h-1l-2 1v1h1.5v4H13z"/></svg>
+          </button>
+        </div>
+
+        <div class="volume">
+          <button id="btn-mute" class="icon-btn" data-i18n-label="player.mute" aria-pressed="false">
+            <svg id="icon-vol" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+            <svg id="icon-muted" class="is-hidden" viewBox="0 0 24 24"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3 3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4 9.91 6.09 12 8.18V4z"/></svg>
+          </button>
+          <input id="volume" class="range" type="range" min="0" max="1" step="0.01" value="1" data-i18n-label="player.volume" />
+        </div>
+      </section>
+
+      <section id="view-lyrics" class="view" aria-labelledby="tab-lyrics">
+        <div id="lyrics" class="lyrics"></div>
+        <p id="lyrics-empty" class="empty is-hidden" data-i18n="lyrics.none">No lyrics for this song</p>
+        <p id="lyrics-source" class="footnote"></p>
+      </section>
+
+      <section id="view-queue" class="view" aria-labelledby="tab-queue">
+        <p id="queue-shared" class="footnote is-hidden" data-i18n="queue.shared">Shared queue of your Listen Together session</p>
+        <ul id="queue-list" class="list"></ul>
+        <p id="queue-empty" class="empty is-hidden" data-i18n="queue.empty">The queue is empty</p>
+      </section>
+
+      <section id="view-search" class="view" aria-labelledby="tab-search">
+        <form id="search-form" class="search-form" role="search">
+          <input id="search-input" class="input" type="search" enterkeyhint="search" autocomplete="off" data-i18n-placeholder="search.placeholder" data-i18n-label="search.placeholder" placeholder="Search songs" />
+        </form>
+        <ul id="search-results" class="list"></ul>
+        <p id="search-empty" class="empty is-hidden" data-i18n="search.empty">No songs found</p>
+      </section>
+
+      <section id="view-room" class="view" aria-labelledby="tab-room">
+        <p id="room-none" class="empty" data-i18n="room.none">You're not in a Listen Together session. Start or join one in YTMD.</p>
+        <div id="room-body" class="is-hidden">
+          <h2 id="room-count" class="section-title"></h2>
+          <ul id="room-members" class="list"></ul>
+          <p id="room-listener" class="footnote is-hidden" data-i18n="room.listenerNote">As a listener you can react and vote to skip.</p>
+          <div class="room-actions">
+            <button id="btn-vote" class="btn btn-tonal" data-i18n="room.voteSkip">Vote to skip</button>
+            <span id="room-votes" class="footnote"></span>
+          </div>
+          <div id="reactions" class="reactions" role="group" data-i18n-label="room.react"></div>
+        </div>
+      </section>
+    </main>
+
+    <div id="floating" class="floating" aria-hidden="true"></div>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <nav class="tabbar" role="tablist">
+      <button id="tab-player" class="tab is-active" role="tab" data-view="view-player" aria-selected="true">
+        <svg viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
+        <span data-i18n="tab.player">Now playing</span>
+      </button>
+      <button id="tab-lyrics" class="tab" role="tab" data-view="view-lyrics" aria-selected="false">
+        <svg viewBox="0 0 24 24"><path d="M3 18h12v-2H3v2zM3 6v2h18V6H3zm0 7h18v-2H3v2z"/></svg>
+        <span data-i18n="tab.lyrics">Lyrics</span>
+      </button>
+      <button id="tab-queue" class="tab" role="tab" data-view="view-queue" aria-selected="false">
+        <svg viewBox="0 0 24 24"><path d="M15 6H3v2h12V6zm0 4H3v2h12v-2zM3 16h8v-2H3v2zM17 6v8.18c-.31-.11-.65-.18-1-.18-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3V8h3V6h-5z"/></svg>
+        <span data-i18n="tab.queue">Up next</span>
+      </button>
+      <button id="tab-search" class="tab" role="tab" data-view="view-search" aria-selected="false">
+        <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+        <span data-i18n="tab.search">Search</span>
+      </button>
+      <button id="tab-room" class="tab" role="tab" data-view="view-room" aria-selected="false">
+        <svg viewBox="0 0 24 24"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
+        <span data-i18n="tab.room">Listen together</span>
+      </button>
+    </nav>
+
+    <script type="module" src="/src/remote/main.ts"></script>
+  </body>
+</html>

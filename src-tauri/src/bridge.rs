@@ -47,6 +47,23 @@ fn to_data<T: Serialize>(value: T) -> Result<Value, String> {
 }
 
 #[derive(Deserialize)]
+struct RemotePublishArgs {
+    kind: String,
+    #[serde(default)]
+    data: Value,
+}
+
+#[derive(Deserialize)]
+struct RemoteReplyArgs {
+    id: u32,
+    ok: bool,
+    #[serde(default)]
+    data: Value,
+    #[serde(default)]
+    error: Option<String>,
+}
+
+#[derive(Deserialize)]
 struct SaveConfigArgs {
     config: config::AppConfig,
 }
@@ -176,7 +193,7 @@ bridge_commands! {
     }
     "get_remote_info" => |h, state, args| {
         let port = state.remote_status.serving_port()?;
-        to_data(remote_server::get_remote_info(port, &state.remote_token))
+        to_data(remote_server::get_remote_info(port, &state.remote_status.token()))
     }
     "toggle_settings_window" => |h, state, args| {
         commands::toggle_settings_window(h.clone())?;
@@ -297,6 +314,22 @@ bridge_commands! {
         });
         Ok(Value::Null)
     }
+    // Phone remote (remote_server.rs): the page reports what a connected
+    // phone shows and answers the phone's `remote-action` requests.
+    "remote_clients" => |h, state, args| {
+        to_data(state.remote_status.hub.client_count())
+    }
+    "remote_publish" => |h, state, args| {
+        let p: RemotePublishArgs = parse_args("remote_publish", args)?;
+        state.remote_status.hub.publish(&p.kind, p.data)?;
+        Ok(Value::Null)
+    }
+    "remote_reply" => |h, state, args| {
+        let p: RemoteReplyArgs = parse_args("remote_reply", args)?;
+        let reply = if p.ok { Ok(p.data) } else { Err(p.error.unwrap_or_else(|| "remote.error.failed".into())) };
+        state.remote_status.hub.resolve(p.id, reply);
+        Ok(Value::Null)
+    }
 }
 
 #[cfg(test)]
@@ -374,6 +407,9 @@ mod tests {
             "sync_queue_play",
             "sync_queue_move",
             "save_config",
+            "remote_clients",
+            "remote_publish",
+            "remote_reply",
         ] {
             assert!(set.contains(cmd), "`{cmd}` missing from BRIDGE_COMMANDS");
         }

@@ -36,7 +36,6 @@ pub struct AppState {
     pub invites: join_link::InviteState,
     pub sync_room: Arc<SyncRoomManager>,
     pub power_manager: PowerManager,
-    pub remote_token: String,
     pub remote_status: Arc<remote_server::RemoteServerStatus>,
     /// Where tauri-plugin-log writes (`~/.ytmd/logs`).
     pub logs_dir: std::path::PathBuf,
@@ -81,8 +80,7 @@ pub fn run() {
         None
     };
 
-    let remote_token = remote_server::generate_token();
-    let config_manager_dir = config_manager.config_path().parent().map(std::path::Path::to_path_buf);
+    let ytmd_dir = config_manager.config_path().parent().map(|dir| dir.to_path_buf());
     let logs_dir = config_manager
         .config_path()
         .parent()
@@ -121,12 +119,14 @@ pub fn run() {
         invites: join_link::InviteState::default(),
         sync_room: Arc::new(SyncRoomManager::new().with_client_id(sync_client_id)),
         power_manager: PowerManager::new(),
-        remote_token: remote_token.clone(),
-        remote_status: Arc::new(remote_server::RemoteServerStatus::new(initial_config.remote_enabled)),
+        remote_status: Arc::new(remote_server::RemoteServerStatus::new(
+            initial_config.remote_enabled,
+            ytmd_dir.as_ref().map(|dir| dir.join("remote_token")),
+        )),
         logs_dir: logs_dir.clone(),
         session: session_store,
         lyrics: lyrics::LyricsState::new(
-            config_manager_dir.unwrap_or_else(|| std::path::PathBuf::from(".")),
+            ytmd_dir.clone().unwrap_or_else(|| std::path::PathBuf::from(".")),
         ),
     });
 
@@ -187,7 +187,6 @@ pub fn run() {
                 remote_server::start_remote_server(
                     handle.clone(),
                     remote_port,
-                    remote_token.clone(),
                     app_state_for_setup.remote_status.clone(),
                 );
             }
@@ -354,6 +353,7 @@ pub fn run() {
             commands::import_settings,
             commands::broadcast_sync_state,
             commands::get_remote_info,
+            commands::regenerate_remote_token,
             commands::set_inhibit_sleep,
             commands::minimize_window,
             commands::toggle_maximize_window,

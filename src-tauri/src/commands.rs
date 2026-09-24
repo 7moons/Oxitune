@@ -224,17 +224,6 @@ pub fn send_volume_command(app_handle: AppHandle, volume: f64) -> Result<(), Str
     Ok(())
 }
 
-/// Legacy LRCLIB-shaped lookup, kept only for the phone remote's old
-/// `/api/invoke` path; the app itself uses `lyrics::commands::fetch_lyrics`.
-pub async fn fetch_lyrics(
-    artist: String,
-    title: String,
-    album_name: Option<String>,
-    duration: Option<f64>,
-) -> Result<serde_json::Value, String> {
-    crate::lyrics::lrclib::fetch_raw(&artist, &title, album_name.as_deref(), duration).await
-}
-
 /// Lets a companion window (settings, local library, sync) that opens or
 /// reloads mid-song fetch the track already playing, instead of sitting
 /// blank until the next `track-changed` broadcast.
@@ -656,7 +645,14 @@ pub fn get_remote_info(
     // The port the server actually bound at startup, not the configured one:
     // a port edited in Settings only applies after a restart.
     let port = state.remote_status.serving_port()?;
-    Ok(crate::remote_server::get_remote_info(port, &state.remote_token))
+    Ok(crate::remote_server::get_remote_info(port, &state.remote_status.token()))
+}
+
+/// "Revoke paired phones": a new pairing token; every phone must scan the
+/// QR code again.
+#[tauri::command]
+pub fn regenerate_remote_token(state: State<'_, Arc<AppState>>) -> Result<(), String> {
+    state.remote_status.regenerate_token().map(|_| ())
 }
 
 #[tauri::command]
