@@ -50,6 +50,7 @@ function createPage() {
   artwork.rect = { left: 400, right: 900, top: 200, bottom: 700, width: 500, height: 500 };
   const video = Object.assign(new FakeElement(), { volume: 0.5, muted: false });
   video.rect = { left: 300, right: 1000, top: 150, bottom: 650, width: 700, height: 500 };
+  let frame: FakeElement | null = null;
   let mode: 'song' | 'video' = 'song';
   let fullscreen = false;
   let playerVolume = 50;
@@ -59,6 +60,8 @@ function createPage() {
   let intervalHandler: (() => void) | undefined;
   let nextTimerId = 1;
   const timers = new Map<number, () => void>();
+  let nextFrameId = 1;
+  const frames = new Map<number, () => void>();
   const documentHandlers = new Map<string, (event: Event) => void>();
   let indicator: FakeElement | null = null;
 
@@ -92,7 +95,12 @@ function createPage() {
         return id;
       },
       clearTimeout: (id: number) => { timers.delete(id); },
-      requestAnimationFrame: (handler: () => void) => { handler(); return 1; }
+      requestAnimationFrame: (handler: () => void) => {
+        const id = nextFrameId++;
+        frames.set(id, handler);
+        return id;
+      },
+      cancelAnimationFrame: (id: number) => { frames.delete(id); }
     }
   });
   Object.defineProperty(globalThis, 'document', {
@@ -110,6 +118,7 @@ function createPage() {
         if (selector === 'ytmusic-player-page #main-panel') return panel;
         if (selector === 'ytmusic-player-page #song-image') return artwork;
         if (selector === 'ytmusic-player-page video') return video;
+        if (selector === 'ytmusic-player-page #player') return frame;
         if (selector === 'ytmusic-player-bar #volume-slider') return slider;
         if (selector === '#expand-volume-slider') return expandedSlider;
         if (selector === 'ytmusic-player-page[video-mode], ytmusic-player-page ytmusic-player[video-mode]') {
@@ -152,6 +161,19 @@ function createPage() {
     },
     dispatchInput() { documentHandlers.get('input')?.({} as Event); },
     tick() { intervalHandler?.(); },
+    moveVideo(left: number, top: number) {
+      video.rect = { ...video.rect, left, top, right: left + video.rect.width, bottom: top + video.rect.height };
+    },
+    setPlayerFrame(left: number, top: number, width: number, height: number) {
+      frame = new FakeElement();
+      frame.rect = { left, top, width, height, right: left + width, bottom: top + height };
+    },
+    get pendingFrames() { return frames.size; },
+    frame() {
+      const due = [...frames];
+      frames.clear();
+      for (const [, handler] of due) handler();
+    },
     expireBadge() {
       for (const [id, handler] of timers) {
         timers.delete(id);
@@ -211,6 +233,34 @@ test('volume badge appears only after a change, follows media, then fades away',
   page.expireBadge();
   expect(page.indicator?.classes.has('ytmd-visible')).toBe(false);
   expect(KIT_CSS).toMatch(/#ytmd-volume-indicator\s*\{[^}]*transition:\s*opacity/s);
+});
+
+test('visible badge follows the media while the player page is still moving, then stops', () => {
+  const page = createPage();
+  page.setMode('video');
+  page.moveVideo(300, -40);
+  page.wheelUp();
+  expect(page.indicator?.style.top).toBe('8px');
+
+  page.moveVideo(300, 150);
+  page.frame();
+  expect(page.indicator?.style.left).toBe('312px');
+  expect(page.indicator?.style.top).toBe('162px');
+  expect(page.pendingFrames).toBe(1);
+
+  page.expireBadge();
+  expect(page.indicator?.classes.has('ytmd-visible')).toBe(false);
+  expect(page.pendingFrames).toBe(0);
+});
+
+test('a paused video taller than its frame still gets the badge in the frame corner', () => {
+  const page = createPage();
+  page.setMode('video');
+  page.setPlayerFrame(300, 290, 540, 300);
+  page.moveVideo(300, -40);
+  page.wheelUp();
+  expect(page.indicator?.style.left).toBe('312px');
+  expect(page.indicator?.style.top).toBe('302px');
 });
 
 test('fullscreen player changes volume anywhere on screen, not only over the old main panel', () => {

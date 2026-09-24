@@ -1,5 +1,6 @@
 import { YTMDPlugin, PluginContext } from '../types';
 import { getPlayerVolumePercent, isPlayerMuted, setPlayerVolumePercent } from '../../preload/playerVolume';
+import { isResumeMuting } from '../../preload/resume';
 import { ensureKitStyles } from '../../preload/ui/kit';
 import { t } from '../../preload/ui/i18n';
 import { createEl } from '../../utils/dom';
@@ -17,6 +18,14 @@ function visibleRect(element: Element | null): DOMRect | null {
     if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) return null;
   }
   return rect;
+}
+
+/** `rect` limited to `frame`, or `frame` when they don't overlap. */
+function clipRect(rect: DOMRect, frame: DOMRect): { left: number; top: number } {
+  const left = Math.max(rect.left, frame.left);
+  const top = Math.max(rect.top, frame.top);
+  if (left >= Math.min(rect.right, frame.right) || top >= Math.min(rect.bottom, frame.bottom)) return frame;
+  return { left, top };
 }
 
 // YTM's fullscreen player covers the whole window, and #main-panel keeps its
@@ -44,19 +53,59 @@ export const VolumePlugin: YTMDPlugin = {
     let lastVolume: number | null = null;
     let hideTimer: number | null = null;
 
+    let followFrame: number | null = null;
+
+    const stopFollowing = () => {
+      if (followFrame !== null) window.cancelAnimationFrame(followFrame);
+      followFrame = null;
+    };
+
     const hideIndicator = () => {
       if (hideTimer !== null) window.clearTimeout(hideTimer);
       hideTimer = null;
+      stopFollowing();
       indicator.classList.remove('ytmd-visible');
+    };
+
+    // Pins the badge to the media's top-left corner; false when there's nothing to pin it to.
+    const placeIndicator = (): boolean => {
+      const panel = document.querySelector('ytmusic-player-page #main-panel');
+      if (!isPlayerFullscreen() && !visibleRect(panel)) return false;
+      const artwork = visibleRect(document.querySelector('ytmusic-player-page #song-image'));
+      const movie = visibleRect(document.querySelector('ytmusic-player-page video')) ||
+        visibleRect(document.querySelector('ytmusic-player-page #movie_player'));
+      const videoMode = document.querySelector('ytmusic-player-page[video-mode], ytmusic-player-page ytmusic-player[video-mode]');
+      const media = (videoMode ? movie || artwork : artwork || movie) || visibleRect(panel);
+      if (!media) return false;
+      // A paused, never-played video (resume on launch) keeps a stale, taller box
+      // than the frame that shows it; the frame is what the user sees.
+      const frame = visibleRect(document.querySelector('ytmusic-player-page #player'));
+      const rect = frame ? clipRect(media, frame) : media;
+      const left = `${Math.max(8, rect.left + 12)}px`;
+      const top = `${Math.max(8, rect.top + 12)}px`;
+      if (indicator.style.left !== left) indicator.style.left = left;
+      if (indicator.style.top !== top) indicator.style.top = top;
+      return true;
+    };
+
+    // The player page animates open (and relayouts after a resize), so a
+    // position read once can be off by the time the badge is seen: follow
+    // the media every frame while the badge is up.
+    const follow = () => {
+      followFrame = null;
+      if (!indicator.classList.contains('ytmd-visible')) return;
+      if (!placeIndicator()) {
+        hideIndicator();
+        return;
+      }
+      followFrame = window.requestAnimationFrame(follow);
     };
 
     const showIndicator = () => {
       if (hideTimer !== null) window.clearTimeout(hideTimer);
       indicator.classList.add('ytmd-visible');
-      hideTimer = window.setTimeout(() => {
-        hideTimer = null;
-        indicator.classList.remove('ytmd-visible');
-      }, 1800);
+      if (followFrame === null) followFrame = window.requestAnimationFrame(follow);
+      hideTimer = window.setTimeout(hideIndicator, 1800);
     };
 
     const syncIndicator = () => {
@@ -67,33 +116,18 @@ export const VolumePlugin: YTMDPlugin = {
         return;
       }
       const volume = isPlayerMuted(video) ? 0 : getPlayerVolumePercent(video);
-      const changed = lastVolume !== null && volume !== lastVolume;
+      // Resume on launch mutes and unmutes the player itself; that's no change to announce.
+      const changed = lastVolume !== null && volume !== lastVolume && !isResumeMuting();
       lastVolume = volume;
-      const panel = document.querySelector('ytmusic-player-page #main-panel');
-      const fullscreen = isPlayerFullscreen();
-      if (!fullscreen && !visibleRect(panel)) {
-        hideIndicator();
-        return;
-      }
 
       if (indicator.textContent !== `${volume}%`) {
         indicator.textContent = `${volume}%`;
         indicator.setAttribute('aria-label', t().volumeLevel(volume));
       }
-
-      const artwork = visibleRect(document.querySelector('ytmusic-player-page #song-image'));
-      const movie = visibleRect(document.querySelector('ytmusic-player-page video')) ||
-        visibleRect(document.querySelector('ytmusic-player-page #movie_player'));
-      const videoMode = document.querySelector('ytmusic-player-page[video-mode], ytmusic-player-page ytmusic-player[video-mode]');
-      const rect = (videoMode ? movie || artwork : artwork || movie) || visibleRect(panel);
-      if (!rect) {
+      if (!placeIndicator()) {
         hideIndicator();
         return;
       }
-      const left = `${Math.max(8, rect.left + 12)}px`;
-      const top = `${Math.max(8, rect.top + 12)}px`;
-      if (indicator.style.left !== left) indicator.style.left = left;
-      if (indicator.style.top !== top) indicator.style.top = top;
       if (changed) showIndicator();
     };
 
