@@ -275,7 +275,7 @@ function renderRegistries(registries: Registry[], refresh: () => void): void {
     const row = createEl('div', { className: 'setting-row' });
     const text = createEl('div', { className: 'setting-text' });
     const title = createEl('span', { className: 'setting-title', text: r.official ? tr('plugins.registry.official') : r.name || r.url });
-    if (r.official) title.append(' ', createEl('span', { className: 'chip', text: tr('plugins.registry.officialBadge') }));
+    if (r.official) title.append(createEl('span', { className: 'plugin-badge', text: tr('plugins.registry.officialBadge') }));
     text.append(title);
     text.append(createEl('span', { className: 'setting-desc mono', text: r.url }));
     row.append(text);
