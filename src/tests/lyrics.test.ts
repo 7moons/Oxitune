@@ -1,37 +1,67 @@
 import { describe, expect, test } from 'bun:test';
-import {
-  parseLrc,
-  isCurrentSongKey,
-  isLyricsTabUnlocked,
-  loadOffsets,
-  storeOffset,
-  formatOffset,
-  MAX_STORED_OFFSETS
-} from '../plugins/lyrics';
+import { isCurrentSongKey, isLyricsTabUnlocked, loadOffsets, formatOffset, songKeyOf } from '../plugins/lyrics';
+import { activeLineIndex, activeWordIndex, providerName, toCurrentLyrics, LyricsLine } from '../types/lyrics';
+import { moveProvider, normalizeProviders } from '../ui/lyricsProviders';
 
-describe('parseLrc', () => {
-  test('parses standard [mm:ss.xx] timestamps in order', () => {
-    const lrc = [
-      '[00:12.50]First line',
-      '[00:05.00]Second line appears first in time',
-      '[01:02.345]Third line with millis'
-    ].join('\n');
+// LRC parsing moved to the backend: src-tauri/src/lyrics/lrc.rs has its tests.
 
-    const lines = parseLrc(lrc);
-    expect(lines).toHaveLength(3);
-    expect(lines[0]).toEqual({ timeSecs: 5, text: 'Second line appears first in time' });
-    expect(lines[1]).toEqual({ timeSecs: 12.5, text: 'First line' });
-    expect(lines[2].timeSecs).toBeCloseTo(62.345, 3);
+const lines: LyricsLine[] = [
+  { t: 5, text: 'first' },
+  { t: 10, text: 'second', words: [{ t: 10, text: 'sec' }, { t: 11, text: 'ond' }] },
+  { t: 20, text: 'third' }
+];
+
+describe('activeLineIndex', () => {
+  test('before the first line there is none', () => {
+    expect(activeLineIndex(lines, 4.9, 0)).toBe(-1);
   });
-
-  test('drops lines with empty text after the timestamp', () => {
-    const lines = parseLrc('[00:01.00]\n[00:02.00]Real lyric');
-    expect(lines).toEqual([{ timeSecs: 2, text: 'Real lyric' }]);
+  test('a line stays active until the next one starts', () => {
+    expect(activeLineIndex(lines, 5, 0)).toBe(0);
+    expect(activeLineIndex(lines, 19.99, 0)).toBe(1);
+    expect(activeLineIndex(lines, 500, 0)).toBe(2);
   });
+  test('a positive offset shows lines earlier', () => {
+    expect(activeLineIndex(lines, 9, 1)).toBe(1);
+    expect(activeLineIndex(lines, 10, -1)).toBe(0);
+  });
+  test('no lines', () => {
+    expect(activeLineIndex([], 10, 0)).toBe(-1);
+  });
+});
 
-  test('ignores non-lyric metadata lines without a timestamp', () => {
-    const lines = parseLrc('[ar:Some Artist]\n[00:03.00]Actual lyric');
-    expect(lines).toEqual([{ timeSecs: 3, text: 'Actual lyric' }]);
+describe('activeWordIndex', () => {
+  test('words light up as they start', () => {
+    expect(activeWordIndex(lines[1], 10.5, 0)).toBe(0);
+    expect(activeWordIndex(lines[1], 11, 0)).toBe(1);
+    expect(activeWordIndex(lines[1], 9, 0)).toBe(-1);
+  });
+  test('lines without words have no active word', () => {
+    expect(activeWordIndex(lines[0], 6, 0)).toBe(-1);
+    expect(activeWordIndex(undefined, 6, 0)).toBe(-1);
+  });
+});
+
+describe('toCurrentLyrics', () => {
+  test('keeps a well-formed payload', () => {
+    const p = toCurrentLyrics({ video_id: 'v', provider: 'lrclib', synced: lines, plain: 'x', offset_secs: 0.5, source_url: null });
+    expect(p.provider).toBe('lrclib');
+    expect(p.synced).toHaveLength(3);
+    expect(p.offset_secs).toBe(0.5);
+  });
+  test('malformed input becomes no lyrics, never throws', () => {
+    expect(toCurrentLyrics(null).synced).toEqual([]);
+    const p = toCurrentLyrics({ synced: [{ t: 'x', text: 1 }, { t: 1, text: 'ok' }], offset_secs: Number.NaN, provider: 3 });
+    expect(p.synced).toEqual([{ t: 1, text: 'ok' }]);
+    expect(p.offset_secs).toBe(0);
+    expect(p.provider).toBeNull();
+  });
+});
+
+describe('providerName', () => {
+  test('brand names and the translated local label', () => {
+    expect(providerName('musixmatch', 'Local')).toBe('Musixmatch');
+    expect(providerName('local', 'Pliki lokalne')).toBe('Pliki lokalne');
+    expect(providerName(null, 'x')).toBe('');
   });
 });
 
@@ -41,9 +71,12 @@ describe('Lyrics: stale fetch guard', () => {
   });
 
   test('rejects a response for a song the user has already skipped past', () => {
-    // fetch_lyrics was requested for Song A, but the user changed tracks to
-    // Song B before it resolved — must not paint Song A's lyrics over Song B.
     expect(isCurrentSongKey('Song A - Artist A', 'Song B - Artist B')).toBe(false);
+  });
+
+  test('song key prefers the video id, like the backend', () => {
+    expect(songKeyOf({ videoId: 'abc', title: 'T', artist: 'A' })).toBe('abc');
+    expect(songKeyOf({ videoId: undefined, title: 'T', artist: 'A' })).toBe('T - A');
   });
 });
 
@@ -70,60 +103,21 @@ describe('isLyricsTabUnlocked', () => {
   });
 });
 
-describe('parseLrc global offset', () => {
-  test('[offset:+500] shifts every line 0.5s earlier', () => {
-    const lines = parseLrc('[offset:500]\n[00:10.00]First\n[00:20.00]Second');
-    expect(lines.map((l) => l.timeSecs)).toEqual([9.5, 19.5]);
-  });
-});
-
-describe('lyrics timing offsets persist across restarts', () => {
-  const memoryStorage = () => {
-    const data = new Map<string, string>();
-    return {
-      getItem: (k: string) => data.get(k) ?? null,
-      setItem: (k: string, v: string) => void data.set(k, v)
-    };
-  };
-
-  test('round-trips through storage', () => {
-    const storage = memoryStorage();
-    const map = loadOffsets(storage);
-    storeOffset(map, 'Song - Artist', 1.5, storage);
-    expect(loadOffsets(storage).get('Song - Artist')).toBe(1.5);
+describe('old localStorage offsets are read for the one-time migration', () => {
+  test('valid entries only', () => {
+    expect(loadOffsets({ getItem: () => '[["ok", 1], ["bad", "x"], 3]' })).toEqual(new Map([['ok', 1]]));
   });
 
-  test('zero offset is removed, not stored', () => {
-    const storage = memoryStorage();
-    const map = loadOffsets(storage);
-    storeOffset(map, 'a', 1, storage);
-    storeOffset(map, 'a', 0, storage);
-    expect(loadOffsets(storage).has('a')).toBe(false);
-  });
-
-  test('keeps only the most recent entries', () => {
-    const storage = memoryStorage();
-    const map = loadOffsets(storage);
-    for (let i = 0; i < MAX_STORED_OFFSETS + 5; i++) storeOffset(map, `s${i}`, 0.5, storage);
-    const loaded = loadOffsets(storage);
-    expect(loaded.size).toBe(MAX_STORED_OFFSETS);
-    expect(loaded.has('s0')).toBe(false);
-    expect(loaded.has(`s${MAX_STORED_OFFSETS + 4}`)).toBe(true);
-  });
-
-  test('corrupt or blocked storage never throws', () => {
-    expect(loadOffsets({ getItem: () => '{not json', setItem: () => {} }).size).toBe(0);
-    expect(loadOffsets({ getItem: () => '[["ok", 1], ["bad", "x"], 3]', setItem: () => {} })).toEqual(new Map([['ok', 1]]));
-    const throwing = {
-      getItem: () => {
-        throw new Error('blocked');
-      },
-      setItem: () => {
-        throw new Error('blocked');
-      }
-    };
-    expect(loadOffsets(throwing).size).toBe(0);
-    expect(() => storeOffset(new Map(), 'a', 1, throwing)).not.toThrow();
+  test('corrupt, missing or blocked storage never throws', () => {
+    expect(loadOffsets({ getItem: () => '{not json' }).size).toBe(0);
+    expect(loadOffsets({ getItem: () => null }).size).toBe(0);
+    expect(
+      loadOffsets({
+        getItem: () => {
+          throw new Error('blocked');
+        }
+      }).size
+    ).toBe(0);
     expect(loadOffsets(null).size).toBe(0);
   });
 
@@ -131,5 +125,28 @@ describe('lyrics timing offsets persist across restarts', () => {
     expect(formatOffset(0)).toBe('0.0 s');
     expect(formatOffset(1.5)).toBe('+1.5 s');
     expect(formatOffset(-0.5)).toBe('−0.5 s');
+  });
+});
+
+describe('lyrics provider settings', () => {
+  test('unknown and duplicate ids dropped, missing ones appended with defaults', () => {
+    const list = normalizeProviders([
+      { id: 'genius', enabled: true },
+      { id: 'bogus', enabled: true },
+      { id: 'genius', enabled: false }
+    ]);
+    expect(list[0]).toEqual({ id: 'genius', enabled: true });
+    expect(list.map((p) => p.id).sort()).toEqual(['genius', 'local', 'lrclib', 'musixmatch', 'netease', 'ytm']);
+    expect(list.find((p) => p.id === 'musixmatch')?.enabled).toBe(false);
+    expect(list.find((p) => p.id === 'netease')?.enabled).toBe(false);
+    expect(list.find((p) => p.id === 'lrclib')?.enabled).toBe(true);
+  });
+
+  test('moving keeps every provider and clamps at the ends', () => {
+    const list = normalizeProviders(undefined);
+    expect(moveProvider(list, 1, -1).map((p) => p.id).slice(0, 2)).toEqual(['lrclib', 'local']);
+    expect(moveProvider(list, 0, -1)).toEqual(list);
+    expect(moveProvider(list, list.length - 1, 1)).toEqual(list);
+    expect(moveProvider(list, 2, 1)).toHaveLength(list.length);
   });
 });

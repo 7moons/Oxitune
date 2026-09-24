@@ -20,7 +20,7 @@
 //! silently (the call just timed out), which is how Listen Together and the
 //! sleep inhibitor were once dead.
 
-use crate::{commands, config, discord_rpc::TrackPayload, downloader, remote_server, sync_room, AppState};
+use crate::{commands, config, discord_rpc::TrackPayload, downloader, lyrics, remote_server, sync_room, AppState};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -63,12 +63,20 @@ struct NotifyArgs {
 }
 
 #[derive(Deserialize)]
-struct LyricsArgs {
-    artist: String,
-    title: String,
-    #[serde(rename = "albumName")]
-    album_name: Option<String>,
-    duration: Option<f64>,
+#[serde(rename_all = "camelCase")]
+struct LyricsOffsetArgs {
+    offset_secs: f64,
+}
+
+#[derive(Deserialize)]
+struct PickLyricsArgs {
+    provider: String,
+    id: String,
+}
+
+#[derive(Deserialize)]
+struct ImportOffsetsArgs {
+    entries: Vec<(String, f64)>,
 }
 
 #[derive(Deserialize)]
@@ -189,8 +197,26 @@ bridge_commands! {
         Ok(Value::Null)
     }
     "fetch_lyrics" => |h, state, args| {
-        let p: LyricsArgs = parse_args("fetch_lyrics", args)?;
-        commands::fetch_lyrics(p.artist, p.title, p.album_name, p.duration).await
+        let p: lyrics::commands::FetchArgs = parse_args("fetch_lyrics", args)?;
+        to_data(lyrics::commands::fetch(h, state, p).await)
+    }
+    "get_current_lyrics" => |h, state, args| {
+        to_data(state.lyrics.current.lock().clone())
+    }
+    "set_lyrics_offset" => |h, state, args| {
+        let p: LyricsOffsetArgs = parse_args("set_lyrics_offset", args)?;
+        to_data(lyrics::commands::set_offset(&state.lyrics, p.offset_secs, h)?)
+    }
+    "list_lyrics_candidates" => |h, state, args| {
+        to_data(lyrics::commands::candidates(state).await?)
+    }
+    "pick_lyrics" => |h, state, args| {
+        let p: PickLyricsArgs = parse_args("pick_lyrics", args)?;
+        to_data(lyrics::commands::pick(&state.lyrics, &p.provider, &p.id, h)?)
+    }
+    "import_lyrics_offsets" => |h, state, args| {
+        let p: ImportOffsetsArgs = parse_args("import_lyrics_offsets", args)?;
+        to_data(lyrics::commands::import_offsets(&state.lyrics, p.entries, h))
     }
     "broadcast_sync_state" => |h, state, args| {
         let p: BroadcastSyncArgs = parse_args("broadcast_sync_state", args)?;
@@ -317,6 +343,11 @@ mod tests {
             "send_sync_control",
             "download_track",
             "fetch_lyrics",
+            "get_current_lyrics",
+            "set_lyrics_offset",
+            "list_lyrics_candidates",
+            "pick_lyrics",
+            "import_lyrics_offsets",
             "get_config",
             "get_remote_info",
             "notify_track_change",

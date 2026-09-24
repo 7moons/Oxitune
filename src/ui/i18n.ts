@@ -114,6 +114,23 @@ const en = {
   'settings.sponsorblock.desc': 'Skips non-music parts of music videos',
   'settings.lyrics.title': 'Timed lyrics',
   'settings.lyrics.desc': 'Adds lyrics that follow the song to the Lyrics tab',
+  'settings.lyricsSrc.title': 'Lyrics sources',
+  'settings.lyricsSrc.desc': 'Checked in this order. Timed lyrics from any source win over text-only ones.',
+  'settings.lyricsSrc.unofficial': 'Unofficial API: may stop working and may be against the service’s terms',
+  'settings.lyricsSrc.up': 'Move {name} up',
+  'settings.lyricsSrc.down': 'Move {name} down',
+  'settings.lyricsSrc.name.local': 'Your music files',
+  'settings.lyricsSrc.name.lrclib': 'LRCLIB',
+  'settings.lyricsSrc.name.musixmatch': 'Musixmatch',
+  'settings.lyricsSrc.name.netease': 'NetEase Cloud Music',
+  'settings.lyricsSrc.name.ytm': 'YouTube Music',
+  'settings.lyricsSrc.name.genius': 'Genius',
+  'settings.lyricsSrc.desc.local': 'A .lrc file or lyrics saved in the song’s file',
+  'settings.lyricsSrc.desc.lrclib': 'Open lyrics database, timed',
+  'settings.lyricsSrc.desc.musixmatch': 'Timed, often word by word',
+  'settings.lyricsSrc.desc.netease': 'Timed, large catalog',
+  'settings.lyricsSrc.desc.ytm': 'YouTube Music’s own text, not timed',
+  'settings.lyricsSrc.desc.genius': 'Text only',
   'settings.notifications.title': 'Song notifications',
   'settings.notifications.desc': 'Shows a desktop notification when the song changes',
   'settings.discord.title': 'Show on Discord',
@@ -275,7 +292,10 @@ const en = {
 
   'mini.windowTitle': 'Mini player',
   'mini.nothingPlaying': 'Nothing playing',
-  'mini.pin': 'Keep on top'
+  'mini.pin': 'Keep on top',
+  'mini.lyrics': 'Lyrics',
+  'mini.lyricsLoading': 'Loading lyrics…',
+  'mini.lyricsNone': 'No timed lyrics for this song'
 };
 
 export type I18nKey = keyof typeof en;
@@ -388,6 +408,23 @@ const pl: Record<I18nKey, string> = {
   'settings.sponsorblock.desc': 'Pomija fragmenty teledysków bez muzyki',
   'settings.lyrics.title': 'Tekst z synchronizacją',
   'settings.lyrics.desc': 'Dodaje do karty Tekst słowa podążające za utworem',
+  'settings.lyricsSrc.title': 'Źródła tekstów',
+  'settings.lyricsSrc.desc': 'Sprawdzane w tej kolejności. Tekst z synchronizacją z dowolnego źródła wygrywa z samym tekstem.',
+  'settings.lyricsSrc.unofficial': 'Nieoficjalne API: może przestać działać i może naruszać regulamin serwisu',
+  'settings.lyricsSrc.up': 'Przesuń {name} wyżej',
+  'settings.lyricsSrc.down': 'Przesuń {name} niżej',
+  'settings.lyricsSrc.name.local': 'Twoje pliki muzyczne',
+  'settings.lyricsSrc.name.lrclib': 'LRCLIB',
+  'settings.lyricsSrc.name.musixmatch': 'Musixmatch',
+  'settings.lyricsSrc.name.netease': 'NetEase Cloud Music',
+  'settings.lyricsSrc.name.ytm': 'YouTube Music',
+  'settings.lyricsSrc.name.genius': 'Genius',
+  'settings.lyricsSrc.desc.local': 'Plik .lrc lub tekst zapisany w pliku utworu',
+  'settings.lyricsSrc.desc.lrclib': 'Otwarta baza tekstów, z synchronizacją',
+  'settings.lyricsSrc.desc.musixmatch': 'Z synchronizacją, często słowo po słowie',
+  'settings.lyricsSrc.desc.netease': 'Z synchronizacją, duży katalog',
+  'settings.lyricsSrc.desc.ytm': 'Tekst z YouTube Music, bez synchronizacji',
+  'settings.lyricsSrc.desc.genius': 'Sam tekst',
   'settings.notifications.title': 'Powiadomienia o utworach',
   'settings.notifications.desc': 'Pokazuje powiadomienie, gdy zmienia się utwór',
   'settings.discord.title': 'Pokazuj na Discordzie',
@@ -549,7 +586,10 @@ const pl: Record<I18nKey, string> = {
 
   'mini.windowTitle': 'Miniodtwarzacz',
   'mini.nothingPlaying': 'Nic nie jest odtwarzane',
-  'mini.pin': 'Zawsze na wierzchu'
+  'mini.pin': 'Zawsze na wierzchu',
+  'mini.lyrics': 'Tekst',
+  'mini.lyricsLoading': 'Wczytywanie tekstu…',
+  'mini.lyricsNone': 'Brak tekstu z synchronizacją dla tego utworu'
 };
 
 export const COMPANION_LOCALES: Record<string, Record<I18nKey, string>> = { en, pl };
