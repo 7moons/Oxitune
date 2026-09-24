@@ -56,6 +56,7 @@ axum = { version = "0.8", default-features = false, features = ["http1", "tokio"
 tower = { version = "0.5", features = ["limit"] }
 tower-http = { version = "0.6", features = ["limit", "timeout"] }
 rust-embed = { version = "8", features = ["mime-guess"] }
+sys-locale = "0.3"
 
 # Screen-lock detection (src/screen_lock.rs). zbus is already in the tree via
 # notify-rust with its default async-io backend; keeping that backend (rather

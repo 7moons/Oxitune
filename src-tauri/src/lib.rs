@@ -4,6 +4,7 @@ pub mod config;
 pub mod discord_rpc;
 pub mod join_link;
 pub mod downloader;
+pub mod i18n;
 pub mod local_files;
 pub mod lyrics;
 pub mod mpris;
@@ -280,8 +281,8 @@ pub fn run() {
                         let _ = handle_for_update
                             .notification()
                             .builder()
-                            .title("YTMD update available")
-                            .body(format!("Version {} is ready to install from Settings.", info.version))
+                            .title(i18n::t().update_available_title)
+                            .body((i18n::t().update_available_body)(&info.version))
                             .show();
                     }
                     Ok(None) => {}

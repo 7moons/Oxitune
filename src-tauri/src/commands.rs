@@ -245,7 +245,7 @@ pub fn notify_track_change(
             .notification()
             .builder()
             .title(&title)
-            .body(format!("Now playing: {}", artist))
+            .body((crate::i18n::t().now_playing)(&artist))
             .show();
     }
     Ok(())

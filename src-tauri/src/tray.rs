@@ -28,15 +28,16 @@ fn toggle_main_window(app: &AppHandle) {
 }
 
 pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
-    let play_pause_i = MenuItem::with_id(app, "play_pause", "Play / Pause", true, None::<&str>)?;
-    let next_i = MenuItem::with_id(app, "next", "Next Track", true, None::<&str>)?;
-    let prev_i = MenuItem::with_id(app, "prev", "Previous Track", true, None::<&str>)?;
+    let s = crate::i18n::t();
+    let play_pause_i = MenuItem::with_id(app, "play_pause", s.tray_play_pause, true, None::<&str>)?;
+    let next_i = MenuItem::with_id(app, "next", s.tray_next, true, None::<&str>)?;
+    let prev_i = MenuItem::with_id(app, "prev", s.tray_previous, true, None::<&str>)?;
     let sep1 = MenuItem::with_id(app, "sep1", "---", false, None::<&str>)?;
-    let miniplayer_i = MenuItem::with_id(app, "miniplayer", "Toggle Mini Player", true, None::<&str>)?;
-    let settings_i = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
+    let miniplayer_i = MenuItem::with_id(app, "miniplayer", s.tray_mini_player, true, None::<&str>)?;
+    let settings_i = MenuItem::with_id(app, "settings", s.tray_settings, true, None::<&str>)?;
     let sep2 = MenuItem::with_id(app, "sep2", "---", false, None::<&str>)?;
-    let show_hide_i = MenuItem::with_id(app, "show_hide", "Show / Hide", true, None::<&str>)?;
-    let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+    let show_hide_i = MenuItem::with_id(app, "show_hide", s.tray_show_hide, true, None::<&str>)?;
+    let quit_i = MenuItem::with_id(app, "quit", s.tray_quit, true, None::<&str>)?;
 
     let menu = Menu::with_items(
         app,
