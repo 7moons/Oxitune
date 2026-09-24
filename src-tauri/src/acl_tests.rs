@@ -53,7 +53,16 @@ fn acl(win: &WebviewWindow<MockRuntime>, url: &str, cmd: &str) -> Result<(), Str
 }
 
 const YTM: &str = "https://music.youtube.com/watch?v=dQw4w9WgXcQ";
+// Where Tauri serves local pages: `tauri://localhost` on Linux/macOS,
+// `http://tauri.localhost` on Windows.
+#[cfg(not(windows))]
 const LOCAL: &str = "tauri://localhost/settings.html";
+#[cfg(windows)]
+const LOCAL: &str = "http://tauri.localhost/settings.html";
+#[cfg(not(windows))]
+const OFFLINE: &str = "tauri://localhost/offline.html";
+#[cfg(windows)]
+const OFFLINE: &str = "http://tauri.localhost/offline.html";
 
 #[test]
 fn test_youtube_music_reaches_only_the_bridge() {
@@ -128,7 +137,7 @@ fn test_a_remote_page_in_a_companion_window_gets_nothing() {
 fn test_offline_screen_can_only_retry() {
     let app = app();
     let main = window(&app, "main", YTM);
-    let offline = "tauri://localhost/offline.html";
+    let offline = OFFLINE;
     assert_eq!(acl(&main, offline, "retry_connection"), Ok(()));
     for cmd in ["ytmd_bridge", "get_config", "save_config", "plugin:event|emit"] {
         assert!(acl(&main, offline, cmd).is_err(), "offline page must not reach {cmd}");

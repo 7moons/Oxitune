@@ -1,0 +1,2 @@
+# Signed or hashed test data must stay byte-for-byte (no CRLF on Windows).
+src-tauri/tests/fixtures/** -text

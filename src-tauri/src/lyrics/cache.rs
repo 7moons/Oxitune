@@ -109,18 +109,27 @@ impl LyricsCache {
         }
         let tmp = path.with_extension("json.tmp");
         if std::fs::write(&tmp, json).is_ok() && std::fs::rename(&tmp, &path).is_ok() {
-            self.enforce_cap();
+            self.enforce_cap(&path);
         }
     }
 
-    fn enforce_cap(&self) {
+    /// Evicts oldest-first; `just_written` always counts as the newest, since
+    /// quick successive writes can share a modification time and a tie
+    /// could otherwise evict the entry that was just saved.
+    fn enforce_cap(&self, just_written: &Path) {
         let Ok(dir) = std::fs::read_dir(&self.dir) else { return };
         let files: Vec<_> = dir
             .flatten()
             .filter(|e| e.path().extension().is_some_and(|x| x == "json"))
             .filter_map(|e| {
                 let meta = e.metadata().ok()?;
-                Some((e.path(), meta.len(), meta.modified().unwrap_or(UNIX_EPOCH)))
+                let path = e.path();
+                let modified = if path == just_written {
+                    SystemTime::now() + std::time::Duration::from_secs(24 * 3600)
+                } else {
+                    meta.modified().unwrap_or(UNIX_EPOCH)
+                };
+                Some((path, meta.len(), modified))
             })
             .collect();
         for path in plan_eviction(files, self.max_bytes) {

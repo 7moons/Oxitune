@@ -564,9 +564,10 @@ mod tests {
     #[test]
     fn test_extracts_only_ffmpeg_and_ffprobe_from_tar_xz() {
         let dir = tempfile::tempdir().unwrap();
+        let (ffmpeg, ffprobe) = (format!("ffmpeg-master/bin/ffmpeg{EXE}"), format!("ffmpeg-master/bin/ffprobe{EXE}"));
         let tar = tar_with(&[
-            ("ffmpeg-master/bin/ffmpeg", b"FFMPEG"),
-            ("ffmpeg-master/bin/ffprobe", b"FFPROBE"),
+            (ffmpeg.as_str(), b"FFMPEG"),
+            (ffprobe.as_str(), b"FFPROBE"),
             ("ffmpeg-master/bin/ffplay", b"no"),
             ("ffmpeg-master/doc/ffmpeg", b"not in bin"),
             ("ffmpeg-master/LICENSE.txt", b"gpl"),
