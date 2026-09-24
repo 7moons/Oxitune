@@ -2,13 +2,16 @@ pub mod bridge;
 pub mod commands;
 pub mod config;
 pub mod discord_rpc;
+pub mod join_link;
 pub mod downloader;
 pub mod local_files;
+pub mod lyrics;
 pub mod mpris;
 pub mod p2p_sync;
 pub mod power_manager;
 pub mod remote_server;
 pub mod screen_lock;
+pub mod session;
 pub mod shortcuts;
 pub mod sync_crypto;
 pub mod sync_room;
@@ -29,12 +32,16 @@ pub struct AppState {
     pub discord_rpc: Mutex<Option<DiscordRpcHandle>>,
     pub mpris: Mutex<Option<MprisManager>>,
     pub current_track: Mutex<Option<TrackPayload>>,
+    /// Listen Together invites: `ytmd://join` links and the Discord button.
+    pub invites: join_link::InviteState,
     pub sync_room: Arc<SyncRoomManager>,
     pub power_manager: PowerManager,
-    pub remote_token: String,
     pub remote_status: Arc<remote_server::RemoteServerStatus>,
     /// Where tauri-plugin-log writes (`~/.ytmd/logs`).
     pub logs_dir: std::path::PathBuf,
+    /// Last song and position, for resume on launch (`~/.ytmd/session.json`).
+    pub session: session::SessionStore,
+    pub lyrics: lyrics::LyricsState,
 }
 
 /// Installs the process-wide rustls crypto provider exactly once.
@@ -73,12 +80,31 @@ pub fn run() {
         None
     };
 
-    let remote_token = remote_server::generate_token();
+    let ytmd_dir = config_manager.config_path().parent().map(|dir| dir.to_path_buf());
     let logs_dir = config_manager
         .config_path()
         .parent()
         .map(|dir| dir.join("logs"))
         .unwrap_or_else(|| std::path::PathBuf::from("logs"));
+    let session_store = session::SessionStore::new(
+        config_manager
+            .config_path()
+            .parent()
+            .map(|dir| dir.join("session.json"))
+            .unwrap_or_else(|| std::path::PathBuf::from("session.json")),
+    );
+    let resume_session = if initial_config.resume_on_launch && !session::launched_from_link(std::env::args()) {
+        session_store.load()
+    } else {
+        None
+    };
+    session_store.set_resume(resume_session.as_ref().map(|s| session::ResumeTarget {
+        video_id: s.video_id.clone(),
+        position_secs: s.position_secs,
+        autoplay: initial_config.resume_autoplay,
+    }));
+    let start_url = session::start_url(resume_session.as_ref());
+
     let sync_client_id = config_manager
         .config_path()
         .parent()
@@ -90,11 +116,18 @@ pub fn run() {
         discord_rpc: Mutex::new(discord_rpc),
         mpris: Mutex::new(None),
         current_track: Mutex::new(None),
+        invites: join_link::InviteState::default(),
         sync_room: Arc::new(SyncRoomManager::new().with_client_id(sync_client_id)),
         power_manager: PowerManager::new(),
-        remote_token: remote_token.clone(),
-        remote_status: Arc::new(remote_server::RemoteServerStatus::new(initial_config.remote_enabled)),
+        remote_status: Arc::new(remote_server::RemoteServerStatus::new(
+            initial_config.remote_enabled,
+            ytmd_dir.as_ref().map(|dir| dir.join("remote_token")),
+        )),
         logs_dir: logs_dir.clone(),
+        session: session_store,
+        lyrics: lyrics::LyricsState::new(
+            ytmd_dir.clone().unwrap_or_else(|| std::path::PathBuf::from(".")),
+        ),
     });
 
     let app_state_for_setup = app_state.clone();
@@ -109,6 +142,10 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             tray::show_main_window(app);
         }))
+        // `ytmd://join/<code>` links (the Discord "Listen along" page). With
+        // single-instance's `deep-link` feature a link opened while we run
+        // arrives through `on_open_url` below, not as a second process.
+        .plugin(tauri_plugin_deep_link::init())
         // Every log::info!/warn!/error! goes to ~/.ytmd/logs/ytmd.log (and the
         // console in dev): a release build has no console, so without files
         // a user's "it doesn't work" left nothing to look at.
@@ -150,7 +187,6 @@ pub fn run() {
                 remote_server::start_remote_server(
                     handle.clone(),
                     remote_port,
-                    remote_token.clone(),
                     app_state_for_setup.remote_status.clone(),
                 );
             }
@@ -183,11 +219,28 @@ pub fn run() {
                 });
             });
 
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                // Installers register the scheme; AppImage and dev builds
+                // have to do it themselves.
+                #[cfg(any(target_os = "linux", all(debug_assertions, windows)))]
+                if let Err(e) = app.deep_link().register_all() {
+                    log::warn!("couldn't register the ytmd:// link scheme: {e}");
+                }
+                if let Ok(Some(urls)) = app.deep_link().get_current() {
+                    join_link::handle_urls(&handle, urls.iter().map(|u| u.as_str()));
+                }
+                let handle_for_links = handle.clone();
+                app.deep_link().on_open_url(move |event| {
+                    join_link::handle_urls(&handle_for_links, event.urls().iter().map(|u| u.as_str()));
+                });
+            }
+
             // Build main window with embedded initialization script
             let mut main_builder = WebviewWindowBuilder::new(
                 app,
                 "main",
-                WebviewUrl::External("https://music.youtube.com".parse().expect("valid youtube music url")),
+                WebviewUrl::External(start_url.parse().expect("valid youtube music url")),
             )
             .title("YTMD")
             .inner_size(1280.0, 820.0)
@@ -239,6 +292,7 @@ pub fn run() {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == "main" {
                     let state = window.state::<Arc<AppState>>();
+                    state.session.flush();
                     let config = state.config_manager.load();
                     if config.close_to_tray {
                         api.prevent_close();
@@ -262,7 +316,12 @@ pub fn run() {
             commands::send_player_command,
             commands::send_seek_command,
             commands::send_volume_command,
-            commands::fetch_lyrics,
+            lyrics::commands::fetch_lyrics,
+            lyrics::commands::get_current_lyrics,
+            lyrics::commands::set_lyrics_offset,
+            lyrics::commands::list_lyrics_candidates,
+            lyrics::commands::pick_lyrics,
+            lyrics::commands::import_lyrics_offsets,
             commands::notify_track_change,
             commands::download_track,
             commands::scan_local_music,
@@ -277,6 +336,9 @@ pub fn run() {
             commands::end_sync_room,
             commands::transfer_sync_host,
             commands::set_sync_require_approval,
+            commands::set_discord_invite,
+            commands::get_discord_invite,
+            commands::take_pending_join_code,
             commands::decide_sync_join,
             commands::vote_sync_skip,
             commands::send_sync_reaction,
@@ -291,6 +353,7 @@ pub fn run() {
             commands::import_settings,
             commands::broadcast_sync_state,
             commands::get_remote_info,
+            commands::regenerate_remote_token,
             commands::set_inhibit_sleep,
             commands::minimize_window,
             commands::toggle_maximize_window,
@@ -299,6 +362,11 @@ pub fn run() {
             commands::check_for_updates,
             commands::install_update,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                app.state::<Arc<AppState>>().session.flush();
+            }
+        });
 }

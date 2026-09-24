@@ -18,6 +18,9 @@ pub struct AppConfig {
     pub adblock_enabled: bool,
     pub sponsorblock_enabled: bool,
     pub lyrics_enabled: bool,
+    /// Lyrics providers in priority order, each on or off.
+    #[serde(default = "crate::lyrics::default_provider_settings")]
+    pub lyrics_providers: Vec<crate::lyrics::ProviderSetting>,
     pub miniplayer_enabled: bool,
     pub wheel_volume_step: f64,
     #[serde(default)]
@@ -45,6 +48,12 @@ pub struct AppConfig {
     pub remote_port: u16,
     pub inhibit_sleep: bool,
     pub pause_on_lock: bool,
+    /// Reopen the last song at its position when the app starts.
+    #[serde(default = "default_true")]
+    pub resume_on_launch: bool,
+    /// Start playing it too, instead of waiting paused.
+    #[serde(default)]
+    pub resume_autoplay: bool,
     /// Equalizer presets the user saved; picked by `equalizer_preset` = id.
     #[serde(default)]
     pub equalizer_custom_presets: Vec<CustomEqPreset>,
@@ -52,6 +61,10 @@ pub struct AppConfig {
     /// an accelerator string; empty = no shortcut.
     #[serde(default = "crate::shortcuts::default_shortcuts")]
     pub shortcuts: BTreeMap<String, String>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_discord_clear_after_pause_min() -> u32 {
@@ -102,6 +115,7 @@ impl Default for AppConfig {
             adblock_enabled: true,
             sponsorblock_enabled: true,
             lyrics_enabled: true,
+            lyrics_providers: crate::lyrics::default_provider_settings(),
             miniplayer_enabled: true,
             wheel_volume_step: 0.05,
             wheel_volume_on_player_page: false,
@@ -128,6 +142,8 @@ impl Default for AppConfig {
             remote_port: 9863,
             inhibit_sleep: true,
             pause_on_lock: true,
+            resume_on_launch: true,
+            resume_autoplay: false,
             equalizer_custom_presets: Vec::new(),
             shortcuts: crate::shortcuts::default_shortcuts(),
         }
@@ -182,6 +198,8 @@ impl AppConfig {
 
         // Custom presets: well-formed ids, no duplicates, a name, exactly one
         // gain per band, everything in range.
+        self.lyrics_providers = crate::lyrics::sanitize_provider_settings(std::mem::take(&mut self.lyrics_providers));
+
         let mut seen = std::collections::HashSet::new();
         self.equalizer_custom_presets.retain(|p| is_custom_preset_id(&p.id) && seen.insert(p.id.clone()));
         self.equalizer_custom_presets.truncate(MAX_CUSTOM_PRESETS);
@@ -382,10 +400,13 @@ mod tests {
         let config = AppConfig::default();
         assert!(config.discord_rpc_enabled);
         assert_eq!(config.discord_clear_after_pause_min, 5);
+        assert!(config.resume_on_launch);
+        assert!(!config.resume_autoplay);
         assert!(config.mpris_enabled);
         assert!(config.adblock_enabled);
         assert!(config.sponsorblock_enabled);
         assert!(config.lyrics_enabled);
+        assert_eq!(config.lyrics_providers, crate::lyrics::default_provider_settings());
         assert!(config.equalizer_enabled);
         assert_eq!(config.equalizer_gains.len(), 10);
         assert_eq!(config.equalizer_preset, "flat");

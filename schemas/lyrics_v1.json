@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ytmd.local/schemas/lyrics_v1.json",
+  "title": "CurrentLyrics",
+  "description": "Lyrics of the song playing now. Payload of the `lyrics-changed` event (sent to every window on a song change, when lyrics load, on an offset change and on a pick) and the result of `get_current_lyrics`. Produced by `CurrentLyrics` in src-tauri/src/lyrics/mod.rs.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["video_id", "provider", "synced", "plain", "offset_secs", "source_url"],
+  "properties": {
+    "video_id": {
+      "type": ["string", "null"],
+      "description": "YouTube video id of the song these lyrics belong to; null when unknown."
+    },
+    "provider": {
+      "type": ["string", "null"],
+      "enum": ["local", "lrclib", "musixmatch", "netease", "ytm", "genius", null],
+      "description": "Where the lyrics came from; null while loading or when none were found."
+    },
+    "synced": {
+      "type": "array",
+      "description": "Timed lines sorted by `t`; empty when only plain text (or nothing) is available.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["t", "text"],
+        "properties": {
+          "t": { "type": "number", "minimum": 0, "description": "Line start, seconds from the start of the song." },
+          "text": { "type": "string" },
+          "words": {
+            "type": "array",
+            "description": "Word-by-word timing when the provider has it. Concatenating `text` of all words gives the line text (spaces stay on the preceding word).",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["t", "text"],
+              "properties": {
+                "t": { "type": "number", "minimum": 0, "description": "Word start, seconds from the start of the song." },
+                "text": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "plain": {
+      "type": ["string", "null"],
+      "description": "Untimed lyrics, lines separated by \\n. Present alongside `synced` for most providers."
+    },
+    "offset_secs": {
+      "type": "number",
+      "minimum": -60,
+      "maximum": 60,
+      "description": "User's timing correction for this song. Positive = lyrics run ahead: a line is active once `position + offset_secs >= t`."
+    },
+    "source_url": {
+      "type": ["string", "null"],
+      "description": "Page of these lyrics on the provider's site, when it has one."
+    }
+  }
+}

@@ -20,6 +20,7 @@
 //! over once the old host can't be reached.
 
 mod features;
+pub(crate) use features::votes_needed;
 
 pub use features::{parse_video_id, REACTIONS};
 pub(crate) use features::pick_successor;
@@ -42,7 +43,7 @@ use tokio::time::Instant;
 const DISCOVERY_UDP_PORT: u16 = 47863;
 const DISCOVERY_TIMEOUT: Duration = Duration::from_millis(2500);
 const BEACON_INTERVAL: Duration = Duration::from_secs(2);
-const MAX_MEMBERS: usize = 16;
+pub const MAX_MEMBERS: usize = 16;
 const JOIN_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 /// How long a guest waits for the host to let it in (join approval).
 pub(crate) const APPROVAL_TIMEOUT: Duration = Duration::from_secs(120);
@@ -468,7 +469,7 @@ pub struct SyncControlRequest {
     pub source: ControlSource,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReactionPayload {
     pub from: String,
     pub emoji: String,

@@ -26,6 +26,14 @@ type MoviePlayerElement = HTMLElement & {
  * new song's link (and the old song's duration) on Discord. */
 export const METADATA_SETTLE_MS = 1500;
 
+/** The URL's playlist, but only while the URL is this song's watch page;
+ * elsewhere (browsing home, search) it says nothing about what's playing. */
+export function playlistFromUrl(search: string, videoId: string | undefined): string | undefined {
+  const params = new URLSearchParams(search);
+  if (!videoId || params.get('v') !== videoId) return undefined;
+  return params.get('list') || undefined;
+}
+
 const normalizeTitle = (s: string) => s.trim().replace(/\s+/g, ' ').toLowerCase();
 
 /** Whether the player's title and MediaSession's title describe the same
@@ -343,6 +351,10 @@ export class PlayerObserver {
 
     if (!title) return null;
 
+    const playlistId =
+      playlistFromUrl(window.location.search, videoId) ??
+      (this.currentTrack?.videoId === videoId ? this.currentTrack?.playlistId : undefined);
+
     return {
       title,
       artist: artist || 'Unknown Artist',
@@ -351,7 +363,8 @@ export class PlayerObserver {
       durationSecs,
       currentTimeSecs,
       isPlaying,
-      videoId
+      videoId,
+      playlistId
     };
   }
 

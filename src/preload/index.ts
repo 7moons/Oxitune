@@ -1,5 +1,6 @@
 import { PlayerObserver } from './observer';
 import { PlayerBridge } from './bridge';
+import { startResume } from './resume';
 import { PluginRegistry } from '../plugins/registry';
 import { AdblockPlugin } from '../plugins/adblock';
 import { SponsorblockPlugin } from '../plugins/sponsorblock';
@@ -176,6 +177,7 @@ async function initYTMD() {
           current_time_secs: Math.round(positionSecs),
           is_playing: isPlaying,
           video_id: track.videoId || null,
+          playlist_id: track.playlistId || null,
           sampled_at_ms: Date.now()
         }
       });
@@ -314,6 +316,7 @@ const isTopLevelYTMFrame =
   window.self === window.top && /(^|\.)music\.youtube\.com$/.test(location.hostname);
 
 if (isTopLevelYTMFrame) {
+  startResume();
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => initYTMD());
   } else {

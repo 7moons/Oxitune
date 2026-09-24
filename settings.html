@@ -196,6 +196,14 @@
             <label class="toggle"><input type="checkbox" id="lyrics_enabled" /><span class="toggle-track"></span></label>
           </div>
 
+          <div class="setting-row stack">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.lyricsSrc.title">Lyrics sources</span>
+              <span class="setting-desc" data-i18n="settings.lyricsSrc.desc">Checked in this order. Timed lyrics from any source win over text-only ones.</span>
+            </div>
+            <div id="lyrics-providers-list" class="shortcut-list"></div>
+          </div>
+
           <div class="setting-row">
             <div class="setting-text">
               <span class="setting-title" data-i18n="settings.notifications.title">Song notifications</span>
@@ -259,6 +267,22 @@
               <span class="setting-desc" data-i18n="settings.lock.desc">Minimizing the window doesn't pause playback</span>
             </div>
             <label class="toggle"><input type="checkbox" id="pause_on_lock" /><span class="toggle-track"></span></label>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.resume.title">Resume where you left off</span>
+              <span class="setting-desc" data-i18n="settings.resume.desc">Opens the last song at the same moment when the app starts</span>
+            </div>
+            <label class="toggle"><input type="checkbox" id="resume_on_launch" /><span class="toggle-track"></span></label>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.resumeAutoplay.title">Start playing right away</span>
+              <span class="setting-desc" data-i18n="settings.resumeAutoplay.desc">Otherwise the resumed song waits paused</span>
+            </div>
+            <label class="toggle"><input type="checkbox" id="resume_autoplay" /><span class="toggle-track"></span></label>
           </div>
 
           <div class="setting-row stack">
@@ -347,6 +371,14 @@
               <span class="setting-desc" data-i18n="settings.port.desc">Takes effect after restarting the app</span>
             </div>
             <input type="number" id="remote_port" class="input narrow" min="1024" max="65535" value="9863" />
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.remoteRevoke.title">Revoke paired phones</span>
+              <span class="setting-desc" data-i18n="settings.remoteRevoke.desc">Disconnects every phone; they need to scan the QR code again</span>
+            </div>
+            <button id="remote-revoke-btn" class="btn btn-tonal" data-i18n="settings.remoteRevoke.action">Revoke</button>
           </div>
         </section>
 

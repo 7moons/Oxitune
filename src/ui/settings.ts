@@ -7,6 +7,7 @@ import { syncRange } from './range';
 import { acceleratorFromEvent, formatAccelerator, isMediaKey, SHORTCUT_ACTIONS, ShortcutAction } from './shortcuts';
 import { CustomEqPreset, deletePreset, isCustomPresetId, MAX_PRESET_NAME_CHARS, savePreset } from './eqPresets';
 import { initWindowChrome } from './window';
+import { normalizeProviders, ProviderSetting, renderProviderList } from './lyricsProviders';
 
 interface AppConfig {
   close_to_tray: boolean;
@@ -17,6 +18,7 @@ interface AppConfig {
   adblock_enabled: boolean;
   sponsorblock_enabled: boolean;
   lyrics_enabled: boolean;
+  lyrics_providers?: ProviderSetting[];
   custom_css: string;
   equalizer_preset: string;
   equalizer_gains: number[];
@@ -38,6 +40,8 @@ interface AppConfig {
   remote_port: number;
   inhibit_sleep: boolean;
   pause_on_lock: boolean;
+  resume_on_launch: boolean;
+  resume_autoplay: boolean;
   equalizer_custom_presets?: CustomEqPreset[];
   shortcuts?: Record<string, string>;
   // Every other field of the backend's AppConfig round-trips untouched.
@@ -69,12 +73,25 @@ const TOGGLES: [keyof AppConfig & string, boolean][] = [
   ['embed_lyrics', true],
   ['remote_enabled', true],
   ['inhibit_sleep', true],
-  ['pause_on_lock', true]
+  ['pause_on_lock', true],
+  ['resume_on_launch', true],
+  ['resume_autoplay', false]
 ];
 
 const SAVE_DEBOUNCE_MS = 500;
 
 let currentConfig: AppConfig | null = null;
+let lyricsProviders: ProviderSetting[] = normalizeProviders(undefined);
+
+function renderLyricsProviders() {
+  const list = $('lyrics-providers-list');
+  if (!list) return;
+  renderProviderList(list, lyricsProviders, (next) => {
+    lyricsProviders = next;
+    renderLyricsProviders();
+    scheduleSave();
+  });
+}
 let currentGains: number[] = new Array(10).fill(0);
 let customPresets: CustomEqPreset[] = [];
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -440,6 +457,9 @@ function applyConfig(config: AppConfig) {
 
   shortcuts = config.shortcuts ?? {};
   renderShortcuts();
+
+  lyricsProviders = normalizeProviders(config.lyrics_providers);
+  renderLyricsProviders();
 }
 
 /** After an import: every live effect the settings drive, pushed to the
@@ -485,6 +505,7 @@ function collectConfig(config: AppConfig): AppConfig {
   next.equalizer_gains = [...currentGains];
   next.equalizer_custom_presets = customPresets;
   next.shortcuts = shortcuts;
+  next.lyrics_providers = lyricsProviders;
   return next;
 }
 
@@ -687,6 +708,14 @@ document.addEventListener('DOMContentLoaded', () => {
       showToast(tr('settings.backup.imported'));
     } catch (e) {
       showToast(errorMessage(e), { durationMs: 8000 });
+    }
+  });
+  $('remote-revoke-btn')?.addEventListener('click', async () => {
+    try {
+      await window.__TAURI__?.core.invoke('regenerate_remote_token');
+      showToast(tr('settings.remoteRevoke.done'));
+    } catch (e) {
+      showToast(errorMessage(e));
     }
   });
   $('open-logs-btn')?.addEventListener('click', async () => {

@@ -110,6 +110,16 @@ const LEFT_MESSAGE: Partial<Record<LeaveReason, I18nKey>> = {
   closed: 'sync.left.closed'
 };
 
+async function refreshDiscordInvite(): Promise<void> {
+  const toggle = $<HTMLInputElement>('discord-invite');
+  if (!toggle || !window.__TAURI__?.core) return;
+  try {
+    toggle.checked = (await window.__TAURI__.core.invoke('get_discord_invite')) === true;
+  } catch {
+    toggle.checked = false;
+  }
+}
+
 async function invokeSync(cmd: string, args: Record<string, unknown>): Promise<boolean> {
   if (!window.__TAURI__?.core) return false;
   try {
@@ -387,6 +397,7 @@ function renderRoomView(room: RoomState | null) {
   if (defaultRole && document.activeElement !== defaultRole) defaultRole.value = room.default_role ?? 'dj';
   const approval = $<HTMLInputElement>('require-approval');
   if (approval) approval.checked = !!room.require_approval;
+  if (room.is_host) void refreshDiscordInvite();
 
   const banned = room.is_host ? (room.banned ?? []) : [];
   show($('banned-section'), banned.length > 0);
@@ -614,6 +625,31 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!ok) toggle.checked = !toggle.checked;
     });
   });
+
+  $<HTMLInputElement>('discord-invite')?.addEventListener('change', (e) => {
+    const toggle = e.currentTarget as HTMLInputElement;
+    void invokeSync('set_discord_invite', { enabled: toggle.checked }).then((ok) => {
+      if (!ok) toggle.checked = !toggle.checked;
+    });
+  });
+
+  // A `ytmd://join/<code>` link: fill in the code, the user still joins.
+  const useJoinLink = (code: string | null | undefined) => {
+    if (!code || activeRoom || !joinCode) return;
+    selectTab(false);
+    joinCode.value = code;
+    setStatusHint('guest-status-hint', tr('sync.joinLink'));
+    guestNick?.focus();
+  };
+  window.__TAURI__?.event.listen<string>('sync-join-link', (e) => useJoinLink(e.payload));
+  window.__TAURI__?.event.listen<boolean>('sync-discord-invite', (e) => {
+    const toggle = $<HTMLInputElement>('discord-invite');
+    if (toggle) toggle.checked = e.payload;
+  });
+  void window.__TAURI__?.core
+    .invoke('take_pending_join_code')
+    .then((code) => useJoinLink(typeof code === 'string' ? code : null))
+    .catch(() => {});
 
   $('vote-skip-btn')?.addEventListener('click', () => {
     void invokeSync('vote_sync_skip', {}).then((ok) => {
