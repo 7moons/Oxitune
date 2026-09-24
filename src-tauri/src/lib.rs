@@ -10,6 +10,7 @@ pub mod p2p_sync;
 pub mod power_manager;
 pub mod remote_server;
 pub mod screen_lock;
+pub mod session;
 pub mod shortcuts;
 pub mod sync_crypto;
 pub mod sync_room;
@@ -38,6 +39,8 @@ pub struct AppState {
     pub remote_status: Arc<remote_server::RemoteServerStatus>,
     /// Where tauri-plugin-log writes (`~/.ytmd/logs`).
     pub logs_dir: std::path::PathBuf,
+    /// Last song and position, for resume on launch (`~/.ytmd/session.json`).
+    pub session: session::SessionStore,
 }
 
 /// Installs the process-wide rustls crypto provider exactly once.
@@ -82,6 +85,25 @@ pub fn run() {
         .parent()
         .map(|dir| dir.join("logs"))
         .unwrap_or_else(|| std::path::PathBuf::from("logs"));
+    let session_store = session::SessionStore::new(
+        config_manager
+            .config_path()
+            .parent()
+            .map(|dir| dir.join("session.json"))
+            .unwrap_or_else(|| std::path::PathBuf::from("session.json")),
+    );
+    let resume_session = if initial_config.resume_on_launch && !session::launched_from_link(std::env::args()) {
+        session_store.load()
+    } else {
+        None
+    };
+    session_store.set_resume(resume_session.as_ref().map(|s| session::ResumeTarget {
+        video_id: s.video_id.clone(),
+        position_secs: s.position_secs,
+        autoplay: initial_config.resume_autoplay,
+    }));
+    let start_url = session::start_url(resume_session.as_ref());
+
     let sync_client_id = config_manager
         .config_path()
         .parent()
@@ -99,6 +121,7 @@ pub fn run() {
         remote_token: remote_token.clone(),
         remote_status: Arc::new(remote_server::RemoteServerStatus::new(initial_config.remote_enabled)),
         logs_dir: logs_dir.clone(),
+        session: session_store,
     });
 
     let app_state_for_setup = app_state.clone();
@@ -212,7 +235,7 @@ pub fn run() {
             let mut main_builder = WebviewWindowBuilder::new(
                 app,
                 "main",
-                WebviewUrl::External("https://music.youtube.com".parse().expect("valid youtube music url")),
+                WebviewUrl::External(start_url.parse().expect("valid youtube music url")),
             )
             .title("YTMD")
             .inner_size(1280.0, 820.0)
@@ -264,6 +287,7 @@ pub fn run() {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == "main" {
                     let state = window.state::<Arc<AppState>>();
+                    state.session.flush();
                     let config = state.config_manager.load();
                     if config.close_to_tray {
                         api.prevent_close();
@@ -327,6 +351,11 @@ pub fn run() {
             commands::check_for_updates,
             commands::install_update,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                app.state::<Arc<AppState>>().session.flush();
+            }
+        });
 }

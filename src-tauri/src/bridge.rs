@@ -153,6 +153,14 @@ bridge_commands! {
     "get_config" => |h, state, args| {
         to_data(state.config_manager.load())
     }
+    "take_resume_session" => |h, state, args| {
+        // Once per launch; never while in a room (the host decides the song).
+        let target = state.session.take_resume();
+        if state.sync_room.get_room_state().is_some() {
+            return Ok(Value::Null);
+        }
+        to_data(target)
+    }
     "save_config" => |h, state, args| {
         let p: SaveConfigArgs = parse_args("save_config", args)?;
         state.config_manager.save(&p.config)?;

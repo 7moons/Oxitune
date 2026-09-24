@@ -7,6 +7,8 @@ export interface TrackInfo {
   currentTimeSecs: number;
   isPlaying: boolean;
   videoId?: string;
+  /** Playlist the song plays from (URL `list`), kept while browsing away. */
+  playlistId?: string;
 }
 
 export interface PluginContext {

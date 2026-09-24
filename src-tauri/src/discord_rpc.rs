@@ -63,6 +63,9 @@ pub struct TrackPayload {
     /// reaches Discord, so bridge/queue delay doesn't shift the progress bar.
     #[serde(default)]
     pub sampled_at_ms: Option<u64>,
+    /// The playlist the song plays from (URL `list`), for resume on launch.
+    #[serde(default)]
+    pub playlist_id: Option<String>,
 }
 
 /// Discord drops `SET_ACTIVITY` calls past about 5 per 20 s without an
@@ -624,6 +627,7 @@ mod tests {
             is_playing: playing,
             video_id: Some(format!("id-{title}")),
             sampled_at_ms: None,
+            playlist_id: None,
         }
     }
 

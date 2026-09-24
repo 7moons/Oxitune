@@ -144,6 +144,7 @@ pub fn update_track_info(
 
     // Update internal state
     *state.current_track.lock() = Some(track.clone());
+    state.session.record(&track);
 
     // Update Discord RPC if enabled
     if config.discord_rpc_enabled {
