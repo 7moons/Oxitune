@@ -117,3 +117,59 @@ Legenda: **K** krytyczny, **W** wysoki, **Ś** średni, **N** niski.
 | F1 | W | Funkcje | brak ograniczenia nawigacji, ekranu offline, zapamiętywania okien, autostartu (mimo pola w configu) |
 
 (Status każdego punktu — sekcja 3.)
+
+---
+
+## 3. Poprawki — Faza 1 (bezpieczeństwo)
+
+| # | Status | Co zrobiono | Commit |
+|---|---|---|---|
+| S1, S2 | ✅ | ACL app-manifest (`build.rs`), **capability per okno**; `main` (tylko `https://music.youtube.com/*`) ma wyłącznie `allow-ytmd-bridge` + `allow-ytmd-subscribe`, **zero** uprawnień do zdarzeń, okien, shell, dialogów. Most zdarzeniowy `ytmd-invoke` usunięty: żądania przez komendę `ytmd_bridge` (odpowiedź bezpośrednia), zdarzenia przez `Channel` filtrowany w `page_ipc.rs` (lista `PAGE_EVENTS`, projekcje: config bez ścieżek/portów, pokój bez kodu/banów). Z tabeli mostu usunięto `save_config`, `get_remote_info`, `download_track`; `get_config` zwraca tylko pola używane przez wtyczki strony. Walidacja: `TrackPayload::sanitized` (tekst, https-only cover, id), `SyncPlaybackState::sanitized`, limity lyrics/offsetów/kolejki. QR pilota przeniesiony do Ustawień. Testy: `acl_tests.rs` (mock runtime Tauri, realne capability), `bridge.rs`, `page_ipc.rs`, `sync.test.ts` (capabilities), `bridge_client.test.ts`. | `6b897ad`, `6346b82`, `3ccca98` |
+| S3–S6 | ✅ (z ograniczeniami opisanymi niżej) | **Protokół sync 3**: kod 130 bitów (26 znaków), HKDF-SHA256 (osobne etykiety klucza i topicu), podpis Ed25519 każdej wiadomości kluczem instalacji (`~/.ytmd/sync_identity`, 0600), AEAD z AAD = wersja + topic; host wiąże member id z kluczem, goście pinują klucz hosta (TOFU przy pierwszym dołączeniu, oczekiwany następca/handoff przy reconnect); ochrona przed replay (sesja + okno licznika 1024, nowa sesja tylko ±10 min). Stare kody → `sync.error.oldCode`; klient v2 dostaje od hosta v3 `Rejected{Outdated}` w starym formacie (MQTT i LAN). | `598cbd1`, `e0a2d84` |
+| S7 | ✅ | Beacon LAN szyfrowany i podpisany (port nie do podrobienia bez kodu, gość zna klucz hosta przed połączeniem), limit 32 równoległych handshake'ów TCP, bufor beaconu 1400 B (wcześniejsze 512 B gubiło losowo beacony v3 — złapane przez flaky test, patrz `e0a2d84`). | `598cbd1`, `e0a2d84` |
+| S8 | ✅ | Pilot domyślnie **wyłączony**; nowa opcja `remote_bind` (`lan` = tylko prywatny adres LAN, domyślnie; `all` = wszystkie interfejsy); limit błędnych tokenów per IP (20/min → 429); token bucket dla wiadomości WS (20/s, burst 40). Już wcześniej: token 32 znaki w QR→cookie HttpOnly/SameSite=Strict, walidacja Host (DNS rebinding) i Origin, limit ramki WS 16 KB, 8 klientów, brak endpointów poza sterowaniem. | `d3b0dde` |
+| S9 | ✅ | CSP dla okien lokalnych (bez `unsafe-eval`, skrypty tylko `'self'`; `style-src 'unsafe-inline'` zostaje, bo kit UI wstrzykuje `<style>`); główne okno: `on_navigation` tylko domeny YouTube/Google (logowanie), `on_new_window` → przeglądarka systemowa (http/https), nic nie otwiera się w aplikacji. | `1b666f7` |
+| S10 | ✅ | `~/.ytmd` 0700; config/sesja/token/tożsamość zapisywane atomowo 0600 (`secure_fs.rs`); stare pliki zawężane przy starcie; `sync_client_id` (v2) usuwany; asset protocol ma zakaz `~/.ytmd` nawet gdy biblioteka = katalog domowy. Logi: przejrzane — brak tokenów, kodów pokoju, cookies; konsola WebView nie trafia do logów; rotacja 5×2 MB. | `1b666f7`, `963c01f` |
+| S11 | ✅ | Import backupu: limit 1 MB, nigdy nie importuje folderów ani włączenia/interfejsu pilota, custom CSS tylko po jawnym potwierdzeniu z ostrzeżeniem o zewnętrznych zasobach. | `1b666f7` |
+| S12 | ✅ | `cargo deny` (`src-tauri/deny.toml`), `bun audit`, akcje przypięte do SHA, `permissions:` minimalne, Dependabot, `--locked`/`--frozen-lockfile`, `scripts/versions.ts` (check w CI i względem tagu). rustls → 0.23.45. | `963c01f` |
+| — | ✅ | `local_files`: skan odrzuca symlinki wychodzące poza katalog (było); asset protocol Tauri kanonizuje ścieżkę i rozwiązuje symlinki przed sprawdzeniem scope (zweryfikowane w źródle `tauri::scope::fs::is_allowed`), scope = tylko skonfigurowany katalog biblioteki. | — |
+| — | ✅ | Wstrzykiwanie treści: w `src/` brak `innerHTML`/`insertAdjacentHTML`/`document.write` (UI budowane przez `createEl`/`textContent`); reakcje to zamknięty zbiór emoji; nicki/tytuły przycinane i bez znaków kontrolnych w Rust (`clean_text`), tytuły z oEmbed też. | — |
+
+### Kryptografia Listen Together — ocena przed/po
+
+**Przed (protokół 2):** kod `YTMD-` + 10 znaków z alfabetu 32 = 50 bitów. Klucz i publiczny
+topic id = PBKDF2-HMAC-SHA256(kod, **stała sól**, 20 000 iteracji). Topic id jest widoczny dla
+każdego subskrybenta publicznego brokera (np. `#` na test.mosquitto.org), więc atak offline:
+2^50 × 20 000 HMAC ≈ 2^65 operacji SHA-256; hashcat PBKDF2-SHA256 na RTX 4090 ≈ 8.8 MH/s przy
+999 iteracjach → ~0.44 M prób/s przy 20 000 → średnio 2^49 / 0.44 M ≈ **40 lat na 1 GPU, ~15 dni
+na 1000 GPU (~140 tys. USD w chmurze)**. Stała sól = jedna tablica/jeden przebieg łamie
+**wszystkie** pokoje naraz. Dodatkowo `party_id` Discorda = SHA-256("ytmd-party:"+kod) bez
+rozciągania: ~2^49 SHA-256 ≈ **kilkanaście godzin na jednym GPU** dla pokoju z zaproszeniem (tam
+kod i tak jest w linku przycisku). Brak uwierzytelnienia nadawcy (MQTT brał `user_id` z treści),
+brak ochrony przed replay.
+
+**Po (protokół 3):** 130 bitów losowości z OS RNG → brute force 2^129 średnio — poza zasięgiem;
+HKDF wystarcza (klucz o pełnej entropii nie potrzebuje rozciągania). Nonce: 96-bitowy losowy
+na wiadomość; przy jednym kluczu na pokój bezpieczny limit ~2^32 wiadomości (pokój nie zbliża
+się do tego). AEAD AES-256-GCM (ring), AAD = wersja protokołu + topic id. Podpisy Ed25519 (ring).
+Rozważony PAKE (SPAKE2/CPace): wymaga interaktywnego uzgodnienia per gość w modelu
+host-broker-wielu gości i nowej zależności (crate `spake2` bez aktywnego rozwoju); wybrano
+wariant „długi losowy sekret w linku/QR/kodzie” — bez nowych zależności.
+
+**Ograniczenia (świadome, opisane w README):**
+- kod jest sekretem na okaziciela — kto go ma, czyta pokój i może poprosić o wejście
+  (dlatego zaproszenie Discord wymusza zatwierdzanie);
+- wyrzucony uczestnik, który zna kod, może dalej **czytać** ruch do końca sesji (rotacja klucza
+  wymagałaby kanałów parami — MLS-podobny protokół; poza zakresem, patrz „Decyzje”); nie może
+  się podszyć ani wrócić pod starym kluczem;
+- ban dotyczy klucza instalacji; nową instalacją można próbować ponownie — przy włączonym
+  zatwierdzaniu wymaga zgody hosta;
+- pierwsze dołączenie ufa pierwszemu hostowi, który odpowie z tym kodem (TOFU);
+- broker widzi: topic id, rozmiary, czas, adresy IP klientów.
+
+Testy: `sync_crypto.rs` (kody, KDF, AEAD, podrobiony podpis, replay, okno licznika, stała
+sesja, tożsamość 0600, zgodność LegacyCipher z v2), `sync_room.rs` (gość słucha tylko klucza
+hosta, member id związany z kluczem, State podpisany przez nazwanego hosta, stare kody, klient
+v2 dostaje Outdated, linie LAN podpisane cudzym kluczem ignorowane, beacon wymaga pieczęci
+pokoju, beacon mieści się w buforze). Testy MQTT z prawdziwymi brokerami w tym środowisku się
+pomijają (proxy blokuje brokery) — w CI GitHub wykonują się normalnie.
