@@ -44,6 +44,10 @@ use tokio::time::Instant;
 const DISCOVERY_UDP_PORT: u16 = 47863;
 const DISCOVERY_TIMEOUT: Duration = Duration::from_millis(2500);
 const BEACON_INTERVAL: Duration = Duration::from_secs(2);
+/// Biggest beacon datagram a guest reads. A signed, sealed beacon is ~550
+/// bytes (its length varies with the sender's counters); anything larger is
+/// not ours.
+const MAX_BEACON_BYTES: usize = 1400;
 pub const MAX_MEMBERS: usize = 16;
 const JOIN_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 /// How long a guest waits for the host to let it in (join approval).
@@ -1929,7 +1933,7 @@ async fn discover_host_on_port(
         format!("Couldn't listen for the host on port {discovery_port}: another YTMD may be searching already.")
     })?;
     let deadline = Instant::now() + timeout_budget;
-    let mut buf = [0u8; 512];
+    let mut buf = [0u8; MAX_BEACON_BYTES];
     loop {
         let remaining = deadline.saturating_duration_since(Instant::now());
         let Ok(Ok((n, src))) = tokio::time::timeout(remaining, sock.recv_from(&mut buf)).await else {
@@ -1938,7 +1942,7 @@ async fn discover_host_on_port(
         let Ok(beacon) = serde_json::from_slice::<Beacon>(&buf[..n]) else {
             continue;
         };
-        if beacon.v != PROTOCOL_VERSION || beacon.t != cipher.topic_id() || beacon.p.len() > 1024 {
+        if beacon.v != PROTOCOL_VERSION || beacon.t != cipher.topic_id() {
             continue;
         }
         let Ok(sealed) = base64::engine::general_purpose::STANDARD.decode(&beacon.p) else {
@@ -2990,6 +2994,25 @@ mod tests {
     }
 
     // --- LAN transport ----------------------------------------------------
+
+    /// Regression: beacons used to be read into 512 bytes, and a signed
+    /// beacon is longer whenever the host's random session id has many
+    /// digits, so some hosts were randomly invisible on the LAN.
+    #[test]
+    fn test_largest_beacon_fits_the_read_buffer() {
+        use base64::Engine;
+        let c = test_cipher(&generate_room_code());
+        let body = c.seal_msg(&WireMessage::Beacon { tcp_port: u16::MAX }).unwrap();
+        let beacon = serde_json::to_vec(&Beacon {
+            v: PROTOCOL_VERSION,
+            t: c.topic_id().to_string(),
+            p: base64::engine::general_purpose::STANDARD.encode(body),
+        })
+        .unwrap();
+        // Worst case: counter and session id at their longest (20 digits each).
+        let worst = beacon.len() + 2 * 20;
+        assert!(worst < MAX_BEACON_BYTES, "{worst} bytes");
+    }
 
     #[tokio::test]
     async fn test_discover_needs_a_beacon_sealed_by_the_room() {
