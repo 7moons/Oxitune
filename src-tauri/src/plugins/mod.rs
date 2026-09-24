@@ -732,6 +732,47 @@ mod tests {
         assert!(scripts[0].contains("ytmd.log.info('hi');"));
     }
 
+    /// The whole registry path with real minisign output: signed index →
+    /// checksum → atomic install → enabled → the page gets its code.
+    #[test]
+    fn test_install_from_a_signed_registry_fixture() {
+        let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/registry");
+        let index = registry::verify_index(
+            &std::fs::read(fixtures.join("index.json")).unwrap(),
+            &std::fs::read_to_string(fixtures.join("index.json.minisig")).unwrap(),
+            &std::fs::read_to_string(fixtures.join("test.pub")).unwrap(),
+        )
+        .unwrap();
+        let entry = &index.plugins[0];
+        let data = std::fs::read(fixtures.join("app.ytmd.example-theme-1.0.0.tar.gz")).unwrap();
+        registry::check_archive(&data, entry).unwrap();
+
+        let (_d, m) = manager();
+        let manifest = m.install_archive(&data, entry).unwrap();
+        m.update_state(|s| {
+            s.installed.insert(
+                manifest.id.clone(),
+                Installed {
+                    version: manifest.version.clone(),
+                    source: Source::Registry,
+                    registry: Some("https://example.com/index.json".into()),
+                    dev_path: None,
+                    enabled: true,
+                    granted: manifest.permissions.clone(),
+                    auto_disabled: false,
+                    errors: 0,
+                    pending_update: None,
+                },
+            );
+        });
+        let enabled = m.enabled_plugins();
+        assert_eq!(enabled.len(), 1);
+        assert_eq!(enabled[0].1["accent"], "red", "settings default from the manifest");
+        let scripts = page_scripts(&enabled);
+        assert!(scripts[0].contains("ytmd.settings.onChange(applyAccent)"));
+        assert!(scripts[0].contains("--example-accent"), "styles travel with the payload");
+    }
+
     #[test]
     fn test_state_survives_restart() {
         let (_d, m) = manager();

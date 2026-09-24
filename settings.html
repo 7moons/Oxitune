@@ -33,6 +33,7 @@
         <button class="settings-nav-item" data-section="sec-system"><svg class="icon" viewBox="0 0 24 24"><path d="M4 6h18V4H4c-1.1 0-2 .9-2 2v11H0v3h14v-3H4V6zm19 2h-6c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h6c.55 0 1-.45 1-1V9c0-.55-.45-1-1-1zm-1 9h-4v-7h4v7z"/></svg><span data-i18n="settings.nav.system">System</span></button>
         <button class="settings-nav-item" data-section="sec-library"><svg class="icon" viewBox="0 0 24 24"><path d="M17 18v1H6v-1h11zm-.5-6.6-.7-.7-3.8 3.7V4h-1v10.4l-3.8-3.8-.7.7 5 5 5-4.9z"/></svg><span data-i18n="settings.nav.library">Music library</span></button>
         <button class="settings-nav-item" data-section="sec-remote"><svg class="icon" viewBox="0 0 24 24"><path d="M17 1.01 7 1c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-1.99-2-1.99zM17 19H7V5h10v14z"/></svg><span data-i18n="settings.nav.remote">Phone remote</span></button>
+        <button class="settings-nav-item" data-section="sec-plugins"><svg class="icon" viewBox="0 0 24 24"><path d="M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5a2.5 2.5 0 0 0-5 0V5H4c-1.1 0-1.99.9-1.99 2v3.8H3.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7s2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5a2.5 2.5 0 0 0 0-5z"/></svg><span data-i18n="settings.nav.plugins">Plugins</span></button>
         <button class="settings-nav-item" data-section="sec-about"><svg class="icon" viewBox="0 0 24 24"><path d="M11 7h2v2h-2zm0 4h2v6h-2zm1-9C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"/></svg><span data-i18n="settings.nav.about">About</span></button>
       </nav>
 
@@ -365,6 +366,74 @@
             </div>
             <div id="remote-qr" class="remote-qr" data-i18n="settings.remotePair.unavailable">The remote isn’t running. Turn it on above and restart YTMD.</div>
             <div id="remote-url" class="setting-desc remote-url"></div>
+          </div>
+        </section>
+
+        <section class="settings-section" id="sec-plugins">
+          <h2 class="section-heading" data-i18n="settings.nav.plugins">Plugins</h2>
+
+          <div id="plugins-restart" class="setting-row is-hidden">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="plugins.restart.title">Restart to apply</span>
+              <span class="setting-desc" data-i18n="plugins.restart.desc">New and updated plugins load when YTMD starts. Your song picks up where it was.</span>
+            </div>
+            <button id="plugins-restart-btn" class="btn btn-filled" data-i18n="plugins.restart.action">Restart now</button>
+          </div>
+
+          <h3 class="subsection-heading" data-i18n="plugins.installed">Installed</h3>
+          <div id="plugins-installed" class="plugin-list"></div>
+          <p id="plugins-installed-empty" class="setting-desc" data-i18n="plugins.none">No plugins installed yet. Add a registry below to find some.</p>
+
+          <h3 class="subsection-heading" data-i18n="plugins.available">Available</h3>
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-desc" data-i18n="plugins.available.desc">Plugins offered by your registries. Every list is checked against the registry's signature.</span>
+            </div>
+            <button id="plugins-browse-btn" class="btn btn-tonal" data-i18n="plugins.browse">Show</button>
+          </div>
+          <div id="plugins-available" class="plugin-list"></div>
+
+          <h3 class="subsection-heading" data-i18n="plugins.registries">Registries</h3>
+          <p class="setting-desc" data-i18n="plugins.registries.desc">YTMD comes with no registry. Add only registries you trust: their plugins run inside YouTube Music.</p>
+          <div id="plugins-registries" class="plugin-list"></div>
+          <div class="setting-row stack">
+            <label class="field">
+              <span class="setting-title" data-i18n="plugins.registry.url">Registry address (index.json)</span>
+              <input type="url" id="registry-url" class="input" placeholder="https://example.com/ytmd-plugins/index.json" spellcheck="false" />
+            </label>
+            <label class="field">
+              <span class="setting-title" data-i18n="plugins.registry.key">Public key (minisign)</span>
+              <input type="text" id="registry-key" class="input mono" placeholder="RW…" spellcheck="false" />
+            </label>
+            <button id="registry-add-btn" class="btn btn-tonal" data-i18n="plugins.registry.add">Add registry</button>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="plugins.updates.title">Check for plugin updates</span>
+              <span class="setting-desc" data-i18n="plugins.updates.desc">Updates that ask for no new permissions install on their own</span>
+            </div>
+            <select id="plugins-update-interval" class="select" data-i18n-label="plugins.updates.title">
+              <option value="0" data-i18n="plugins.updates.off">Never</option>
+              <option value="6" data-i18n="plugins.updates.6h">Every 6 hours</option>
+              <option value="12" data-i18n="plugins.updates.12h">Every 12 hours</option>
+              <option value="24" data-i18n="plugins.updates.24h">Once a day</option>
+            </select>
+          </div>
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-desc" data-i18n="plugins.updates.nowDesc">Look for updates right away</span>
+            </div>
+            <button id="plugins-check-btn" class="btn btn-tonal" data-i18n="plugins.updates.now">Check now</button>
+          </div>
+
+          <h3 class="subsection-heading" data-i18n="plugins.dev.title">Developer</h3>
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="plugins.dev.load">Load a plugin from a folder</span>
+              <span class="setting-desc" data-i18n="plugins.dev.desc">For plugin authors. Nothing checks this code: only load folders you wrote or reviewed.</span>
+            </div>
+            <button id="plugins-dev-btn" class="btn btn-tonal" data-i18n="plugins.dev.pick">Choose folder</button>
           </div>
         </section>
 

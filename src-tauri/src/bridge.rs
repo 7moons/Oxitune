@@ -415,6 +415,11 @@ mod tests {
             "set_sync_member_role",
             "open_logs_folder",
             "regenerate_remote_token",
+            "plugins_install",
+            "plugins_add_registry",
+            "plugins_add_dev",
+            "plugins_set_enabled",
+            "restart_app",
         ] {
             assert!(!BRIDGE_COMMANDS.contains(&cmd), "`{cmd}` must not be reachable from music.youtube.com");
         }

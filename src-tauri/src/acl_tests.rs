@@ -75,6 +75,10 @@ fn test_youtube_music_reaches_only_the_bridge() {
         "plugin:webview|create_webview_window",
         "plugin:opener|open_url",
         "plugin:dialog|open",
+        "plugins_install",
+        "plugins_add_registry",
+        "plugins_add_dev",
+        "restart_app",
     ] {
         assert!(acl(&main, YTM, cmd).is_err(), "music.youtube.com must not reach {cmd}");
     }
@@ -97,6 +101,8 @@ fn test_companion_windows_get_only_their_own_commands() {
     let mini = local_window(&app, "miniplayer");
 
     assert_eq!(acl(&settings, LOCAL, "save_config"), Ok(()));
+    assert_eq!(acl(&settings, LOCAL, "plugins_install"), Ok(()));
+    assert!(acl(&sync, LOCAL, "plugins_install").is_err(), "only Settings manages plugins");
     assert_eq!(acl(&settings, LOCAL, "plugin:event|emit"), Ok(()));
     assert!(acl(&settings, LOCAL, "ytmd_bridge").is_err(), "the page bridge is for the main window only");
     assert!(acl(&settings, LOCAL, "create_sync_room").is_err());

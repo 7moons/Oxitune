@@ -7,6 +7,7 @@ import { syncRange } from './range';
 import { acceleratorFromEvent, formatAccelerator, isMediaKey, SHORTCUT_ACTIONS, ShortcutAction } from './shortcuts';
 import { CustomEqPreset, deletePreset, isCustomPresetId, MAX_PRESET_NAME_CHARS, savePreset } from './eqPresets';
 import { initWindowChrome, onBeforeClose } from './window';
+import { initPluginsSection } from './plugins';
 import { normalizeProviders, ProviderSetting, renderProviderList } from './lyricsProviders';
 
 interface AppConfig {
@@ -697,6 +698,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initAmbientBackdrop();
   initSectionNav();
   void loadRemotePairing();
+  initPluginsSection();
   // Opened on a section (`settings.html#sec-remote`, see windows.rs).
   const initialSection = decodeURIComponent(location.hash.slice(1));
   if (/^sec-[a-z-]+$/.test(initialSection)) requestAnimationFrame(() => showSection(initialSection));
