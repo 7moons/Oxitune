@@ -173,3 +173,176 @@ hosta, member id związany z kluczem, State podpisany przez nazwanego hosta, sta
 v2 dostaje Outdated, linie LAN podpisane cudzym kluczem ignorowane, beacon wymaga pieczęci
 pokoju, beacon mieści się w buforze). Testy MQTT z prawdziwymi brokerami w tym środowisku się
 pomijają (proxy blokuje brokery) — w CI GitHub wykonują się normalnie.
+
+---
+
+## 4. Pomiary (Faza 2)
+
+Środowisko: Linux, WebKitGTK 2.x, Xvfb, bez GPU. Skrypty: PSS = suma `Pss` z
+`/proc/<pid>/smaps_rollup` procesu aplikacji i wszystkich potomków (WebKitWebProcess,
+WebKitNetworkProcess), 20 s po starcie; CPU = przyrost `utime+stime` wszystkich procesów przez
+10 s; start = czas od `exec` do zmapowanego okna (`xwininfo`, 6 przebiegów na przemian
+przed/po, mediana). **YouTube Music nie był ładowany** (proxy środowiska blokuje
+music.youtube.com), więc to koszt samej aplikacji, bez strony YTM.
+
+| Metryka | Przed | Po | Zmiana | Commit |
+|---|---|---|---|---|
+| PSS bezczynnie, build z `tauri build` (0.2.0 vs HEAD) | 618 MB | 357 MB | −42% | `159866f` |
+| PSS bezczynnie, ten sam build, tylko leniwe okna | 531.7 MB | 307.6 MB | −224 MB (4 ukryte okna × ~71 MB) | `159866f` |
+| Okno główne na ekranie od startu | ~586 ms | ~530 ms | −10% | `159866f` |
+| Binarka (release) | 39.1 MB (`tauri build`; 36.6 MB `cargo build`) | 15.9 MB (15.4 MB) | −59% | `159866f` |
+| Instalator `.deb` | 13.54 MB | 7.37 MB | −46% | `159866f` |
+| Ponowny skan biblioteki, 3000 plików | 88 ms (na głównym wątku) | 32 ms (poza nim, cache mtime/rozmiar) | −64%, UI nie blokowane | `159866f` |
+| CPU bezczynnie na ekranie offline | ~4% rdzenia | ~0.3% rdzenia | backoff 10 s→5 min, jeden klient TLS | `01ff2c0` |
+| CPU bezczynnie (bez YTM) | ~0.6% | ~0.3–0.6% | bez zmian (szum) | — |
+
+Przyczyny i poprawki:
+- 4 okna towarzyszące tworzone przy starcie jako ukryte — każde to osobny proces WebKit
+  (~71 MB PSS). Teraz `windows.rs` tworzy je przy pierwszym otwarciu; Ustawienia i Biblioteka
+  są niszczone przy zamknięciu (po zapisaniu oczekującej zmiany), mini player i Listen Together
+  się chowają (szybki powrót, rzadko otwierane rzadko).
+- `[profile.release]`: `lto`, `codegen-units = 1`, `opt-level = "s"`, `strip`. `panic`
+  zostaje `unwind` (panika w zadaniu w tle nie może zabić odtwarzacza; panic hook ją loguje).
+- `scan_local_music` był synchroniczną komendą (główny wątek) — teraz `async` +
+  `spawn_blocking` z przyrostowym cache'em w `~/.ytmd/library_cache.json`.
+- Ekran offline: ponawianie z backoffem bez przemalowywania, współdzielony `reqwest::Client`.
+- Wstrzykiwany skrypt: przejrzany pod kątem pętli per-klatka (to naprawiono już w 0.1.x,
+  `90d0e2c`; ambient liczony raz na utwór) — bez nowych znalezisk; bez YTM nie da się go
+  zmierzyć rzetelnie, więc nie podaję liczb.
+
+Log `startup: main window in N ms` pozwala mierzyć start na maszynie użytkownika.
+
+---
+
+## 5. Nowe funkcje (Faza 3)
+
+| Funkcja | Stan | Commit |
+|---|---|---|
+| Panic hook: `crash-<czas>.log` (komunikat, miejsce, backtrace) w `~/.ytmd/logs`, przy następnym starcie okno „Otwórz folder logów” | ✅ | `ca17bc7` |
+| Ekran offline (`offline.html`, własna capability tylko z `retry_connection`), automatyczne ponawianie | ✅ | `ca17bc7`, `01ff2c0` |
+| Zapamiętywanie rozmiaru/pozycji/maksymalizacji okna głównego i mini playera (`tauri-plugin-window-state`) | ✅ | `ca17bc7` |
+| Autostart (`tauri-plugin-autostart`), domyślnie **wyłączony**; start z logowania → w zasobniku | ✅ | `ca17bc7` |
+| Menu zasobnika, powiadomienia, okno crasha po polsku/angielsku (`i18n.rs`, język systemu) | ✅ | `ca17bc7` |
+| Przyciski poprzedni/odtwórz/następny w podglądzie paska zadań Windows (`thumbbar.rs`, ITaskbarList3) | ✅ (sprawdzone `clippy --target x86_64-pc-windows-gnu`, nie uruchamiane na Windows) | `78d2403` |
+| Naprawa: MPRIS/SMTC Toggle i „Odtwórz/Pauza” z zasobnika wysyłały `play-pause` (nieobsługiwane) — nic nie robiły | ✅ + test | `78d2403` |
+| SMTC (Windows) i MPRIS (Linux) | były (souvlaki); zweryfikowane komendy | — |
+| Jedna instancja | była (`tauri-plugin-single-instance`) | — |
+| Metadane instalatora (wydawca, kategoria, opisy, licencja, strona) | ✅ | `01ff2c0` |
+| Podpisywanie kodu Windows / build macOS | ❌ — decyzja, patrz §8 | — |
+| Testy: ACL (mock runtime), crypto, pluginy E2E (podpisany rejestr → skrypt strony), komendy odtwarzacza, wersje, strona join | ✅ | różne |
+
+Stan testów na HEAD: `cargo test` 278 pass (+59 od bazy), `bun test` 235 pass (+16),
+`clippy -D warnings` czysto na Linux i `x86_64-pc-windows-gnu`, `cargo deny check` OK,
+`tsc --noEmit` OK, `bun run build` OK.
+
+---
+
+## 6. System pluginów (Fazy 4–5)
+
+- **API v1** (`docs/PLUGIN_API.md`): manifest (`id` reverse-DNS, semver, `apiVersion`,
+  `matches`, `runAt`, zamknięty zbiór uprawnień `player:read`, `player:control`, `page`,
+  `storage`, `network`+`hosts`, `ui`; `internal:*` tylko dla wbudowanych), schemat ustawień
+  renderowany w Ustawieniach, izolacja błędów per callback, wyłączenie po 5 błędach.
+- **Loader** (`src-tauri/src/plugins/`, `src/preload/pluginHost.ts`): każdy włączony plugin to
+  osobny initialization script → `__ytmdDefinePlugin` → zamrożony obiekt `ytmd` tylko z
+  przyznanymi grupami; storage (1 MB) i fetch (https, tylko `hosts`, 1 MB, 10 s, bez
+  przekierowań) ponownie sprawdzane w Rust.
+- **Wbudowane funkcje** mają `manifest.json` (`app.ytmd.*`) i kontekst zawężony do uprawnień
+  (`scopedContext`); test pilnuje, by nie wołały komend/zdarzeń poza nimi.
+- **Menedżer** (Ustawienia → Pluginy): włącz/wyłącz, ustawienia, odinstaluj, aktualizacje
+  czekające na zgodę (nowe uprawnienia), rejestry (URL + klucz minisign, weryfikowane przed
+  zapisaniem), interwał sprawdzania aktualizacji (6/12/24 h, 0 = nigdy), tryb deweloperski za
+  ostrzeżeniem, przycisk restartu.
+- **Instalacja**: `index.json` + `.minisig` weryfikowane kluczem użytkownika, SHA-256
+  archiwum z podpisanego indeksu, manifest w archiwum musi zgadzać się z wpisem (id, wersja,
+  uprawnienia); rozpakowanie do staging bez ścieżek absolutnych, `..`, linków i plików
+  specjalnych, limity rozmiaru/liczby plików (zip-bomb), potem atomowy `rename`.
+- **Hot-reload**: wyłączenie działa od razu; włączenie/instalacja/aktualizacja wymagają
+  restartu (`restart_app`, utwór wznawia się z `session.json`) — patrz §8.
+- **Wydzielone**: adblock i SponsorBlock → `_plugins-export/plugins/` (z testami); przykład
+  `app.ytmd.example-theme`. `_plugins-export/` to gotowe repo rejestru: builder
+  `index.json` (odtwarzalne archiwa, te same reguły manifestu), CI na PR, workflow na tag
+  (build → hash → podpis minisign → GitHub Pages), akcje przypięte do SHA.
+- **Downloader usunięty** z rdzenia (komendy, UI, ustawienia `download_*`; stare pola w
+  configu są ignorowane przy wczytaniu, więc format `config.json` pozostaje wstecznie
+  zgodny — test `config` z polami download to sprawdza).
+
+Pozostałe wystąpienia „ad”/„download” w rdzeniu (świadomie): pobieranie aktualizacji
+(updater), pobieranie pluginów/rejestrów, wykrywanie reklamy YTM w `observer.ts` i
+`sync-room` (host nie synchronizuje reklamy jako utworu), test zgodności wstecznej configu,
+parser Genius pomija `div`y reklamowe, `nav_policy` przepuszcza ramki doubleclick/
+googlesyndication (bez tego YTM się nie ładuje — to nie blokowanie, tylko pozwolenie).
+
+---
+
+## 7. Zależności
+
+| Zmiana | Uzasadnienie |
+|---|---|
+| − `tauri-plugin-shell`, − `tauri-plugin-store` | nieużywane; shell to niepotrzebna powierzchnia ataku |
+| − `reqwest` feature `blocking` | nieużywany, osobny runtime |
+| − `@tauri-apps/api`, `plugin-global-shortcut`, `plugin-notification`, `plugin-shell`, `plugin-store` (JS) | okna używają `window.__TAURI__` (typowane w `global.d.ts`), paczki nieimportowane |
+| + `tauri-plugin-window-state` | zapamiętywanie okien (oficjalny plugin Tauri; własna implementacja = więcej kodu i błędów przy wielu monitorach) |
+| + `tauri-plugin-autostart` | autostart na Linux/Windows (oficjalny) |
+| + `minisign-verify`, `tar`, `flate2`, `semver` | weryfikacja podpisu rejestru, rozpakowanie i wersje pluginów — **już były w drzewie** przez `tauri-plugin-updater`, więc zero nowego kodu w binarce; bez własnej kryptografii |
+| `ring` (bez zmiany wersji, nowe użycie: HKDF, Ed25519) | już w drzewie (rustls); zamiast dodawać `ed25519-dalek`/`hkdf` |
+| + `windows` features `Win32_UI_Shell`, `…WindowsAndMessaging`, `…Graphics_Gdi`, `…Globalization` | przyciski paska zadań, język systemu |
+| dev: `tauri` feature `test` | mock runtime do testów ACL |
+| `rustls` 0.23.43 → 0.23.45 | RUSTSEC-2026-0285 |
+| zignorowane w `deny.toml`: 4 advisories `rustls-webpki 0.102.8` | `rumqttc` linkuje ją tylko dla typu błędu; weryfikacja certyfikatów idzie przez 0.103.15 — do usunięcia przy aktualizacji rumqttc |
+
+---
+
+## 8. Decyzje do zatwierdzenia
+
+Wdrożony jest bezpieczniejszy/zachowawczy wariant; każdą można zmienić.
+
+1. **Downloader — przyszłość.** Usunięty z rdzenia (wymóg). Warianty:
+   (a) nic więcej — YTMD nie pobiera (wdrożone, najmniej ryzyka prawnego i ToS);
+   (b) osobny program/projekt poza YTMD (np. nakładka na yt-dlp), YTMD co najwyżej linkuje;
+   (c) plugin w zewnętrznym rejestrze — **wymagałby nowego uprawnienia z dostępem do plików/
+   procesów**, czyli rozszerzenia API o coś, czego strona YTM nigdy nie powinna mieć;
+   odradzam. Kod usuniętego downloadera jest w historii (`c4a9297`).
+2. **Ścieżki danych**: zostaje `~/.ytmd/` (też na Windows) zamiast XDG/`%APPDATA%` —
+   migracja przeniosłaby sesję, tożsamość sync, pluginy i token pilota, a istniejący
+   użytkownicy już tam mają dane. Wariant XDG = osobna migracja z testami.
+3. **Brak domyślnego rejestru pluginów** — użytkownik dodaje URL + klucz. Czy dołączyć
+   oficjalny rejestr (`_plugins-export` po wypchnięciu) jako predefiniowany? Wymaga
+   wygenerowania klucza rejestru przez Ciebie (sekret w repo rejestru, nie tu) i decyzji, czy
+   adblock ma być „oficjalny”.
+4. **Hot-reload pluginów**: niewdrożony. Skrypty `document-start` muszą być
+   initialization scriptami okna, a Tauri nie pozwala ich dodać do istniejącego okna;
+   `eval` w stronie YTM łamałby model uprawnień. Zamiast tego restart z wznowieniem utworu.
+5. **Pluginy nie są sandboxowane** — działają w realmie strony YTM (jak userscript). Sufit
+   to wąski most strony (§3, S1/S2). Prawdziwa izolacja (osobny iframe/worker + postMessage)
+   to API v2 i utrata `page`/`document-start`. Zaufanie = rejestr.
+6. **Listen Together — PAKE zamiast długiego kodu**: odrzucone (patrz §3); do rozważenia,
+   jeśli kody mają być krótkie/do przepisania ustnie.
+7. **Rotacja klucza pokoju po wyrzuceniu**: niewdrożona (wyrzucony z kodem może czytać do
+   końca sesji). Obejście: nowy pokój. Pełne rozwiązanie ≈ MLS.
+8. **Podpisywanie kodu Windows**: potrzebny certyfikat (OV/EV lub Azure Trusted Signing,
+   ~10 USD/mies.) — decyzja kosztowa; do tego czasu SmartScreen ostrzega. Klucz updatera
+   `A721E1BF70C34591` nietknięty.
+9. **macOS**: brak builda. Wymaga konta Apple Developer (99 USD/rok), notaryzacji,
+   odpowiednika `screen_lock`/`power_manager`/przycisków; MPRIS→MediaRemote przez souvlaki.
+10. **CSP `style-src 'unsafe-inline'`** w oknach lokalnych: kit UI wstrzykuje `<style>`;
+    usunięcie = przepisanie kitu na arkusze statyczne/nonce. Skrypty bez `unsafe-*`.
+11. **Pilot: `remote_bind = lan`** domyślnie i cały pilot domyślnie wyłączony — zmiana
+    zachowania względem 0.2.0 (użytkownicy muszą go włączyć).
+12. **Protokół sync 3** nie współpracuje z 0.2.x — starsi dostają czytelny komunikat
+    „zaktualizuj”; stare kody pokoi przestają działać.
+
+---
+
+## 9. Niezrobione / ograniczenia
+
+- Pamięć i CPU **z załadowanym YouTube Music** nie zmierzone (proxy środowiska blokuje
+  music.youtube.com); podane liczby to koszt samej aplikacji.
+- Windows (WebView2) nie mierzony ani nie uruchamiany; kod Windows sprawdzany tylko
+  kompilacją `x86_64-pc-windows-gnu` + clippy (i job `backend-windows` w CI).
+- Testy MQTT z publicznymi brokerami pomijane lokalnie (proxy), wykonują się w CI GitHub.
+- Pluginy nie są sandboxem (§8.5); manifest ogranicza dobrze napisany plugin, nie złośliwy.
+- Brak podpisu kodu Windows i builda macOS (§8.8–9).
+- `_plugins-export/` nie jest wypchnięty jako osobne repo i nie ma wygenerowanego klucza
+  rejestru — to wymaga Twojego konta i sekretów.
+- `rustls-webpki 0.102.8` w drzewie przez `rumqttc` (zignorowane z uzasadnieniem, §7).
