@@ -190,6 +190,9 @@ export const VolumePlugin: YTMDPlugin = {
         ? Math.min(configuredStep, 1)
         : 0.05;
       e.preventDefault();
+      // YTM's player bar has its own wheel handler over the volume slider
+      // (onVolumeScroll, a much bigger step); ours handled it, so it stops here.
+      e.stopPropagation();
       setPlayerVolumePercent(getPlayerVolumePercent(video) + (e.deltaY < 0 ? step : -step) * 100, video);
       syncIndicator();
     };
