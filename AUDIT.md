@@ -263,7 +263,7 @@ Stan testów na HEAD: `cargo test` 278 pass (+59 od bazy), `bun test` 235 pass (
   `app.ytmd.example-theme`. `_plugins-export/` to gotowe repo rejestru: builder
   `index.json` (odtwarzalne archiwa, te same reguły manifestu), CI na PR, workflow na tag
   (build → hash → podpis minisign → GitHub Pages), akcje przypięte do SHA.
-- **Downloader usunięty** z rdzenia (komendy, UI, ustawienia `download_*`; stare pola w
+- **Downloader usunięty** z rdzenia, potem wrócił jako addon przez `media:save` (§8.1, pkt 1) (stare komendy, UI, ustawienia `download_*` usunięte; stare pola w
   configu są ignorowane przy wczytaniu, więc format `config.json` pozostaje wstecznie
   zgodny — test `config` z polami download to sprawdza).
 
@@ -293,44 +293,31 @@ googlesyndication (bez tego YTM się nie ładuje — to nie blokowanie, tylko po
 
 ---
 
-## 8. Decyzje do zatwierdzenia
+## 8. Decyzje
 
-Wdrożony jest bezpieczniejszy/zachowawczy wariant; każdą można zmienić.
+### 8.1 Zatwierdzone (24.09.2026)
 
-1. **Downloader — przyszłość.** Usunięty z rdzenia (wymóg). Warianty:
-   (a) nic więcej — YTMD nie pobiera (wdrożone, najmniej ryzyka prawnego i ToS);
-   (b) osobny program/projekt poza YTMD (np. nakładka na yt-dlp), YTMD co najwyżej linkuje;
-   (c) plugin w zewnętrznym rejestrze — **wymagałby nowego uprawnienia z dostępem do plików/
-   procesów**, czyli rozszerzenia API o coś, czego strona YTM nigdy nie powinna mieć;
-   odradzam. Kod usuniętego downloadera jest w historii (`c4a9297`).
-2. **Ścieżki danych**: zostaje `~/.ytmd/` (też na Windows) zamiast XDG/`%APPDATA%` —
-   migracja przeniosłaby sesję, tożsamość sync, pluginy i token pilota, a istniejący
-   użytkownicy już tam mają dane. Wariant XDG = osobna migracja z testami.
-3. **Brak domyślnego rejestru pluginów** — użytkownik dodaje URL + klucz. Czy dołączyć
-   oficjalny rejestr (`_plugins-export` po wypchnięciu) jako predefiniowany? Wymaga
-   wygenerowania klucza rejestru przez Ciebie (sekret w repo rejestru, nie tu) i decyzji, czy
-   adblock ma być „oficjalny”.
-4. **Hot-reload pluginów**: niewdrożony. Skrypty `document-start` muszą być
-   initialization scriptami okna, a Tauri nie pozwala ich dodać do istniejącego okna;
-   `eval` w stronie YTM łamałby model uprawnień. Zamiast tego restart z wznowieniem utworu.
-5. **Pluginy nie są sandboxowane** — działają w realmie strony YTM (jak userscript). Sufit
-   to wąski most strony (§3, S1/S2). Prawdziwa izolacja (osobny iframe/worker + postMessage)
-   to API v2 i utrata `page`/`document-start`. Zaufanie = rejestr.
-6. **Listen Together — PAKE zamiast długiego kodu**: odrzucone (patrz §3); do rozważenia,
-   jeśli kody mają być krótkie/do przepisania ustnie.
-7. **Rotacja klucza pokoju po wyrzuceniu**: niewdrożona (wyrzucony z kodem może czytać do
-   końca sesji). Obejście: nowy pokój. Pełne rozwiązanie ≈ MLS.
-8. **Podpisywanie kodu Windows**: potrzebny certyfikat (OV/EV lub Azure Trusted Signing,
-   ~10 USD/mies.) — decyzja kosztowa; do tego czasu SmartScreen ostrzega. Klucz updatera
-   `A721E1BF70C34591` nietknięty.
-9. **macOS**: brak builda. Wymaga konta Apple Developer (99 USD/rok), notaryzacji,
-   odpowiednika `screen_lock`/`power_manager`/przycisków; MPRIS→MediaRemote przez souvlaki.
-10. **CSP `style-src 'unsafe-inline'`** w oknach lokalnych: kit UI wstrzykuje `<style>`;
-    usunięcie = przepisanie kitu na arkusze statyczne/nonce. Skrypty bez `unsafe-*`.
-11. **Pilot: `remote_bind = lan`** domyślnie i cały pilot domyślnie wyłączony — zmiana
-    zachowania względem 0.2.0 (użytkownicy muszą go włączyć).
-12. **Protokół sync 3** nie współpracuje z 0.2.x — starsi dostają czytelny komunikat
-    „zaktualizuj”; stare kody pokoi przestają działać.
+| # | Decyzja | Co wdrożono |
+|---|---|---|
+| 1 | **Downloader jako addon**, wariant „uprawnienie + yt-dlp” | Nowe uprawnienie `media:save` (`plugins/media_save.rs`): plugin podaje tylko id utworu (11 znaków) i format z listy; rdzeń uruchamia yt-dlp zainstalowany przez użytkownika (nigdy go nie pobieramy) ze stałą linią poleceń (`--ignore-config`, bez powłoki, tylko `music.youtube.com/watch?v=<id>`, `--no-overwrites`) do folderu wybranego w Ustawieniach → Pluginy; 2 naraz, max 20 w kolejce; postęp do strony tylko z nazwą pliku. Addon `app.ytmd.downloader` w rejestrze (przycisk w pasku odtwarzacza z pierścieniem postępu, PL/EN). Linia poleceń sprawdzona z prawdziwym yt-dlp 2026.08.19 + ffmpeg dla mp3/m4a/opus/flac (test `real_ytdlp`, `--ignored`). Commit `ab960ee`. **Odstępstwo od pierwotnego wymogu „zero download w rdzeniu”** — świadome, na Twoją decyzję; bez zainstalowanego addonu ten kod nic nie robi. |
+| 2 | **Oficjalny rejestr wbudowany**, repo `oscilla-plugins` | `registry::official()`: `https://kayzedd.github.io/oscilla-plugins/index.json`, klucz minisign `2254F07B14D10D3E` wkompilowany (`OFFICIAL_KEY`); użytkownik może go usunąć i przywrócić; zapisany w stanie rejestr nie może udawać oficjalnego (test). Parę kluczy wygenerowałem w sesji (Twój wybór); sekret i hasło są tylko w katalogu tymczasowym sesji, nie w repo — do wklejenia w GitHub Secrets repo rejestru. Test pilnuje, że `_plugins-export/minisign.pub` = `OFFICIAL_KEY`. Commit `50a4001`. |
+| 3 | **Bez płatnego certyfikatu** | Windows zostaje niepodpisany (SmartScreen: „Więcej informacji → Uruchom mimo to”); aktualizacje i tak są podpisane minisign. Brak builda macOS (notaryzacja wymaga płatnego konta Apple). Darmowa opcja na przyszłość: **SignPath Foundation** podpisuje za darmo projekty open source (wymaga zgłoszenia i ich zasad dla buildów z CI). |
+| 4 | **Rotacja klucza pokoju po wyrzuceniu: „nie wiem”** | Zostaje stan obecny (bez rotacji). Rekomendacja: tak zostawić — wyrzucony nie może pisać ani się podszywać, a żeby odciąć czytanie, host zakłada nowy pokój. Rotacja miałaby sens dopiero przy dużych, publicznych pokojach. |
+| 5 | **Ścieżki: `~/.ytmd`**, później zmiana nazwy na **Oscilla** | Bez zmian teraz. Przy rebrandingu potrzebna migracja `~/.ytmd` → nowy katalog (config, sesja, `sync_identity`, pluginy, token pilota, cache), identyfikator aplikacji Tauri (`identifier`), nazwa pakietów, `ytmd://` (zostawić jako alias) i adres updatera. Rejestr już nazywa się `oscilla-plugins`, więc jego adres się nie zmieni. |
+| 6 | **Restart zamiast hot-reloadu** | Bez zmian. |
+
+### 8.2 Otwarte (wdrożony zachowawczy wariant)
+
+1. **Pluginy nie są sandboxowane** — działają w realmie strony YTM (jak userscript). Sufit
+   to wąski most strony (§3, S1/S2). Prawdziwa izolacja (iframe/worker + postMessage) to API
+   v2 i utrata `page`/`document-start`. Zaufanie = rejestr.
+2. **CSP `style-src 'unsafe-inline'`** w oknach lokalnych: kit UI wstrzykuje `<style>`;
+   usunięcie = przepisanie kitu na arkusze statyczne/nonce. Skrypty bez `unsafe-*`.
+3. **Pilot domyślnie wyłączony, `remote_bind = lan`** — zmiana zachowania względem 0.2.0.
+4. **Protokół sync 3** nie współpracuje z 0.2.x — starsi dostają czytelny komunikat
+   „zaktualizuj”; stare kody pokoi przestają działać.
+5. **PAKE zamiast długiego kodu** — odrzucone (§3); do rozważenia, jeśli kody mają być
+   krótkie/do podyktowania.
 
 ---
 
@@ -343,6 +330,8 @@ Wdrożony jest bezpieczniejszy/zachowawczy wariant; każdą można zmienić.
 - Testy MQTT z publicznymi brokerami pomijane lokalnie (proxy), wykonują się w CI GitHub.
 - Pluginy nie są sandboxem (§8.5); manifest ogranicza dobrze napisany plugin, nie złośliwy.
 - Brak podpisu kodu Windows i builda macOS (§8.8–9).
-- `_plugins-export/` nie jest wypchnięty jako osobne repo i nie ma wygenerowanego klucza
-  rejestru — to wymaga Twojego konta i sekretów.
+- `_plugins-export/` nie jest jeszcze wypchnięty jako repo `KayZedd/oscilla-plugins`
+  (nie tworzę repozytoriów bez Twojej zgody), a sekrety `MINISIGN_SECRET_KEY` /
+  `MINISIGN_PASSWORD` trzeba wkleić w jego ustawieniach. Do tego czasu wbudowany rejestr
+  jest nieosiągalny i Ustawienia po prostu nie pokażą z niego wtyczek.
 - `rustls-webpki 0.102.8` w drzewie przez `rumqttc` (zignorowane z uzasadnieniem, §7).
