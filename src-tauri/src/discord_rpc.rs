@@ -159,8 +159,11 @@ impl DiscordRpcHandle {
     }
 }
 
+/// Our own Discord application (Developer Portal → General Information →
+/// Application ID; public, not a secret). Its name is what friends see
+/// ("Listening to …"). Never borrow another project's application.
 pub const DISCORD_CLIENT_IDS: &[&str] = &[
-    "1177081335727267940", // YouTube Music Desktop (Verified active Discord application)
+    "1552722936966680676", // Oscilla
 ];
 
 /// Discord Rich Presence requires strings (details, state, large_text) to be between 2 and 128 characters.
@@ -644,6 +647,12 @@ fn current_uid() -> u32 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn test_uses_our_own_discord_application() {
+        assert_eq!(super::DISCORD_CLIENT_IDS, ["1552722936966680676"]);
+        assert!(super::DISCORD_CLIENT_IDS.iter().all(|id| id.len() >= 17 && id.bytes().all(|b| b.is_ascii_digit())));
+    }
+
     use super::*;
     use std::sync::{Arc, Mutex};
 
