@@ -3,10 +3,13 @@ mod acl_tests;
 pub mod bridge;
 pub mod commands;
 pub mod config;
+pub mod connectivity;
+pub mod crash;
 pub mod discord_rpc;
 pub mod join_link;
 pub mod local_files;
 pub mod lyrics;
+pub mod i18n;
 pub mod mpris;
 pub mod nav_policy;
 pub mod page_ipc;
@@ -73,6 +76,9 @@ fn install_crypto_provider_for_tests() {
     ensure_crypto_provider();
 }
 
+/// Passed by the login item (tauri-plugin-autostart).
+const AUTOSTART_ARG: &str = "--autostart";
+
 pub fn run() {
     let started = std::time::Instant::now();
     ensure_crypto_provider();
@@ -128,6 +134,8 @@ pub fn run() {
             .unwrap_or_else(sync_crypto::Identity::generate),
     );
 
+    crash::install_panic_hook(logs_dir.clone(), env!("CARGO_PKG_VERSION").to_string());
+
     let app_state = Arc::new(AppState {
         config_manager,
         discord_rpc: Mutex::new(discord_rpc),
@@ -152,6 +160,7 @@ pub fn run() {
     let remote_enabled = initial_config.remote_enabled;
     let remote_bind = initial_config.remote_bind.clone();
     let initial_shortcuts = initial_config.shortcuts.clone();
+    let initial_autostart = initial_config.autostart;
 
     tauri::Builder::default()
         // Must be the first plugin: a second launch (even while this one sits
@@ -183,11 +192,28 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_opener::init())
+        // Size, position and maximized state of the main window and the
+        // mini player, restored on the next launch.
+        .plugin(
+            tauri_plugin_window_state::Builder::new()
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::all() - tauri_plugin_window_state::StateFlags::VISIBLE,
+                )
+                .with_denylist(&["settings", "local", "sync"])
+                .build(),
+        )
+        // Login item (Settings > System, off by default); such launches
+        // pass --autostart and start in the tray.
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec![AUTOSTART_ARG]),
+        ))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(app_state)
+        .manage(Arc::new(connectivity::PageAlive::default()))
         .setup(move |app| {
             let handle = app.handle().clone();
 
@@ -203,6 +229,30 @@ pub fn run() {
 
             // Initialize Tray
             let _ = tray::setup_tray(&handle);
+
+            // The last run crashed: say so, and offer the report.
+            if crash::take_unreported(&app_state_for_setup.logs_dir).is_some() {
+                use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+                let h = handle.clone();
+                handle
+                    .dialog()
+                    .message(i18n::t(i18n::Text::CrashBody))
+                    .title(i18n::t(i18n::Text::CrashTitle))
+                    .kind(MessageDialogKind::Warning)
+                    .buttons(MessageDialogButtons::OkCancelCustom(
+                        i18n::t(i18n::Text::CrashOpenLogs).to_string(),
+                        i18n::t(i18n::Text::Close).to_string(),
+                    ))
+                    .show(move |open| {
+                        if open {
+                            let state = h.state::<Arc<AppState>>();
+                            let _ = commands::open_logs_folder(h.clone(), state);
+                        }
+                    });
+            }
+
+            // The login item follows the setting (e.g. after a config edit).
+            commands::apply_autostart(&handle, initial_autostart);
 
             // Global shortcuts, as configured in Settings.
             shortcuts::apply(&handle, &initial_shortcuts);
@@ -257,6 +307,8 @@ pub fn run() {
             // margin and got visibly clipped on their left edge.
             .min_inner_size(700.0, 500.0)
             .resizable(true)
+            // A login-item launch starts in the tray.
+            .visible(!std::env::args().any(|a| a == AUTOSTART_ARG))
             .initialization_script(include_str!("../inject/preload.js"))
             // YouTube Music and Google sign-in only (nav_policy.rs).
             .on_navigation(|url| {
@@ -296,6 +348,7 @@ pub fn run() {
             });
             let main_win = main_builder.build()?;
             log::info!("[YTMD] main window created {} ms after start", started.elapsed().as_millis());
+            connectivity::watch_startup(handle.clone());
 
             // Initialize MPRIS (needs the main window's HWND on Windows)
             let mpris_manager = MprisManager::new(handle.clone(), &main_win);
@@ -314,8 +367,8 @@ pub fn run() {
                         let _ = handle_for_update
                             .notification()
                             .builder()
-                            .title("YTMD update available")
-                            .body(format!("Version {} is ready to install from Settings.", info.version))
+                            .title(i18n::t(i18n::Text::UpdateTitle))
+                            .body(i18n::update_body(&info.version))
                             .show();
                     }
                     Ok(None) => {}
@@ -352,6 +405,7 @@ pub fn run() {
             // Keep in sync with APP_COMMANDS in build.rs and capabilities/*.json.
             commands::ytmd_bridge,
             commands::ytmd_subscribe,
+            commands::retry_connection,
             commands::get_config,
             commands::save_config,
             commands::get_current_track,

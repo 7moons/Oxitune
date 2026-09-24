@@ -117,3 +117,17 @@ fn test_a_remote_page_in_a_companion_window_gets_nothing() {
     assert!(acl(&settings, "https://evil.example/", "save_config").is_err());
 }
 
+
+#[test]
+fn test_offline_screen_can_only_retry() {
+    let app = app();
+    let main = window(&app, "main", YTM);
+    let offline = "tauri://localhost/offline.html";
+    assert_eq!(acl(&main, offline, "retry_connection"), Ok(()));
+    for cmd in ["ytmd_bridge", "get_config", "save_config", "plugin:event|emit"] {
+        assert!(acl(&main, offline, cmd).is_err(), "offline page must not reach {cmd}");
+    }
+    assert!(acl(&main, YTM, "retry_connection").is_err(), "YouTube Music can't call it");
+    let settings = local_window(&app, "settings");
+    assert!(acl(&settings, LOCAL, "retry_connection").is_err());
+}

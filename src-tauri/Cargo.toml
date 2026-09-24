@@ -55,6 +55,8 @@ axum = { version = "0.8", default-features = false, features = ["http1", "tokio"
 tower = { version = "0.5", features = ["limit"] }
 tower-http = { version = "0.6", features = ["limit", "timeout"] }
 rust-embed = { version = "8", features = ["mime-guess"] }
+tauri-plugin-window-state = "2"
+tauri-plugin-autostart = "2"
 
 # Screen-lock detection (src/screen_lock.rs). zbus is already in the tree via
 # notify-rust with its default async-io backend; keeping that backend (rather
@@ -65,7 +67,7 @@ zbus = { version = "5", default-features = false, features = ["async-io"] }
 
 [target.'cfg(windows)'.dependencies]
 webview2-com = "0.38"
-windows = { version = "0.61", features = ["Win32_System_Com", "Win32_System_Power", "Win32_System_RemoteDesktop", "Win32_Foundation"] }
+windows = { version = "0.61", features = ["Win32_System_Com", "Win32_System_Power", "Win32_System_RemoteDesktop", "Win32_Foundation", "Win32_Globalization"] }
 
 [dev-dependencies]
 # The mock runtime, to test the IPC permissions (acl_tests.rs).

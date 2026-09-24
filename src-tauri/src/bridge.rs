@@ -164,6 +164,8 @@ macro_rules! bridge_commands {
 bridge_commands! {
     // Only the settings the page's plugins use (`page_ipc::PAGE_CONFIG_KEYS`).
     "get_config" => |h, state, args| {
+        // The injected script's first call: YouTube Music is up.
+        h.state::<Arc<crate::connectivity::PageAlive>>().mark();
         Ok(page_ipc::page_config(&state.config_manager.load()))
     }
     "take_resume_session" => |h, state, args| {

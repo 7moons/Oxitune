@@ -22,6 +22,20 @@ pub async fn ytmd_bridge(
     crate::bridge::dispatch(app_handle, state, &cmd, args).await
 }
 
+/// The offline screen's retry: back to YouTube Music once it answers.
+#[tauri::command]
+pub async fn retry_connection(webview: tauri::Webview, app_handle: AppHandle) -> Result<(), String> {
+    if webview.label() != "main" || !webview.url().is_ok_and(|u| crate::connectivity::is_offline_page(&u)) {
+        return Err("not allowed".into());
+    }
+    if !crate::connectivity::youtube_music_reachable().await {
+        return Err("offline".into());
+    }
+    app_handle.state::<Arc<crate::connectivity::PageAlive>>().reset();
+    let url = crate::session::start_url(None).parse::<url::Url>().map_err(|e| e.to_string())?;
+    webview.navigate(url).map_err(|e| e.to_string())
+}
+
 /// The page's event feed: app events listed in `page_ipc::PAGE_EVENTS`.
 #[tauri::command]
 pub fn ytmd_subscribe(
@@ -42,8 +56,25 @@ pub fn get_config(state: State<'_, Arc<AppState>>) -> AppConfig {
 }
 
 #[tauri::command]
-pub fn save_config(state: State<'_, Arc<AppState>>, config: AppConfig) -> Result<(), String> {
-    state.config_manager.save(&config)
+pub fn save_config(app_handle: AppHandle, state: State<'_, Arc<AppState>>, config: AppConfig) -> Result<(), String> {
+    state.config_manager.save(&config)?;
+    apply_autostart(&app_handle, config.autostart);
+    Ok(())
+}
+
+/// Registers or removes YTMD from the system's login items to match the
+/// setting (off by default). Launched that way, YTMD starts in the tray.
+pub fn apply_autostart(app_handle: &AppHandle, enabled: bool) {
+    use tauri_plugin_autostart::ManagerExt;
+    let launcher = app_handle.autolaunch();
+    let result = match (enabled, launcher.is_enabled().unwrap_or(false)) {
+        (true, false) => launcher.enable(),
+        (false, true) => launcher.disable(),
+        _ => Ok(()),
+    };
+    if let Err(e) = result {
+        log::warn!("[YTMD] couldn't change autostart: {e}");
+    }
 }
 
 /// Sets the global shortcut for one player action (empty clears it) and
@@ -195,6 +226,7 @@ pub async fn import_settings(
     let imported = merge_imported(&state.config_manager.load(), parse_settings_backup(&json)?);
     state.config_manager.save(&imported.config)?;
     crate::shortcuts::apply(&app_handle, &imported.config.shortcuts);
+    apply_autostart(&app_handle, imported.config.autostart);
     Ok(Some(imported))
 }
 
@@ -271,7 +303,7 @@ pub fn notify_track_change(
             .notification()
             .builder()
             .title(&title)
-            .body(format!("Now playing: {}", artist))
+            .body(format!("{}: {}", crate::i18n::t(crate::i18n::Text::NowPlaying), artist))
             .show();
     }
     Ok(())

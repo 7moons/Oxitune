@@ -56,6 +56,7 @@ pub fn is_allowed_navigation(url: &Url) -> bool {
     match url.scheme() {
         // Frames YouTube Music builds itself.
         "about" | "data" | "blob" => true,
+        _ if crate::connectivity::is_offline_page(url) => true,
         "https" => url
             .host_str()
             .map(|h| h.to_ascii_lowercase())

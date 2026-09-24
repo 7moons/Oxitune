@@ -6,6 +6,8 @@ const APP_COMMANDS: &[&str] = &[
     // Injected page (music.youtube.com), main window only.
     "ytmd_bridge",
     "ytmd_subscribe",
+    // Offline screen (offline.html) in the main window.
+    "retry_connection",
     // Companion windows.
     "get_config",
     "save_config",

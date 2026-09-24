@@ -602,6 +602,7 @@ describe('capabilities', () => {
       windows: string[];
       permissions: string[];
       remote?: { urls: string[] };
+      local?: boolean;
     });
 
   test('only the main page capability has remote URLs, and only YouTube Music', () => {
@@ -610,6 +611,8 @@ describe('capabilities', () => {
     expect(remote[0].windows).toEqual(['main']);
     expect(remote[0].remote?.urls).toEqual(['https://music.youtube.com/*']);
     expect(remote[0].permissions.sort()).toEqual(['allow-ytmd-bridge', 'allow-ytmd-subscribe']);
+    // Capabilities also apply to local pages unless told otherwise.
+    expect(remote[0].local).toBe(false);
   });
 
   test('no capability applies to every window', () => {

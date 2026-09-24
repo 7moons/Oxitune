@@ -11,6 +11,7 @@ import { normalizeProviders, ProviderSetting, renderProviderList } from './lyric
 
 interface AppConfig {
   close_to_tray: boolean;
+  autostart: boolean;
   discord_rpc_enabled: boolean;
   discord_clear_after_pause_min: number;
   mpris_enabled: boolean;
@@ -60,6 +61,7 @@ const TOGGLES: [keyof AppConfig & string, boolean][] = [
   ['mpris_enabled', true],
   ['notifications_enabled', false],
   ['close_to_tray', true],
+  ['autostart', false],
   ['adblock_enabled', true],
   ['sponsorblock_enabled', true],
   ['lyrics_enabled', true],

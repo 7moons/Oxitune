@@ -28,15 +28,17 @@ fn toggle_main_window(app: &AppHandle) {
 }
 
 pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
-    let play_pause_i = MenuItem::with_id(app, "play_pause", "Play / Pause", true, None::<&str>)?;
-    let next_i = MenuItem::with_id(app, "next", "Next Track", true, None::<&str>)?;
-    let prev_i = MenuItem::with_id(app, "prev", "Previous Track", true, None::<&str>)?;
-    let sep1 = MenuItem::with_id(app, "sep1", "---", false, None::<&str>)?;
-    let miniplayer_i = MenuItem::with_id(app, "miniplayer", "Toggle Mini Player", true, None::<&str>)?;
-    let settings_i = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
-    let sep2 = MenuItem::with_id(app, "sep2", "---", false, None::<&str>)?;
-    let show_hide_i = MenuItem::with_id(app, "show_hide", "Show / Hide", true, None::<&str>)?;
-    let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+    use crate::i18n::{t, Text};
+    use tauri::menu::PredefinedMenuItem;
+    let play_pause_i = MenuItem::with_id(app, "play_pause", t(Text::TrayPlayPause), true, None::<&str>)?;
+    let next_i = MenuItem::with_id(app, "next", t(Text::TrayNext), true, None::<&str>)?;
+    let prev_i = MenuItem::with_id(app, "prev", t(Text::TrayPrevious), true, None::<&str>)?;
+    let sep1 = PredefinedMenuItem::separator(app)?;
+    let miniplayer_i = MenuItem::with_id(app, "miniplayer", t(Text::TrayMiniPlayer), true, None::<&str>)?;
+    let settings_i = MenuItem::with_id(app, "settings", t(Text::TraySettings), true, None::<&str>)?;
+    let sep2 = PredefinedMenuItem::separator(app)?;
+    let show_hide_i = MenuItem::with_id(app, "show_hide", t(Text::TrayShowHide), true, None::<&str>)?;
+    let quit_i = MenuItem::with_id(app, "quit", t(Text::TrayQuit), true, None::<&str>)?;
 
     let menu = Menu::with_items(
         app,

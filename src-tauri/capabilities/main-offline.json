@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-offline",
+  "description": "The offline screen (offline.html, a local page) in the main window: it can only ask to retry.",
+  "windows": ["main"],
+  "permissions": ["allow-retry-connection"]
+}
