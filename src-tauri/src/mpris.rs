@@ -69,7 +69,7 @@ impl MprisManager {
                     let _ = app.emit("mpris-command", "pause");
                 }
                 MediaControlEvent::Toggle => {
-                    let _ = app.emit("mpris-command", "play-pause");
+                    let _ = app.emit("mpris-command", "play_pause");
                 }
                 MediaControlEvent::Next => {
                     let _ = app.emit("mpris-command", "next");

@@ -210,6 +210,8 @@ async function initYTMD() {
         PlayerBridge.play();
         break;
       case 'pause':
+      // MPRIS Stop: YouTube Music has no stop, pausing is the closest.
+      case 'stop':
         PlayerBridge.pause();
         break;
       case 'play_pause':

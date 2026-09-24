@@ -69,7 +69,7 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let tray_builder = tray_builder
         .on_menu_event(move |app_handle, event| match event.id.as_ref() {
             "play_pause" => {
-                let _ = app_handle.emit("tray-command", "play-pause");
+                let _ = app_handle.emit("tray-command", "play_pause");
             }
             "next" => {
                 let _ = app_handle.emit("tray-command", "next");

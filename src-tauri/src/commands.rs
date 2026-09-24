@@ -266,6 +266,8 @@ pub fn update_track_info(
         }
     }
 
+    crate::thumbbar::set_playing(&app_handle, track.is_playing);
+
     // Broadcast track update to miniplayer and any other windows
     let _ = app_handle.emit("track-changed", &track);
 

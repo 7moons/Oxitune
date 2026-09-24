@@ -22,6 +22,7 @@ pub mod session;
 pub mod shortcuts;
 pub mod sync_crypto;
 pub mod sync_room;
+pub mod thumbbar;
 pub mod tray;
 pub mod updater;
 pub mod windows;
@@ -349,6 +350,9 @@ pub fn run() {
             let main_win = main_builder.build()?;
             log::info!("[YTMD] main window created {} ms after start", started.elapsed().as_millis());
             connectivity::watch_startup(handle.clone());
+
+            // Windows: prev/play/next under the taskbar preview.
+            thumbbar::install(&handle, &main_win);
 
             // Initialize MPRIS (needs the main window's HWND on Windows)
             let mpris_manager = MprisManager::new(handle.clone(), &main_win);
