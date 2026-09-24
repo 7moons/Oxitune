@@ -377,3 +377,16 @@ Później tego samego dnia repo przemianowano na `KayZedd/Oscilla`: adresy repo 
 zaproszeń (`https://kayzedd.github.io/Oscilla/join/`) zaktualizowane. Stare zaproszenia
 z przyciskiem Discorda wskazujące `…/ytmd/join/` przestają działać (GitHub Pages nie
 przekierowuje po zmianie nazwy repo) — dotyczy tylko zaproszeń już wysłanych.
+
+### Aktualizacje przez GitHub Pages zamiast Cloudflare Workera (24.09.2026)
+
+Repo jest prywatne, więc pliki wydań nie są publicznie dostępne. Zamiast Workera (token GitHuba
+po stronie Cloudflare) `pages.yml` przy każdym opublikowaniu wydania kopiuje pliki aktualizacji
+najnowszego wydania na Pages (`/updates/<tag>/`) i publikuje `latest.json` z adresami tych kopii
+(`scripts/update-manifest.ts`, testy: podpisy zachowane, nazwy plików i tag bez możliwości
+wyjścia poza katalog, tylko https). Bezpieczeństwo bez zmian: aplikacja weryfikuje każdą
+aktualizację podpisem minisign kluczem `A721E1BF70C34591` wbudowanym w aplikację, więc Pages
+to tylko lustro. Brak tokenu poza GitHubem. Limity Pages: 1 GB, ~100 GB ruchu/mies. (miękki).
+Instalacje 0.2.0 i starsze pytają dalej Workera — zostawić go, aż zaktualizują się do wersji
+z nowym adresem (`docs/updates.md`). **Niesprawdzone end-to-end** (proxy tego środowiska blokuje
+github.io): po pierwszym wydaniu sprawdzić `https://kayzedd.github.io/Oscilla/updates/latest.json`.

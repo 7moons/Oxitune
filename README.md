@@ -142,7 +142,8 @@ cd src-tauri && cargo test && cargo clippy --all-targets -- -D warnings && cargo
 ## Releasing
 
 1. `bun scripts/versions.ts set 0.3.0` (keeps `package.json`, `Cargo.toml` and `tauri.conf.json` in step; CI checks them against the tag).
-2. Commit, tag `v0.3.0`, push the tag. `.github/workflows/release.yml` builds Linux and Windows installers, signs the updater artifacts and opens a **draft** release; publish it by hand.
+2. Commit, tag `v0.3.0`, push the tag. `.github/workflows/release.yml` builds Linux and Windows installers, signs the updater artifacts and opens a **draft** release.
+3. Publish the draft on GitHub. `.github/workflows/pages.yml` then copies its update files to GitHub Pages, where installed copies find them (the repo is private; details in [`docs/updates.md`](docs/updates.md)).
 
 Secrets: `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. The matching public key (ID `A721E1BF70C34591`) is in `src-tauri/tauri.conf.json`; regenerating the key pair would make every installed copy reject future updates. Windows installers are not code-signed yet (SmartScreen will warn), see `AUDIT.md`.
 

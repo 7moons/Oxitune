@@ -94,7 +94,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEE3MjFFMUJGNzBDMzQ1OTEKUldTUlJjTnd2K0VocDJobjF2ZVNhTTVleCs3TEZDenc5NGhjM2V5VHhGdUh6VStCOWtTR0lacEcK",
       "endpoints": [
-        "https://ytmd-updates.kayzed.workers.dev/latest.json"
+        "https://kayzedd.github.io/Oscilla/updates/latest.json"
       ]
     }
   },
