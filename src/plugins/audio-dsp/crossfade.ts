@@ -17,14 +17,22 @@ export class CrossfadeController {
   }
 
   public onTrackChange(track: TrackInfo): void {
+    const id = track.videoId || `${track.title}-${track.artist}`;
+    // The observer also reports metadata arriving mid-song (cover, album, a
+    // corrected duration) as a track change. That's the same song: fading
+    // it in from silence again dipped the volume at random moments.
+    if (id === this.currentTrackId) return;
+
     // A new track means any auto-advance scheduled for the previous one is
     // no longer relevant — cancel it instead of letting it fire and rely on
     // the currentTrackId check as the only guard.
     this.clearPendingAdvance();
     this.fadeOutTriggered = false;
-    this.currentTrackId = track.videoId || `${track.title}-${track.artist}`;
+    this.currentTrackId = id;
 
-    if (this.crossfadeSeconds > 0) {
+    // Only a song that is actually starting fades in; one picked up mid-way
+    // (resume on launch, a late first detection) just plays at full level.
+    if (this.crossfadeSeconds > 0 && track.currentTimeSecs < this.crossfadeSeconds) {
       AudioEngine.getInstance().fadeIn(this.crossfadeSeconds);
     } else {
       AudioEngine.getInstance().resetFade();
