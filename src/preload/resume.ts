@@ -38,6 +38,19 @@ type MoviePlayer = HTMLElement & {
   getVideoData?: () => { video_id?: string } | undefined;
 };
 
+/** How long after the unmute its `volumechange` still counts as ours. */
+const UNMUTE_SETTLE_MS = 500;
+let muting = false;
+let unmutedAt = -Infinity;
+
+/**
+ * True while the resume mute is on and just after it's lifted: the volume
+ * badge must not flash "0%" → "19%" at launch for a change nobody made.
+ */
+export function isResumeMuting(): boolean {
+  return muting || performance.now() - unmutedAt < UNMUTE_SETTLE_MS;
+}
+
 const playerVideoId = () =>
   (document.getElementById('movie_player') as MoviePlayer | null)?.getVideoData?.()?.video_id || undefined;
 
@@ -51,6 +64,7 @@ export function startResume(): void {
   const muteEarly = (e: Event) => {
     const video = e.target;
     if (released || !(video instanceof HTMLVideoElement) || video.muted) return;
+    muting = true;
     video.muted = true;
     mutedByUs.add(video);
   };
@@ -63,7 +77,9 @@ export function startResume(): void {
     document.removeEventListener('loadstart', muteEarly, true);
     document.removeEventListener('play', muteEarly, true);
     mutedByUs.forEach((v) => (v.muted = false));
+    if (mutedByUs.size > 0) unmutedAt = performance.now();
     mutedByUs.clear();
+    muting = false;
   };
 
   const apply = (target: ResumeTarget, video: HTMLVideoElement) => {

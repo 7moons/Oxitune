@@ -317,6 +317,10 @@ pub fn run() {
             .resizable(true)
             // A login-item launch starts in the tray.
             .visible(!std::env::args().any(|a| a == AUTOSTART_ARG))
+            // YTM's nav bar is the title bar: the injected page adds the window
+            // buttons and drags the window from it (src/preload/ui/windowControls.ts,
+            // through the page bridge's window_* commands).
+            .decorations(false)
             .initialization_script(include_str!("../inject/preload.js"));
             // Enabled plugins, one script each after the plugin host
             // (plugins/mod.rs, src/preload/pluginHost.ts).

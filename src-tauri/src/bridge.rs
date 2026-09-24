@@ -163,6 +163,11 @@ struct PluginMediaCancelArgs {
 }
 
 #[derive(Deserialize)]
+struct WindowActionArgs {
+    action: String,
+}
+
+#[derive(Deserialize)]
 struct PluginErrorArgs {
     id: String,
     #[serde(default)]
@@ -401,6 +406,29 @@ bridge_commands! {
         let plugins = plugin_manager(h);
         plugins.check_permission(&p.id, crate::plugins::media_save::PERMISSION)?;
         to_data(plugins.tools.status())
+    }
+    // The page's own title-bar buttons (the main window is undecorated;
+    // src/preload/ui/windowControls.ts). Only the main window, only these
+    // actions; answers whether it is maximized.
+    "window_action" => |h, state, args| {
+        let p: WindowActionArgs = parse_args("window_action", args)?;
+        let win = h.get_webview_window("main").ok_or("no main window")?;
+        match p.action.as_str() {
+            "minimize" => win.minimize().map_err(|e| e.to_string())?,
+            "toggle_maximize" => {
+                if win.is_maximized().unwrap_or(false) {
+                    win.unmaximize().map_err(|e| e.to_string())?
+                } else {
+                    win.maximize().map_err(|e| e.to_string())?
+                }
+            }
+            // Goes through CloseRequested, so close-to-tray still applies.
+            "close" => win.close().map_err(|e| e.to_string())?,
+            "start_dragging" => win.start_dragging().map_err(|e| e.to_string())?,
+            "state" => {}
+            other => return Err(format!("unknown window action: {other}")),
+        }
+        Ok(serde_json::json!({ "maximized": win.is_maximized().unwrap_or(false) }))
     }
     "plugin_error" => |h, state, args| {
         let p: PluginErrorArgs = parse_args("plugin_error", args)?;

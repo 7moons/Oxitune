@@ -82,6 +82,44 @@ describe('CrossfadeController: auto-advance timer is tracked and cancellable', (
   });
 });
 
+describe('CrossfadeController: fades only when a song really starts', () => {
+  test('metadata arriving mid-song does not fade the same song in again', () => {
+    const engine = AudioEngine.getInstance();
+    const fadeIn = spyOn(engine, 'fadeIn');
+    try {
+      const controller = new CrossfadeController();
+      controller.setCrossfadeSeconds(5);
+      controller.onTrackChange(makeTrack({ videoId: 'same' }));
+      expect(fadeIn).toHaveBeenCalledTimes(1);
+
+      controller.onTrackChange(makeTrack({ videoId: 'same', currentTimeSecs: 80, coverUrl: 'https://x/cover.jpg' }));
+      controller.onTrackChange(makeTrack({ videoId: 'same', currentTimeSecs: 120, durationSecs: 203 }));
+      expect(fadeIn).toHaveBeenCalledTimes(1);
+
+      controller.onTrackChange(makeTrack({ videoId: 'next' }));
+      expect(fadeIn).toHaveBeenCalledTimes(2);
+    } finally {
+      fadeIn.mockRestore();
+    }
+  });
+
+  test('a song first seen mid-way plays at full level instead of fading in', () => {
+    const engine = AudioEngine.getInstance();
+    const fadeIn = spyOn(engine, 'fadeIn');
+    const reset = spyOn(engine, 'resetFade');
+    try {
+      const controller = new CrossfadeController();
+      controller.setCrossfadeSeconds(5);
+      controller.onTrackChange(makeTrack({ videoId: 'resumed', currentTimeSecs: 95 }));
+      expect(fadeIn).not.toHaveBeenCalled();
+      expect(reset).toHaveBeenCalledTimes(1);
+    } finally {
+      fadeIn.mockRestore();
+      reset.mockRestore();
+    }
+  });
+});
+
 describe('Advanced DSP: Crossfade, Skip Silence & Speed/Pitch', () => {
   test('crossfade timing clamps between 0s and 12s', () => {
     const cf = new CrossfadeController();

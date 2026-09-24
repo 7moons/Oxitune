@@ -1,3 +1,17 @@
+/**
+ * Volume in YTM's own terms: the 0-100 value its player-bar slider shows.
+ * That is not the player's volume: YTM maps the slider through a curve
+ * (slider 30 plays at player volume 8, 57 at 26) and keeps the slider value
+ * in its own store, which it restores on launch. Writing the player's volume
+ * directly left the two apart, so after a restart the slider showed ~40 while
+ * the song played far quieter, until the next change resynced it.
+ *
+ * So changes go through the slider the way a drag does: set its value and
+ * fire `change`, which YTM's `onVolumeChange` turns into the player volume
+ * and its stored value. The player API is only a fallback while the player
+ * bar isn't rendered.
+ */
+
 /** Volume controls exposed by YouTube's player at #movie_player. */
 type MoviePlayerVolume = HTMLElement & {
   getVolume?: () => number;
@@ -6,28 +20,37 @@ type MoviePlayerVolume = HTMLElement & {
   unMute?: () => void;
 };
 
+type VolumeSlider = HTMLElement & { value: number; step?: number | string };
+
 function getMoviePlayer(): MoviePlayerVolume | null {
   return document.getElementById('movie_player') as MoviePlayerVolume | null;
 }
 
-/** The player API changes audio, but YTM's Polymer sliders are not updated by it. */
-function syncVolumeSliders(percent: number): void {
-  type VolumeSlider = HTMLElement & { value: number; step?: number | string };
-  for (const selector of ['ytmusic-player-bar #volume-slider', '#expand-volume-slider']) {
-    const slider = document.querySelector<VolumeSlider>(selector);
-    if (!slider || !('value' in slider)) continue;
-    // YTM may quantize the native slider to 5%, while wheel steps can be 1%.
-    if ('step' in slider && Number(slider.step) > 1) slider.step = 1;
-    slider.value = percent;
-  }
+function getSlider(selector: string): VolumeSlider | null {
+  const slider = document.querySelector<VolumeSlider>(selector);
+  return slider && 'value' in slider ? slider : null;
+}
+
+const playerBarSlider = () => getSlider('ytmusic-player-bar #volume-slider');
+
+function clampPercent(percent: number): number {
+  return Math.max(0, Math.min(100, Math.round(percent)));
+}
+
+function setSliderValue(slider: VolumeSlider, percent: number): void {
+  // YTM may quantize the slider to 5%, while wheel steps can be 1%.
+  if ('step' in slider && Number(slider.step) > 1) slider.step = 1;
+  slider.value = percent;
 }
 
 export function getPlayerVolumePercent(video: HTMLVideoElement): number {
+  const sliderValue = Number(playerBarSlider()?.value);
+  if (Number.isFinite(sliderValue)) return clampPercent(sliderValue);
   const playerVolume = getMoviePlayer()?.getVolume?.();
   const percent = typeof playerVolume === 'number' && Number.isFinite(playerVolume)
     ? playerVolume
     : video.volume * 100;
-  return Math.max(0, Math.min(100, Math.round(percent)));
+  return clampPercent(percent);
 }
 
 export function isPlayerMuted(video: HTMLVideoElement): boolean {
@@ -36,7 +59,18 @@ export function isPlayerMuted(video: HTMLVideoElement): boolean {
 
 export function setPlayerVolumePercent(percent: number, video: HTMLVideoElement): void {
   if (!Number.isFinite(percent)) return;
-  const clamped = Math.max(0, Math.min(100, Math.round(percent)));
+  const clamped = clampPercent(percent);
+
+  const slider = playerBarSlider();
+  if (slider) {
+    setSliderValue(slider, clamped);
+    // What a finished drag fires; YTM sets the player (and unmutes) from it.
+    slider.dispatchEvent(new CustomEvent('change', { bubbles: true, composed: true }));
+    const expanded = getSlider('#expand-volume-slider');
+    if (expanded) setSliderValue(expanded, clamped);
+    return;
+  }
+
   const player = getMoviePlayer();
   if (typeof player?.setVolume === 'function') {
     player.setVolume(clamped);
@@ -44,11 +78,8 @@ export function setPlayerVolumePercent(percent: number, video: HTMLVideoElement)
       if (typeof player.unMute === 'function') player.unMute();
       else video.muted = false;
     }
-    syncVolumeSliders(clamped);
     return;
   }
-
   video.volume = clamped / 100;
   if (clamped > 0 && video.muted) video.muted = false;
-  syncVolumeSliders(clamped);
 }

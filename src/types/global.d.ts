@@ -17,6 +17,12 @@ declare global {
       window?: {
         getCurrentWindow: () => {
           setAlwaysOnTop: (alwaysOnTop: boolean) => Promise<void>;
+          minimize: () => Promise<void>;
+          toggleMaximize: () => Promise<void>;
+          isMaximized: () => Promise<boolean>;
+          close: () => Promise<void>;
+          startDragging: () => Promise<void>;
+          onResized: (handler: () => void) => Promise<() => void>;
         };
       };
     };

@@ -78,6 +78,18 @@ export const AMBIENT_THEME_CSS = `
     background-color: #08070b !important;
   }
 
+  /* Playlist/album pages wrap their header in .background-gradient, a
+     60%-black to opaque #030303 fade only as tall as the header (over
+     YTM's own blurred-art #background). Scrolled down, its opaque bottom
+     edge cut straight across the ambient wash as a hard band. The wash
+     already plays that role, so both go. */
+  ytmusic-browse-response .background-gradient {
+    background: transparent !important;
+  }
+  ytmusic-browse-response #background.immersive-background {
+    display: none !important;
+  }
+
   /* The chrome users look at constantly — nav bar, player bar, sidebar —
      goes translucent glass instead of a flat opaque box, so the ambient
      wash actually shows through it instead of stopping at its edges. */

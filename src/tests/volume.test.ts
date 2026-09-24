@@ -39,26 +39,40 @@ function createPage() {
 
   class FakeSlider extends FakeElement {
     step = 5;
+    changes = 0;
     private currentValue = 50;
     get value() { return this.currentValue; }
     set value(next: number) {
       this.currentValue = Math.round(Number(next) / this.step) * this.step;
     }
+    // YTM's onVolumeChange: the slider value goes through a curve to the player.
+    dispatchEvent(event: Event) {
+      if (event.type === 'change') {
+        this.changes++;
+        player.setVolume(sliderToPlayer(this.currentValue));
+      }
+      return true;
+    }
   }
+  const sliderToPlayer = (value: number) => Math.round((value * value) / 100);
 
   const panel = new FakeElement();
   const artwork = new FakeElement();
   artwork.rect = { left: 400, right: 900, top: 200, bottom: 700, width: 500, height: 500 };
-  const video = Object.assign(new FakeElement(), { volume: 0.5, muted: false });
+  const video = Object.assign(new FakeElement(), { volume: 0.25, muted: false });
   video.rect = { left: 300, right: 1000, top: 150, bottom: 650, width: 700, height: 500 };
+  let frame: FakeElement | null = null;
   let mode: 'song' | 'video' = 'song';
-  let playerVolume = 50;
+  let fullscreen = false;
+  let playerVolume = 25;
   const slider = new FakeSlider();
   const expandedSlider = new FakeSlider();
   let wheelHandler: ((event: WheelEvent) => void) | undefined;
   let intervalHandler: (() => void) | undefined;
   let nextTimerId = 1;
   const timers = new Map<number, () => void>();
+  let nextFrameId = 1;
+  const frames = new Map<number, () => void>();
   const documentHandlers = new Map<string, (event: Event) => void>();
   let indicator: FakeElement | null = null;
 
@@ -92,7 +106,12 @@ function createPage() {
         return id;
       },
       clearTimeout: (id: number) => { timers.delete(id); },
-      requestAnimationFrame: (handler: () => void) => { handler(); return 1; }
+      requestAnimationFrame: (handler: () => void) => {
+        const id = nextFrameId++;
+        frames.set(id, handler);
+        return id;
+      },
+      cancelAnimationFrame: (id: number) => { frames.delete(id); }
     }
   });
   Object.defineProperty(globalThis, 'document', {
@@ -110,11 +129,13 @@ function createPage() {
         if (selector === 'ytmusic-player-page #main-panel') return panel;
         if (selector === 'ytmusic-player-page #song-image') return artwork;
         if (selector === 'ytmusic-player-page video') return video;
+        if (selector === 'ytmusic-player-page #player') return frame;
         if (selector === 'ytmusic-player-bar #volume-slider') return slider;
         if (selector === '#expand-volume-slider') return expandedSlider;
         if (selector === 'ytmusic-player-page[video-mode], ytmusic-player-page ytmusic-player[video-mode]') {
           return mode === 'video' ? panel : null;
         }
+        if (selector === 'ytmusic-player-page[player-fullscreened]') return fullscreen ? panel : null;
         return null;
       },
       addEventListener: (name: string, handler: (event: Event) => void) => documentHandlers.set(name, handler),
@@ -141,30 +162,54 @@ function createPage() {
     get expandedSliderValue() { return expandedSlider.value; },
     setSliderValue(value: number) {
       slider.value = value;
-      playerVolume = slider.value;
-      video.volume = playerVolume / 100;
+      player.setVolume(sliderToPlayer(slider.value));
     },
+    // The mismatch the old direct player writes left after a restart.
+    setPlayerVolumeOnly(value: number) { player.setVolume(value); },
+    get sliderChanges() { return slider.changes; },
     setWheelStep(value: number) { ctx.config.wheel_volume_step = value; },
     get indicator() { return indicator; },
     setMode(value: 'song' | 'video') { mode = value; },
+    setFullscreen(value: boolean) { fullscreen = value; },
+    // A wheel target inside an element with the given tag that matches the popup/dialog filter.
+    targetInside(tagName: string) {
+      const container = Object.assign(new FakeElement(), { tagName });
+      return Object.assign(new FakeElement(), { closest: () => container });
+    },
     dispatchInput() { documentHandlers.get('input')?.({} as Event); },
     tick() { intervalHandler?.(); },
+    moveVideo(left: number, top: number) {
+      video.rect = { ...video.rect, left, top, right: left + video.rect.width, bottom: top + video.rect.height };
+    },
+    setPlayerFrame(left: number, top: number, width: number, height: number) {
+      frame = new FakeElement();
+      frame.rect = { left, top, width, height, right: left + width, bottom: top + height };
+    },
+    get pendingFrames() { return frames.size; },
+    frame() {
+      const due = [...frames];
+      frames.clear();
+      for (const [, handler] of due) handler();
+    },
     expireBadge() {
       for (const [id, handler] of timers) {
         timers.delete(id);
         handler();
       }
     },
-    wheelUp() {
+    lastWheelStopped: false,
+    wheelUp(clientX = 100, clientY = 100, target: unknown = null) {
       let prevented = false;
+      this.lastWheelStopped = false;
       wheelHandler?.({
         deltaY: -100,
         ctrlKey: false,
-        target: null,
-        clientX: 100,
-        clientY: 100,
-        preventDefault: () => { prevented = true; }
-      } as WheelEvent);
+        target,
+        clientX,
+        clientY,
+        preventDefault: () => { prevented = true; },
+        stopPropagation: () => { this.lastWheelStopped = true; }
+      } as unknown as WheelEvent);
       return prevented;
     }
   };
@@ -175,15 +220,40 @@ test('wheel volume keeps the native player volume control in sync', () => {
   expect(page.wheelUp()).toBe(true);
   expect(page.sliderValue).toBe(55);
   expect(page.expandedSliderValue).toBe(55);
-  expect(page.video.volume).toBe(0.55);
+  // YTM turned the slider change into the player volume through its curve.
+  expect(page.sliderChanges).toBe(1);
+  expect(page.video.volume).toBe(0.3);
   expect(page.indicator?.textContent).toBe('55%');
+});
+
+test('steps count on the slider YTM shows, not the player volume behind its curve', () => {
+  const page = createPage();
+  page.setWheelStep(0.01);
+  page.setSliderValue(40);
+  page.setPlayerVolumeOnly(10);
+  page.wheelUp();
+  expect(page.sliderValue).toBe(41);
+  expect(page.indicator?.textContent).toBe('41%');
+  expect(page.video.volume).toBe(0.17);
+});
+
+test("a handled wheel never reaches YTM's own bigger-step volume scroll", () => {
+  const page = createPage();
+  page.setWheelStep(0.01);
+  expect(page.wheelUp()).toBe(true);
+  expect(page.lastWheelStopped).toBe(true);
+  expect(page.sliderValue).toBe(51);
+
+  // Not ours to handle (outside the bar and player page): left alone.
+  expect(page.wheelUp(1200, 400)).toBe(false);
+  expect(page.lastWheelStopped).toBe(false);
 });
 
 test('configured one-point steps are reflected exactly by both native sliders', () => {
   const page = createPage();
   page.setWheelStep(0.01);
   page.wheelUp();
-  expect(page.video.volume).toBe(0.51);
+  expect(page.sliderValue).toBe(51);
   expect(page.sliderValue).toBe(51);
   expect(page.expandedSliderValue).toBe(51);
   expect(page.indicator?.textContent).toBe('51%');
@@ -208,4 +278,52 @@ test('volume badge appears only after a change, follows media, then fades away',
   page.expireBadge();
   expect(page.indicator?.classes.has('ytmd-visible')).toBe(false);
   expect(KIT_CSS).toMatch(/#ytmd-volume-indicator\s*\{[^}]*transition:\s*opacity/s);
+});
+
+test('visible badge follows the media while the player page is still moving, then stops', () => {
+  const page = createPage();
+  page.setMode('video');
+  page.moveVideo(300, -40);
+  page.wheelUp();
+  expect(page.indicator?.style.top).toBe('8px');
+
+  page.moveVideo(300, 150);
+  page.frame();
+  expect(page.indicator?.style.left).toBe('312px');
+  expect(page.indicator?.style.top).toBe('162px');
+  expect(page.pendingFrames).toBe(1);
+
+  page.expireBadge();
+  expect(page.indicator?.classes.has('ytmd-visible')).toBe(false);
+  expect(page.pendingFrames).toBe(0);
+});
+
+test('a paused video taller than its frame still gets the badge in the frame corner', () => {
+  const page = createPage();
+  page.setMode('video');
+  page.setPlayerFrame(300, 290, 540, 300);
+  page.moveVideo(300, -40);
+  page.wheelUp();
+  expect(page.indicator?.style.left).toBe('312px');
+  expect(page.indicator?.style.top).toBe('302px');
+});
+
+test('fullscreen player changes volume anywhere on screen, not only over the old main panel', () => {
+  const page = createPage();
+  expect(page.wheelUp(1200, 400)).toBe(false);
+  expect(page.sliderValue).toBe(50);
+
+  page.setFullscreen(true);
+  expect(page.wheelUp(1200, 400)).toBe(true);
+  expect(page.sliderValue).toBe(55);
+});
+
+test('fullscreen player marked role=dialog still takes the wheel, real popups do not', () => {
+  const page = createPage();
+  page.setFullscreen(true);
+  expect(page.wheelUp(600, 400, page.targetInside('YTMUSIC-PLAYER'))).toBe(true);
+  expect(page.sliderValue).toBe(55);
+
+  expect(page.wheelUp(600, 400, page.targetInside('TP-YT-PAPER-DIALOG'))).toBe(false);
+  expect(page.sliderValue).toBe(55);
 });
