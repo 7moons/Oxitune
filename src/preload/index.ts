@@ -88,6 +88,9 @@ function configToggleMap(config: Record<string, unknown>): Record<string, boolea
   return map;
 }
 
+const CONFIG_QUICK_TRIES = 4;
+const CONFIG_RETRY_MS = 2000;
+
 async function initYTMD() {
   console.log('[YTMD] Initializing desktop integration bridge...');
 
@@ -116,13 +119,27 @@ async function initYTMD() {
   // Object.assign rather than reassigned, since `context.config` and this
   // `config` binding must stay the same object for the config-updated
   // listener below to keep working after a Settings save.
-  try {
-    const loaded = await invokeBackend('get_config');
-    if (loaded && typeof loaded === 'object') {
-      Object.assign(config, loaded as Record<string, unknown>);
+  // Right at launch the bridge can miss a request; one failed read used to
+  // leave every plugin on defaults (5% wheel steps instead of the saved 1%)
+  // until something happened to broadcast config-updated. So: a few quick
+  // tries before plugins start, then keep trying in the background.
+  const loadConfig = async (timeoutMs: number): Promise<Record<string, unknown> | null> => {
+    try {
+      const loaded = await invokeBackend('get_config', {}, { timeoutMs });
+      return loaded && typeof loaded === 'object' ? (loaded as Record<string, unknown>) : null;
+    } catch (e) {
+      console.warn('[YTMD] Loading config failed, retrying:', e);
+      return null;
     }
-  } catch (e) {
-    console.error('[YTMD] Failed to load config, using defaults:', e);
+  };
+  let configLoaded = false;
+  for (let attempt = 0; attempt < CONFIG_QUICK_TRIES && !configLoaded; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, 250));
+    const loaded = await loadConfig(2000);
+    if (loaded) {
+      Object.assign(config, loaded);
+      configLoaded = true;
+    }
   }
 
   const context: PluginContext = {
@@ -281,8 +298,7 @@ async function initYTMD() {
   // take effect immediately instead of only on next app restart. Plugins
   // that read ctx.config directly (audio_dsp, ambient_lighting, ...) pick up
   // the change for free since `config` is mutated in place, not reassigned.
-  listenEvent<Record<string, unknown>>('config-updated', (payload) => {
-    if (!payload || typeof payload !== 'object') return;
+  const applyConfig = (payload: Record<string, unknown>) => {
     Object.assign(config, payload);
     const toggles = configToggleMap(config);
     for (const [pluginId, shouldBeEnabled] of Object.entries(toggles)) {
@@ -296,7 +312,22 @@ async function initYTMD() {
         );
       }
     }
+  };
+  listenEvent<Record<string, unknown>>('config-updated', (payload) => {
+    if (payload && typeof payload === 'object') applyConfig(payload);
   });
+
+  if (!configLoaded) {
+    console.error('[YTMD] Config not loaded yet; plugins run on defaults until it is.');
+    const retry = setInterval(() => {
+      void loadConfig(CONFIG_RETRY_MS).then((loaded) => {
+        if (!loaded || configLoaded) return;
+        configLoaded = true;
+        clearInterval(retry);
+        applyConfig(loaded);
+      });
+    }, CONFIG_RETRY_MS);
+  }
 
   // Keyboard shortcut: Ctrl+, or F2 opens settings
   window.addEventListener('keydown', (e) => {
