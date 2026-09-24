@@ -316,7 +316,7 @@ impl LyricsState {
     /// `data_dir` is `~/.oscilla`.
     pub fn new(data_dir: PathBuf) -> Self {
         let http = reqwest::Client::builder()
-            .user_agent(concat!("Oscilla/", env!("CARGO_PKG_VERSION"), " (https://github.com/KayZedd/ytmd)"))
+            .user_agent(concat!("Oscilla/", env!("CARGO_PKG_VERSION"), " (https://github.com/KayZedd/oscilla)"))
             .timeout(Duration::from_secs(10))
             .build()
             .unwrap_or_default();

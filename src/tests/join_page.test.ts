@@ -22,6 +22,6 @@ describe('Discord "Listen along" landing page', () => {
   });
 
   test('is the page the app links to', () => {
-    expect(joinLink).toContain('pub const INVITE_PAGE: &str = "https://kayzedd.github.io/ytmd/join/";');
+    expect(joinLink).toContain('pub const INVITE_PAGE: &str = "https://kayzedd.github.io/oscilla/join/";');
   });
 });

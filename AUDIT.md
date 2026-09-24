@@ -368,7 +368,12 @@ nową komendę mostu `window_action` (strona YTM nie ma uprawnień okna).
 - Linux: pakiety deb/rpm `oscilla` zastępują `ytmd` (`replaces`/`conflicts`/`obsoletes`).
 - Domyślny folder zapisanych utworów: `~/Music/Oscilla` (albo istniejący `~/Music/YTMD`).
 
-**Świadomie bez zmian:** repo GitHub i adresy Pages/updatera, identyfikatory wewnętrzne
+**Świadomie bez zmian:** adres updatera (Cloudflare Worker), identyfikatory wewnętrzne
 (`ytmd_bridge`, klasy/zdarzenia `ytmd-*`), obiekt `ytmd` w API pluginów i id `app.ytmd.*`
 (zależą od nich zainstalowane pluginy), stałe protokołu (etykiety HKDF, znacznik kopii
 `ytmd-settings`, więc stare kopie ustawień dalej się importują).
+
+Później tego samego dnia repo przemianowano na `KayZedd/oscilla`: adresy repo i strony
+zaproszeń (`https://kayzedd.github.io/oscilla/join/`) zaktualizowane. Stare zaproszenia
+z przyciskiem Discorda wskazujące `…/ytmd/join/` przestają działać (GitHub Pages nie
+przekierowuje po zmianie nazwy repo) — dotyczy tylko zaproszeń już wysłanych.
