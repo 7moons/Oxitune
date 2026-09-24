@@ -152,9 +152,7 @@ pub fn update_track_info(
             *rpc_lock = Some(crate::discord_rpc::DiscordRpcHandle::new());
         }
         if let Some(ref rpc) = *rpc_lock {
-            let clear_after_pause = (config.discord_clear_after_pause_min > 0)
-                .then(|| std::time::Duration::from_secs(u64::from(config.discord_clear_after_pause_min) * 60));
-            rpc.update(track.clone(), clear_after_pause);
+            rpc.update(discord_desired(&state, &config, Some(track.clone())));
         }
     } else {
         let mut rpc_lock = state.discord_rpc.lock();
@@ -716,7 +714,78 @@ pub fn set_sync_require_approval(
     state: State<'_, Arc<AppState>>,
     enabled: bool,
 ) -> Result<(), String> {
-    state.sync_room.set_require_approval(enabled, &sync_sink(app_handle))
+    state.sync_room.set_require_approval(enabled, &sync_sink(app_handle.clone()))?;
+    // A public Discord invite is only safe behind approval.
+    if !enabled && state.invites.current(state.sync_room.get_room_state().as_ref()).is_some() {
+        state.invites.set_published(None);
+        refresh_discord(&app_handle, &state);
+    }
+    Ok(())
+}
+
+/// What Discord should show for `track`, including the host's room invite.
+fn discord_desired(
+    state: &AppState,
+    config: &crate::config::AppConfig,
+    track: Option<TrackPayload>,
+) -> crate::discord_rpc::Desired {
+    crate::discord_rpc::Desired {
+        track,
+        clear_after_pause: (config.discord_clear_after_pause_min > 0)
+            .then(|| std::time::Duration::from_secs(u64::from(config.discord_clear_after_pause_min) * 60)),
+        invite: state.invites.current(state.sync_room.get_room_state().as_ref()),
+    }
+}
+
+/// Re-sends the current track so a changed invite shows up right away.
+fn refresh_discord(app_handle: &AppHandle, state: &AppState) {
+    let config = state.config_manager.load();
+    if !config.discord_rpc_enabled {
+        return;
+    }
+    let track = state.current_track.lock().clone();
+    if let Some(rpc) = state.discord_rpc.lock().as_ref() {
+        rpc.update(discord_desired(state, &config, track));
+    }
+    let _ = app_handle.emit("sync-discord-invite", state.invites.current(state.sync_room.get_room_state().as_ref()).is_some());
+}
+
+/// Host: shows (or stops showing) a "Listen along" button for this room on
+/// Discord. Turning it on also turns on join approval, since anyone who can
+/// see the status can follow the link.
+#[tauri::command]
+pub fn set_discord_invite(
+    app_handle: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    enabled: bool,
+) -> Result<(), String> {
+    let room = state.sync_room.get_room_state().ok_or("sync.error.notInRoom")?;
+    if !room.is_host {
+        return Err("sync.error.notHost".to_string());
+    }
+    if enabled {
+        if !state.config_manager.load().discord_rpc_enabled {
+            return Err("sync.error.discordOff".to_string());
+        }
+        state.sync_room.set_require_approval(true, &sync_sink(app_handle.clone()))?;
+        state.invites.set_published(Some(room.room_code));
+    } else {
+        state.invites.set_published(None);
+    }
+    refresh_discord(&app_handle, &state);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_discord_invite(state: State<'_, Arc<AppState>>) -> bool {
+    state.invites.current(state.sync_room.get_room_state().as_ref()).is_some()
+}
+
+/// A room code from a `ytmd://join/...` link that arrived before the Listen
+/// Together window was ready.
+#[tauri::command]
+pub fn take_pending_join_code(state: State<'_, Arc<AppState>>) -> Option<String> {
+    state.invites.take_pending_join()
 }
 
 /// Host: lets a waiting guest in (`approve`) or turns them away.

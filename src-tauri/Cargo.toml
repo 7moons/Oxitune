@@ -36,7 +36,8 @@ rand = "0.9"
 rumqttc = { version = "0.25.1", default-features = false, features = ["use-rustls"] }
 lofty = "0.25.1"
 tauri-plugin-updater = "2.0.0"
-tauri-plugin-single-instance = "2.0.0"
+tauri-plugin-single-instance = { version = "2.0.0", features = ["deep-link"] }
+tauri-plugin-deep-link = "2"
 # Log files in ~/.ytmd/logs (a release build has no console to log to).
 tauri-plugin-log = "2"
 # Settings: open the logs folder, pick files for settings backup.

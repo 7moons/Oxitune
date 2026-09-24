@@ -2,6 +2,7 @@ pub mod bridge;
 pub mod commands;
 pub mod config;
 pub mod discord_rpc;
+pub mod join_link;
 pub mod downloader;
 pub mod local_files;
 pub mod mpris;
@@ -29,6 +30,8 @@ pub struct AppState {
     pub discord_rpc: Mutex<Option<DiscordRpcHandle>>,
     pub mpris: Mutex<Option<MprisManager>>,
     pub current_track: Mutex<Option<TrackPayload>>,
+    /// Listen Together invites: `ytmd://join` links and the Discord button.
+    pub invites: join_link::InviteState,
     pub sync_room: Arc<SyncRoomManager>,
     pub power_manager: PowerManager,
     pub remote_token: String,
@@ -90,6 +93,7 @@ pub fn run() {
         discord_rpc: Mutex::new(discord_rpc),
         mpris: Mutex::new(None),
         current_track: Mutex::new(None),
+        invites: join_link::InviteState::default(),
         sync_room: Arc::new(SyncRoomManager::new().with_client_id(sync_client_id)),
         power_manager: PowerManager::new(),
         remote_token: remote_token.clone(),
@@ -109,6 +113,10 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             tray::show_main_window(app);
         }))
+        // `ytmd://join/<code>` links (the Discord "Listen along" page). With
+        // single-instance's `deep-link` feature a link opened while we run
+        // arrives through `on_open_url` below, not as a second process.
+        .plugin(tauri_plugin_deep_link::init())
         // Every log::info!/warn!/error! goes to ~/.ytmd/logs/ytmd.log (and the
         // console in dev): a release build has no console, so without files
         // a user's "it doesn't work" left nothing to look at.
@@ -182,6 +190,23 @@ pub fn run() {
                     let _ = h.emit(&format!("ytmd-response-{id}"), bridge::response_envelope(result));
                 });
             });
+
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                // Installers register the scheme; AppImage and dev builds
+                // have to do it themselves.
+                #[cfg(any(target_os = "linux", all(debug_assertions, windows)))]
+                if let Err(e) = app.deep_link().register_all() {
+                    log::warn!("couldn't register the ytmd:// link scheme: {e}");
+                }
+                if let Ok(Some(urls)) = app.deep_link().get_current() {
+                    join_link::handle_urls(&handle, urls.iter().map(|u| u.as_str()));
+                }
+                let handle_for_links = handle.clone();
+                app.deep_link().on_open_url(move |event| {
+                    join_link::handle_urls(&handle_for_links, event.urls().iter().map(|u| u.as_str()));
+                });
+            }
 
             // Build main window with embedded initialization script
             let mut main_builder = WebviewWindowBuilder::new(
@@ -277,6 +302,9 @@ pub fn run() {
             commands::end_sync_room,
             commands::transfer_sync_host,
             commands::set_sync_require_approval,
+            commands::set_discord_invite,
+            commands::get_discord_invite,
+            commands::take_pending_join_code,
             commands::decide_sync_join,
             commands::vote_sync_skip,
             commands::send_sync_reaction,

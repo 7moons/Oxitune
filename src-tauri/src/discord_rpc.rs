@@ -93,6 +93,8 @@ pub struct Desired {
     pub track: Option<TrackPayload>,
     /// Clear the presence once a song has stayed paused this long.
     pub clear_after_pause: Option<Duration>,
+    /// The Listen Together room the host chose to show.
+    pub invite: Option<crate::join_link::DiscordInvite>,
 }
 
 pub struct DiscordRpcHandle {
@@ -114,11 +116,8 @@ impl DiscordRpcHandle {
 
     /// Replaces the wanted state; never blocks and never drops the newest
     /// update (the old bounded queue discarded updates once full).
-    pub fn update(&self, track: TrackPayload, clear_after_pause: Option<Duration>) {
-        self.sender.send_replace(Desired {
-            track: Some(track),
-            clear_after_pause,
-        });
+    pub fn update(&self, desired: Desired) {
+        self.sender.send_replace(desired);
     }
 
     pub fn clear(&self) {
@@ -160,7 +159,11 @@ fn now_unix_ms() -> u64 {
 
 /// The activity object for `track`, or `None` when there is nothing worth
 /// showing (no title: YTM idle, between songs, or an ad).
-pub fn build_activity(track: &TrackPayload, now_ms: u64) -> Option<Value> {
+pub fn build_activity(
+    track: &TrackPayload,
+    invite: Option<&crate::join_link::DiscordInvite>,
+    now_ms: u64,
+) -> Option<Value> {
     let title = track.title.trim();
     if title.is_empty() {
         return None;
@@ -208,6 +211,20 @@ pub fn build_activity(track: &TrackPayload, now_ms: u64) -> Option<Value> {
             format!("https://music.youtube.com/watch?v={vid}")
         };
         activity["buttons"] = json!([{ "label": "Listen on YouTube Music", "url": watch_url }]);
+    }
+
+    if let Some(invite) = invite {
+        let listen_along = json!({ "label": "Listen along", "url": invite.url });
+        match activity["buttons"].as_array_mut() {
+            Some(buttons) => buttons.push(listen_along),
+            None => activity["buttons"] = json!([listen_along]),
+        }
+        // Discord wants 1 <= current <= max; the host always counts.
+        let max = invite.max_members.max(1);
+        activity["party"] = json!({
+            "id": invite.party_id,
+            "size": [invite.members.clamp(1, max), max]
+        });
     }
 
     Some(activity)
@@ -318,7 +335,7 @@ impl PauseClock {
         };
         if track.is_playing {
             self.since = None;
-            return (build_activity(track, now_ms), None);
+            return (build_activity(track, desired.invite.as_ref(), now_ms), None);
         }
         let key = track.video_id.clone().unwrap_or_else(|| track.title.clone());
         let started = match &self.since {
@@ -330,8 +347,8 @@ impl PauseClock {
         };
         match desired.clear_after_pause {
             Some(after) if now >= started + after => (None, None),
-            Some(after) => (build_activity(track, now_ms), Some(started + after)),
-            None => (build_activity(track, now_ms), None),
+            Some(after) => (build_activity(track, desired.invite.as_ref(), now_ms), Some(started + after)),
+            None => (build_activity(track, desired.invite.as_ref(), now_ms), None),
         }
     }
 }
@@ -655,6 +672,7 @@ mod tests {
         tx.send_replace(Desired {
             track: Some(t),
             clear_after_pause,
+            invite: None,
         });
     }
 
@@ -671,7 +689,10 @@ mod tests {
     fn test_discord_rpc_handle_initialization() {
         let handle = DiscordRpcHandle::new();
         handle.clear();
-        handle.update(track("Starboy", true), None);
+        handle.update(Desired {
+            track: Some(track("Starboy", true)),
+            ..Desired::default()
+        });
     }
 
     #[test]
@@ -701,7 +722,7 @@ mod tests {
 
     #[test]
     fn test_build_activity_playing_and_paused() {
-        let act = build_activity(&track("Maniac", true), 1_000_000_000).unwrap();
+        let act = build_activity(&track("Maniac", true), None, 1_000_000_000).unwrap();
         assert_eq!(act["type"], 2);
         assert_eq!(act["details"], "Maniac");
         assert_eq!(act["state"], "by Carpenter Brut");
@@ -711,7 +732,7 @@ mod tests {
         assert_eq!(act["assets"]["large_text"], "Trilogy");
         assert_eq!(act["buttons"][0]["url"], "https://music.youtube.com/watch?v=id-Maniac");
 
-        let paused = build_activity(&track("Maniac", false), 1_000_000_000).unwrap();
+        let paused = build_activity(&track("Maniac", false), None, 1_000_000_000).unwrap();
         assert_eq!(paused["state"], "Paused - Carpenter Brut");
         assert!(paused.get("timestamps").is_none());
 
@@ -723,33 +744,59 @@ mod tests {
         let mut t = track("Maniac", true);
         t.sampled_at_ms = Some(2_000_000_400);
         // Sent 7 s after the sample: the start must not move by those 7 s.
-        let act = build_activity(&t, 2_000_007_400).unwrap();
+        let act = build_activity(&t, None, 2_000_007_400).unwrap();
         assert_eq!(act["timestamps"]["start"], 2_000_000 - 50);
+    }
+
+    #[test]
+    fn test_invite_adds_listen_along_and_party() {
+        let invite = crate::join_link::DiscordInvite {
+            url: crate::join_link::invite_url("YTMD-ABCDEFGH23"),
+            party_id: crate::join_link::party_id("YTMD-ABCDEFGH23"),
+            members: 3,
+            max_members: 16,
+        };
+        let act = build_activity(&track("Maniac", true), Some(&invite), 0).unwrap();
+        let buttons = act["buttons"].as_array().unwrap();
+        assert_eq!(buttons.len(), 2, "Discord allows at most 2 buttons");
+        assert_eq!(buttons[1]["label"], "Listen along");
+        assert_eq!(buttons[1]["url"], invite.url.as_str());
+        assert!(buttons.iter().all(|b| b["label"].as_str().unwrap().chars().count() <= 32));
+        assert_eq!(act["party"]["size"], json!([3, 16]));
+
+        let mut no_id = track("Maniac", true);
+        no_id.video_id = None;
+        let alone = crate::join_link::DiscordInvite { members: 0, ..invite };
+        let act = build_activity(&no_id, Some(&alone), 0).unwrap();
+        assert_eq!(act["buttons"].as_array().unwrap().len(), 1);
+        assert_eq!(act["party"]["size"], json!([1, 16]), "an empty member list still counts the host");
+
+        assert!(build_activity(&track("Maniac", true), None, 0).unwrap().get("party").is_none());
     }
 
     #[test]
     fn test_nothing_to_show_without_a_title() {
         let mut t = track("", true);
-        assert!(build_activity(&t, 0).is_none());
+        assert!(build_activity(&t, None, 0).is_none());
         t.title = "   ".into();
-        assert!(build_activity(&t, 0).is_none());
+        assert!(build_activity(&t, None, 0).is_none());
     }
 
     #[test]
     fn test_missing_artist_never_shows_a_bare_by() {
         let mut t = track("Maniac", true);
         t.artist = " ".into();
-        assert!(build_activity(&t, 0).unwrap().get("state").is_none());
+        assert!(build_activity(&t, None, 0).unwrap().get("state").is_none());
         t.is_playing = false;
-        assert_eq!(build_activity(&t, 0).unwrap()["state"], "Paused");
+        assert_eq!(build_activity(&t, None, 0).unwrap()["state"], "Paused");
     }
 
     #[test]
     fn test_same_presence_ignores_small_timestamp_jitter() {
-        let a = build_activity(&track("Maniac", true), 1_000_000_000).unwrap();
-        let b = build_activity(&track("Maniac", true), 1_000_001_000).unwrap();
-        let far = build_activity(&track("Maniac", true), 1_000_010_000).unwrap();
-        let other = build_activity(&track("Turbo Killer", true), 1_000_000_000).unwrap();
+        let a = build_activity(&track("Maniac", true), None, 1_000_000_000).unwrap();
+        let b = build_activity(&track("Maniac", true), None, 1_000_001_000).unwrap();
+        let far = build_activity(&track("Maniac", true), None, 1_000_010_000).unwrap();
+        let other = build_activity(&track("Turbo Killer", true), None, 1_000_000_000).unwrap();
         assert!(same_presence(Some(&a), Some(&b)));
         assert!(!same_presence(Some(&a), Some(&far)), "a seek must still be sent");
         assert!(!same_presence(Some(&a), Some(&other)));
@@ -874,7 +921,7 @@ mod tests {
     #[ignore = "needs a running Discord client"]
     async fn test_live_discord_connect_and_activity() {
         let mut transport = IpcTransport::default();
-        let act = build_activity(&track("Starboy", true), now_unix_ms());
+        let act = build_activity(&track("Starboy", true), None, now_unix_ms());
         transport.send(act.as_ref()).await.expect("send over live Discord");
     }
 }
