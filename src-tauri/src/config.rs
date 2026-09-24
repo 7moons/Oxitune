@@ -531,8 +531,8 @@ mod tests {
         assert_eq!(loaded_again.custom_css, AppConfig::default().custom_css);
     }
 
-    /// Configs from before the downloader was removed still load; the old
-    /// download fields are simply dropped on the next save.
+    /// Configs written by 0.2 still load; fields of features that were
+    /// removed since are dropped on the next save.
     #[test]
     fn test_config_with_removed_download_fields_still_loads() {
         let mut saved = serde_json::to_value(AppConfig { crossfade_seconds: 3.0, ..AppConfig::default() }).unwrap();

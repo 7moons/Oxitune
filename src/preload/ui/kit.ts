@@ -55,7 +55,7 @@ export const KIT_CSS = `
   .ytmd-icon-btn.ytmd-icon-btn--muted { color: var(--ytmd-text-secondary); }
   .ytmd-icon-btn.ytmd-icon-btn--muted:hover { color: var(--ytmd-text); }
 
-  /* Circular progress drawn around an icon button (e.g. a download). */
+  /* Circular progress drawn around an icon button. */
   .ytmd-progress-ring {
     position: absolute;
     inset: 2px;
@@ -303,7 +303,6 @@ export const ICONS = {
   group: 'M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z',
   phone: 'M17 1.01 7 1c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-1.99-2-1.99zM17 19H7V5h10v14z',
   miniPlayer: 'M19 11h-8v6h8v-6zm4 8V4.98C23 3.88 22.1 3 21 3H3c-1.1 0-2 .88-2 1.98V19c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2zm-2 .02H3V4.97h18v14.05z',
-  download: 'M17 18v1H6v-1h11zm-.5-6.6-.7-.7-3.8 3.7V4h-1v10.4l-3.8-3.8-.7.7 5 5 5-4.9z',
   check: 'M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z',
   pip: 'M19 11h-8v6h8v-6zm4 8V4.98C23 3.88 22.1 3 21 3H3c-1.1 0-2 .88-2 1.98V19c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2zm-2 .02H3V4.97h18v14.05z'
 } as const;
@@ -420,7 +419,7 @@ function installTooltips(): void {
 
 // ---------------------------------------------------------------------
 // Toasts: YTM shows one at a time, bottom-left above the player bar.
-// Reusing an `id` updates the visible toast in place (download progress)
+// Reusing an `id` updates the visible toast in place (progress)
 // instead of stacking a new one.
 // ---------------------------------------------------------------------
 

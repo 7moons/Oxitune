@@ -1,6 +1,5 @@
-//! Lyrics already on disk: for the song's file in the local library or
-//! the downloads folder, a `.lrc` next to it or lyrics in its tags (YTMD's
-//! own downloads embed them).
+//! Lyrics already on disk: for the song's file in the local library, a
+//! `.lrc` next to it or lyrics in its tags.
 
 use super::lrc::parse_lrc;
 use super::matching::{clean_track_name, score_match, token_similarity, Candidate, MIN_MATCH_SCORE};

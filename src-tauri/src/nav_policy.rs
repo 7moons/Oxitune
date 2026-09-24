@@ -5,7 +5,7 @@
 //! app window into a convincing phishing page. On WebKitGTK the navigation
 //! hook also sees iframe loads, so the allowlist covers the Google/YouTube
 //! domains YouTube Music frames itself (sign-in, consent, static files,
-//! video, ad frames it shows) rather than only its own host.
+//! video, the third-party frames it embeds) rather than only its own host.
 //!
 //! Pop-ups (`window.open`, `target=_blank`) never open inside the app:
 //! web links go to the system browser, everything else is dropped.

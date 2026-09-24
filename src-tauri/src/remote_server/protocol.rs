@@ -469,7 +469,7 @@ mod tests {
 
     #[test]
     fn test_unknown_client_messages_are_rejected() {
-        assert!(serde_json::from_value::<ClientMsg>(json!({ "type": "invoke", "cmd": "download_track" })).is_err());
-        assert!(serde_json::from_value::<ClientMsg>(json!({ "type": "cmd", "command": "download" })).is_err());
+        assert!(serde_json::from_value::<ClientMsg>(json!({ "type": "invoke", "cmd": "save_config" })).is_err());
+        assert!(serde_json::from_value::<ClientMsg>(json!({ "type": "cmd", "command": "install_update" })).is_err());
     }
 }

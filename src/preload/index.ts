@@ -300,12 +300,12 @@ async function initYTMD() {
 }
 
 // Tauri's initialization_script runs in every frame of the webview, including
-// third-party iframes YouTube Music itself loads (ad creatives served from
+// third-party iframes YouTube Music itself loads (content served from
 // tpc.googlesyndication.com and similar). Bootstrapping the full plugin stack
 // there wastes resources, spams "event.listen not allowed" errors (those
 // origins aren't in our Tauri capability allowlist — by design, since they're
 // untrusted), and runs a duplicate copy of every setInterval polling loop
-// (lyrics, burger menu, DSP...) per ad iframe. Only the
+// (lyrics, burger menu, DSP...) per such iframe. Only the
 // top-level music.youtube.com frame should ever run this.
 const isTopLevelYTMFrame =
   window.self === window.top && /(^|\.)music\.youtube\.com$/.test(location.hostname);

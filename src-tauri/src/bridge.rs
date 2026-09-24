@@ -8,7 +8,7 @@
 //!
 //! Everything here is callable by any script running in that page, not
 //! just ours, so the table is the minimum the page needs to be a player:
-//! no file system, no downloads, no whole-config reads or writes, no room
+//! no file system, no whole-config reads or writes, no room
 //! code, no remote token, no updater. Every command validates its input.
 //!
 //! Every bridge-callable command is declared exactly once, in the

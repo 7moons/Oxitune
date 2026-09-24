@@ -1405,7 +1405,7 @@ mod tests {
         let host = format!("127.0.0.1:{port}");
         let cookie = format!("Cookie: {COOKIE_NAME}={}\r\n", status.token());
         let (code, _, _) = http(port, "POST", "/api/invoke", &host, &cookie).await;
-        assert_eq!(code, 404, "the LAN must not reach download_track/get_config any more");
+        assert_eq!(code, 404, "the LAN must not reach page or config commands");
         let (code, _, _) = http(port, "POST", "/api/command?cmd=next", &host, &cookie).await;
         assert_eq!(code, 404);
     }
