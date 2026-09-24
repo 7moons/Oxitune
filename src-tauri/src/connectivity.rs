@@ -33,9 +33,11 @@ impl PageAlive {
     }
 }
 
-/// Whether music.youtube.com answers at all (any HTTP status).
+/// Whether music.youtube.com answers at all (any HTTP status). One client
+/// for every check: building one loads the TLS roots, which isn't free.
 pub async fn youtube_music_reachable() -> bool {
-    let Ok(client) = reqwest::Client::builder().timeout(CHECK_TIMEOUT).build() else {
+    static CLIENT: std::sync::OnceLock<Option<reqwest::Client>> = std::sync::OnceLock::new();
+    let Some(client) = CLIENT.get_or_init(|| reqwest::Client::builder().timeout(CHECK_TIMEOUT).build().ok()) else {
         return false;
     };
     client.head("https://music.youtube.com/").send().await.is_ok()
