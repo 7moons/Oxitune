@@ -5,6 +5,7 @@ pub mod discord_rpc;
 pub mod join_link;
 pub mod downloader;
 pub mod local_files;
+pub mod lyrics;
 pub mod mpris;
 pub mod p2p_sync;
 pub mod power_manager;
@@ -41,6 +42,7 @@ pub struct AppState {
     pub logs_dir: std::path::PathBuf,
     /// Last song and position, for resume on launch (`~/.ytmd/session.json`).
     pub session: session::SessionStore,
+    pub lyrics: lyrics::LyricsState,
 }
 
 /// Installs the process-wide rustls crypto provider exactly once.
@@ -80,6 +82,7 @@ pub fn run() {
     };
 
     let remote_token = remote_server::generate_token();
+    let config_manager_dir = config_manager.config_path().parent().map(std::path::Path::to_path_buf);
     let logs_dir = config_manager
         .config_path()
         .parent()
@@ -122,6 +125,9 @@ pub fn run() {
         remote_status: Arc::new(remote_server::RemoteServerStatus::new(initial_config.remote_enabled)),
         logs_dir: logs_dir.clone(),
         session: session_store,
+        lyrics: lyrics::LyricsState::new(
+            config_manager_dir.unwrap_or_else(|| std::path::PathBuf::from(".")),
+        ),
     });
 
     let app_state_for_setup = app_state.clone();
@@ -311,7 +317,12 @@ pub fn run() {
             commands::send_player_command,
             commands::send_seek_command,
             commands::send_volume_command,
-            commands::fetch_lyrics,
+            lyrics::commands::fetch_lyrics,
+            lyrics::commands::get_current_lyrics,
+            lyrics::commands::set_lyrics_offset,
+            lyrics::commands::list_lyrics_candidates,
+            lyrics::commands::pick_lyrics,
+            lyrics::commands::import_lyrics_offsets,
             commands::notify_track_change,
             commands::download_track,
             commands::scan_local_music,

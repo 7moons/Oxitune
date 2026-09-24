@@ -18,6 +18,9 @@ pub struct AppConfig {
     pub adblock_enabled: bool,
     pub sponsorblock_enabled: bool,
     pub lyrics_enabled: bool,
+    /// Lyrics providers in priority order, each on or off.
+    #[serde(default = "crate::lyrics::default_provider_settings")]
+    pub lyrics_providers: Vec<crate::lyrics::ProviderSetting>,
     pub miniplayer_enabled: bool,
     pub wheel_volume_step: f64,
     #[serde(default)]
@@ -112,6 +115,7 @@ impl Default for AppConfig {
             adblock_enabled: true,
             sponsorblock_enabled: true,
             lyrics_enabled: true,
+            lyrics_providers: crate::lyrics::default_provider_settings(),
             miniplayer_enabled: true,
             wheel_volume_step: 0.05,
             wheel_volume_on_player_page: false,
@@ -194,6 +198,8 @@ impl AppConfig {
 
         // Custom presets: well-formed ids, no duplicates, a name, exactly one
         // gain per band, everything in range.
+        self.lyrics_providers = crate::lyrics::sanitize_provider_settings(std::mem::take(&mut self.lyrics_providers));
+
         let mut seen = std::collections::HashSet::new();
         self.equalizer_custom_presets.retain(|p| is_custom_preset_id(&p.id) && seen.insert(p.id.clone()));
         self.equalizer_custom_presets.truncate(MAX_CUSTOM_PRESETS);
@@ -400,6 +406,7 @@ mod tests {
         assert!(config.adblock_enabled);
         assert!(config.sponsorblock_enabled);
         assert!(config.lyrics_enabled);
+        assert_eq!(config.lyrics_providers, crate::lyrics::default_provider_settings());
         assert!(config.equalizer_enabled);
         assert_eq!(config.equalizer_gains.len(), 10);
         assert_eq!(config.equalizer_preset, "flat");
