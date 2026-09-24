@@ -83,7 +83,7 @@ windows = { version = "0.61", features = ["Win32_System_Com", "Win32_System_Powe
 tauri = { version = "2.0.0", features = ["test"] }
 ctor = "0.4"
 tempfile = "3.10"
-tokio-tungstenite = "0.29"
+tokio-tungstenite = "0.30"
 
 # Smaller, faster release binary (measured in AUDIT.md). panic stays
 # "unwind": a panic in one background task must not take the player down.
