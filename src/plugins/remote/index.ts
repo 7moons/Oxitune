@@ -2,6 +2,7 @@ import { YTMDPlugin, PluginContext } from '../types';
 import { createEl } from '../../utils/dom';
 import { openDialog } from '../../preload/ui/kit';
 import { t } from '../../preload/ui/i18n';
+import { startRemoteHost, stopRemoteHost } from './host';
 
 interface RemoteInfo {
   ip: string;
@@ -18,10 +19,12 @@ export const RemotePlugin: YTMDPlugin = {
 
   onInit(ctx: PluginContext) {
     window.__ytmd_show_remote_qr = () => showQrModal(ctx);
+    startRemoteHost(ctx);
     console.log('[YTMD] Mobile remote module ready.');
   },
 
   onDestroy() {
+    stopRemoteHost();
     window.__ytmd_show_remote_qr = undefined;
     document.getElementById('ytmd-remote-modal')?.remove();
   }

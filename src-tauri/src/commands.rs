@@ -853,7 +853,14 @@ pub fn get_remote_info(
     // The port the server actually bound at startup, not the configured one:
     // a port edited in Settings only applies after a restart.
     let port = state.remote_status.serving_port()?;
-    Ok(crate::remote_server::get_remote_info(port, &state.remote_token))
+    Ok(crate::remote_server::get_remote_info(port, &state.remote_status.token()))
+}
+
+/// "Revoke paired phones": a new pairing token; every phone must scan the
+/// QR code again.
+#[tauri::command]
+pub fn regenerate_remote_token(state: State<'_, Arc<AppState>>) -> Result<(), String> {
+    state.remote_status.regenerate_token().map(|_| ())
 }
 
 #[tauri::command]

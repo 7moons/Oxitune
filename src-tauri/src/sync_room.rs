@@ -20,6 +20,7 @@
 //! over once the old host can't be reached.
 
 mod features;
+pub(crate) use features::votes_needed;
 
 pub use features::{parse_video_id, REACTIONS};
 pub(crate) use features::pick_successor;
@@ -468,7 +469,7 @@ pub struct SyncControlRequest {
     pub source: ControlSource,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReactionPayload {
     pub from: String,
     pub emoji: String,

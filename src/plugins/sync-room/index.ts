@@ -285,7 +285,7 @@ function isAdPlaying(): boolean {
 /** Switches tracks through YTM's own SPA router (the same `yt-navigate`
  * event its links fire) instead of `location.href`, which reloaded the
  * whole app, re-ran every plugin, and took seconds per track change. */
-function navigateToVideo(videoId: string) {
+export function navigateToVideo(videoId: string) {
   const app = document.querySelector('ytmusic-app');
   if (!app) {
     window.location.href = `https://music.youtube.com/watch?v=${videoId}`;
@@ -713,6 +713,16 @@ export function routeRoomPlayerCommand(command: string): boolean {
   const action = controlForCommand(command, video ? video.paused : true);
   if (!action) return false;
   controller.requestControl(action, invokeRef);
+  return true;
+}
+
+/** Guest: a song picked on the phone remote is asked of the host, the
+ * same way `routeRoomPlayerCommand` routes skips. Returns whether it was
+ * taken (false outside a room or on the host, whose own player acts). */
+export function routeRoomPlayVideo(videoId: string): boolean {
+  const controller = controllerRef;
+  if (!controller || !invokeRef || !controller.isGuest()) return false;
+  controller.requestControl({ kind: 'play_video', video_id: videoId }, invokeRef);
   return true;
 }
 

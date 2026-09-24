@@ -689,6 +689,14 @@ document.addEventListener('DOMContentLoaded', () => {
       showToast(errorMessage(e), { durationMs: 8000 });
     }
   });
+  $('remote-revoke-btn')?.addEventListener('click', async () => {
+    try {
+      await window.__TAURI__?.core.invoke('regenerate_remote_token');
+      showToast(tr('settings.remoteRevoke.done'));
+    } catch (e) {
+      showToast(errorMessage(e));
+    }
+  });
   $('open-logs-btn')?.addEventListener('click', async () => {
     try {
       await window.__TAURI__?.core.invoke('open_logs_folder');

@@ -1,13 +1,48 @@
+//! Phone remote: an axum HTTP + WebSocket server on the LAN.
+//!
+//! Pairing: the QR code's `/?t=<token>` is swapped once for an HttpOnly,
+//! SameSite=Strict cookie and a redirect to `/`, so the token leaves the
+//! address bar. Every request must carry that cookie (or `?t=`), and a
+//! `Host` that is an IP literal or `localhost` on our port: a DNS-rebinding
+//! page always sends its own domain name there. The token lives in
+//! `~/.ytmd/remote_token` so a saved phone bookmark survives restarts;
+//! "Revoke paired phones" in Settings replaces it and drops every open
+//! connection.
+//!
+//! The phone app (`remote.html`, built into `dist-remote/`) talks the
+//! protocol in `protocol.rs` / `schemas/remote_v1.json` over `/ws`. Actions
+//! on the YTM page go out as `remote-action` events and come back through
+//! the `remote_reply` bridge command; the page reports what it shows
+//! (volume, like state, queue, ...) through `remote_publish` while a phone
+//! is connected.
+
+pub mod protocol;
+
+use axum::body::Body;
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::extract::{Request, State};
+use axum::http::{header, HeaderMap, HeaderValue, Method, StatusCode, Uri};
+use axum::middleware::{self, Next};
+use axum::response::{IntoResponse, Response};
+use axum::routing::get;
+use axum::Router;
 use local_ip_address::{list_afinet_netifas, local_ip};
+use parking_lot::{Mutex, RwLock};
+use protocol::*;
 use qrcode::render::svg;
 use qrcode::QrCode;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::HashMap;
+use std::future::Future;
 use std::net::{IpAddr, SocketAddr};
-use std::sync::atomic::{AtomicU16, Ordering};
+use std::path::{Path, PathBuf};
+use std::pin::Pin;
+use std::sync::atomic::{AtomicU16, AtomicU32, AtomicUsize, Ordering};
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, Manager};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpListener;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tauri::{AppHandle, Emitter, Listener, Manager};
+use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RemoteInfo {
@@ -17,21 +52,20 @@ pub struct RemoteInfo {
     pub qr_svg: String,
 }
 
-#[derive(Deserialize)]
-struct InvokeRequest {
-    cmd: String,
-    args: Option<serde_json::Value>,
-}
-
-#[derive(Deserialize)]
-struct UpdateTrackWrapper {
-    track: crate::discord_rpc::TrackPayload,
-}
-
-#[derive(Deserialize)]
-struct DownloadRequestWrapper {
-    request: crate::downloader::DownloadRequest,
-}
+const COOKIE_NAME: &str = "ytmd_remote";
+const TOKEN_LEN: usize = 32;
+/// Request bodies: the phone app only ever sends GETs and WS frames.
+const MAX_BODY_BYTES: usize = 16 * 1024;
+/// A phone message bigger than this is dropped.
+const MAX_WS_MESSAGE_BYTES: usize = 16 * 1024;
+/// In-flight HTTP requests (a WS session releases its slot once upgraded).
+const MAX_CONCURRENT_REQUESTS: usize = 32;
+/// Open phone connections.
+const MAX_CLIENTS: usize = 8;
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long a page action may take to answer (search, queue edits).
+const PAGE_REPLY_TIMEOUT: Duration = Duration::from_secs(8);
+const WS_PING_EVERY: Duration = Duration::from_secs(20);
 
 fn looks_like_virtual_adapter(name: &str) -> bool {
     let name = name.to_lowercase();
@@ -56,9 +90,7 @@ pub fn get_local_ip() -> String {
         let mut candidates: Vec<_> = interfaces
             .into_iter()
             .filter_map(|(name, ip)| match ip {
-                IpAddr::V4(v4) if v4.is_private() && !looks_like_virtual_adapter(&name) => {
-                    Some(v4)
-                }
+                IpAddr::V4(v4) if v4.is_private() && !looks_like_virtual_adapter(&name) => Some(v4),
                 _ => None,
             })
             .collect();
@@ -82,25 +114,55 @@ pub fn get_local_ip() -> String {
         .unwrap_or_else(|_| "127.0.0.1".to_string())
 }
 
-/// Random URL-safe pairing token generated once per app run. Every request
-/// to the LAN remote-control server (which must bind 0.0.0.0 so phones on
-/// the same Wi-Fi can reach it) must present this token via `?t=`. Without
-/// it, any website open in the user's regular browser could blind-POST to
-/// this server (classic local-network CSRF / DNS-rebinding) and trigger
-/// playback control, arbitrary file writes via download_track, or config
-/// reads — none of which requires the response to be readable, so CORS
-/// headers alone can never prevent it. Only a secret the attacker can't
-/// guess does.
+/// Random URL-safe pairing token. The server binds 0.0.0.0 so phones on the
+/// same Wi-Fi can reach it; without a secret, any website open in the
+/// user's browser could blind-send it commands (local-network CSRF).
 pub fn generate_token() -> String {
     use rand::Rng;
     const CHARS: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
     let mut rng = rand::rng();
-    (0..32)
-        .map(|_| {
-            let idx = rng.random_range(0..CHARS.len());
-            CHARS[idx] as char
-        })
+    (0..TOKEN_LEN)
+        .map(|_| CHARS[rng.random_range(0..CHARS.len())] as char)
         .collect()
+}
+
+fn is_well_formed_token(token: &str) -> bool {
+    token.len() == TOKEN_LEN && token.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+}
+
+/// The saved token, or a new one written there (owner-only on unix).
+pub fn load_or_create_token(path: &Path) -> String {
+    if let Ok(saved) = std::fs::read_to_string(path) {
+        let saved = saved.trim();
+        if is_well_formed_token(saved) {
+            return saved.to_string();
+        }
+    }
+    let token = generate_token();
+    if let Err(e) = write_token(path, &token) {
+        log::warn!("[YTMD Remote] Couldn't save the pairing token: {e}");
+    }
+    token
+}
+
+fn write_token(path: &Path, token: &str) -> std::io::Result<()> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let tmp = path.with_extension("tmp");
+    {
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        use std::io::Write;
+        let mut file = opts.open(&tmp)?;
+        file.write_all(token.as_bytes())?;
+    }
+    std::fs::rename(&tmp, path)
 }
 
 fn constant_time_eq(a: &str, b: &str) -> bool {
@@ -115,122 +177,44 @@ fn constant_time_eq(a: &str, b: &str) -> bool {
     diff == 0
 }
 
-fn query_param(path: &str, key: &str) -> Option<String> {
-    let query = path.split('?').nth(1)?;
-    url::form_urlencoded::parse(query.as_bytes())
+fn query_param(query: Option<&str>, key: &str) -> Option<String> {
+    url::form_urlencoded::parse(query?.as_bytes())
         .find(|(k, _)| k == key)
         .map(|(_, v)| v.into_owned())
 }
 
-fn token_ok(path: &str, expected: &str) -> bool {
-    query_param(path, "t")
-        .map(|v| constant_time_eq(&v, expected))
-        .unwrap_or(false)
+fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
+    headers
+        .get_all(header::COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .flat_map(|v| v.split(';'))
+        .filter_map(|pair| pair.trim().split_once('='))
+        .find(|(k, _)| *k == name)
+        .map(|(_, v)| v.to_string())
 }
 
-/// Hard cap on a single HTTP request (headers + body) the local remote
-/// server will buffer. Bounds memory from any one connection and gives a
-/// real `413` response instead of the previous behavior: a single fixed
-/// 8KB `read()` that silently truncated any larger `/api/invoke` body,
-/// which then failed JSON parsing with no error surfaced to the caller.
-const MAX_REQUEST_SIZE: usize = 1024 * 1024; // 1MB — generous for JSON bodies this API ever sends
-/// Hard cap on concurrent in-flight connections. Previously every accepted
-/// connection spawned an unbounded tokio task; since this server must bind
-/// `0.0.0.0` (see `start_remote_server`) to be reachable from a phone on the
-/// same Wi-Fi, anything else on the LAN could open unlimited connections
-/// and grow task/socket count without bound.
-const MAX_CONNECTIONS: usize = 32;
-
-#[derive(Debug, PartialEq, Eq)]
-enum RequestReadError {
-    /// Request (headers + declared body) exceeds `MAX_REQUEST_SIZE`.
-    TooLarge,
-    /// The peer closed the connection or a read failed before a complete
-    /// request was assembled.
-    Closed,
-}
-
-/// Reads one HTTP/1.1 request from `reader`: accumulates bytes until the
-/// header terminator (`\r\n\r\n`) is seen, reads `Content-Length` from the
-/// headers, then keeps reading until that many body bytes have arrived too.
-/// Unlike a single fixed-size `read()`, this correctly receives bodies
-/// larger than one OS-level read (previously anything over ~8KB was
-/// truncated and failed JSON parsing downstream with no error surfaced to
-/// the caller). Generic over `AsyncRead` so tests can drive it with an
-/// in-memory duplex stream instead of a real `TcpStream`.
-async fn read_http_request<R>(reader: &mut R) -> Result<Vec<u8>, RequestReadError>
-where
-    R: tokio::io::AsyncRead + Unpin,
-{
-    let mut buf = Vec::with_capacity(8192);
-    let mut chunk = [0u8; 8192];
-    let mut headers_end: Option<usize> = None;
-    let mut content_length: usize = 0;
-
-    loop {
-        let n = reader.read(&mut chunk).await.map_err(|_| RequestReadError::Closed)?;
-        if n == 0 {
-            break;
+/// Whether `host` (a `Host` header) is one this server answers to: an IP
+/// literal or `localhost`, on our port. A DNS-rebinding attack reaches us
+/// under the attacker's own domain name, which this refuses. IP literals
+/// keep working when DHCP hands the PC a new LAN address.
+pub fn host_allowed(host: &str, port: u16) -> bool {
+    let (name, host_port) = if let Some(rest) = host.strip_prefix('[') {
+        // [v6]:port
+        match rest.split_once("]:") {
+            Some((v6, p)) => (v6, p),
+            None => return false,
         }
-        buf.extend_from_slice(&chunk[..n]);
-        if buf.len() > MAX_REQUEST_SIZE {
-            return Err(RequestReadError::TooLarge);
+    } else {
+        match host.rsplit_once(':') {
+            Some(pair) => pair,
+            None => return false,
         }
-
-        if headers_end.is_none() {
-            if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
-                let end = pos + 4;
-                let declared_len = String::from_utf8_lossy(&buf[..pos])
-                    .lines()
-                    .find_map(|line| {
-                        let (k, v) = line.split_once(':')?;
-                        if k.trim().eq_ignore_ascii_case("content-length") {
-                            v.trim().parse::<usize>().ok()
-                        } else {
-                            None
-                        }
-                    })
-                    .unwrap_or(0);
-
-                if end.saturating_add(declared_len) > MAX_REQUEST_SIZE {
-                    return Err(RequestReadError::TooLarge);
-                }
-                headers_end = Some(end);
-                content_length = declared_len;
-            }
-        }
-
-        if let Some(end) = headers_end {
-            if buf.len() >= end + content_length {
-                break;
-            }
-        }
+    };
+    if host_port.parse::<u16>().ok() != Some(port) {
+        return false;
     }
-
-    if buf.is_empty() {
-        return Err(RequestReadError::Closed);
-    }
-
-    Ok(buf)
-}
-
-/// Tries to admit one more connection under `MAX_CONNECTIONS`. Split out
-/// from the accept loop so the backpressure decision itself can be
-/// exercised in a test without needing a live `AppHandle`/TCP server.
-fn try_acquire_connection_permit(
-    limiter: &Arc<tokio::sync::Semaphore>,
-) -> Option<tokio::sync::OwnedSemaphorePermit> {
-    limiter.clone().try_acquire_owned().ok()
-}
-
-async fn write_forbidden(socket: &mut tokio::net::TcpStream) {
-    let body = "Forbidden: missing or invalid pairing token";
-    let response = format!(
-        "HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
-        body.len(),
-        body
-    );
-    let _ = socket.write_all(response.as_bytes()).await;
+    name.eq_ignore_ascii_case("localhost") || name.parse::<IpAddr>().is_ok()
 }
 
 pub fn generate_qr_svg(url: &str) -> String {
@@ -245,23 +229,295 @@ pub fn generate_qr_svg(url: &str) -> String {
     }
 }
 
-/// Whether the remote server is actually serving, so the pairing QR never
-/// advertises a URL nothing is listening on. `enabled` is fixed at startup
-/// (turning the remote on/off takes a restart); the bound port is set once
-/// the listener binds, which can fail (e.g. the port is taken).
+pub const REMOTE_OFF_ERROR: &str = "Remote is turned off";
+
+/// Pure decision behind `RemoteServerStatus::serving_port`.
+pub fn remote_availability(enabled: bool, bound_port: Option<u16>) -> Result<u16, String> {
+    match (enabled, bound_port) {
+        (false, _) => Err(REMOTE_OFF_ERROR.to_string()),
+        (true, Some(port)) => Ok(port),
+        (true, None) => Err("Remote server isn't running (its port may be in use by another app)".to_string()),
+    }
+}
+
+pub fn get_remote_info(port: u16, token: &str) -> RemoteInfo {
+    let ip = get_local_ip();
+    let url = format!("http://{}:{}/?t={}", ip, port, token);
+    let qr_svg = generate_qr_svg(&url);
+    RemoteInfo { ip, port, url, qr_svg }
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+}
+
+/// What the YTM page reports about its player while a phone is connected
+/// (`remote_publish` with kind `state`).
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct PageState {
+    #[serde(default)]
+    pub playing: bool,
+    #[serde(default)]
+    pub position_secs: f64,
+    #[serde(default)]
+    pub sampled_at_ms: u64,
+    #[serde(default = "full_volume")]
+    pub volume: f64,
+    #[serde(default)]
+    pub muted: bool,
+    #[serde(default)]
+    pub like: LikeStatus,
+    #[serde(default)]
+    pub shuffle: bool,
+    #[serde(default)]
+    pub repeat: RepeatMode,
+    #[serde(default)]
+    pub accent: Option<Accent>,
+}
+
+fn full_volume() -> f64 {
+    1.0
+}
+
+#[derive(Default)]
+struct Snapshot {
+    track: Option<crate::discord_rpc::TrackPayload>,
+    page: Option<PageState>,
+    page_queue: Option<QueueView>,
+    room: Option<RoomView>,
+    room_queue: Option<QueueView>,
+    lyrics: Value,
+}
+
+impl Snapshot {
+    fn player_state(&self, now: u64) -> PlayerState {
+        let track = self.track.as_ref().filter(|t| !t.title.trim().is_empty());
+        let page = self.page.clone().unwrap_or(PageState { volume: 1.0, ..PageState::default() });
+        // The newer of the two position readings wins.
+        let (position_secs, sampled_at_ms, playing) = match track {
+            Some(t) if t.sampled_at_ms.unwrap_or(0) > page.sampled_at_ms => {
+                (t.current_time_secs as f64, t.sampled_at_ms.unwrap_or(now), t.is_playing)
+            }
+            _ if page.sampled_at_ms > 0 => (page.position_secs, page.sampled_at_ms, page.playing),
+            Some(t) => (t.current_time_secs as f64, now, t.is_playing),
+            None => (0.0, now, false),
+        };
+        PlayerState {
+            track: track.map(|t| TrackView {
+                title: t.title.clone(),
+                artist: t.artist.clone(),
+                album: t.album.clone(),
+                cover_url: t.cover_url.clone(),
+                duration_secs: t.duration_secs as f64,
+                video_id: t.video_id.clone(),
+            }),
+            playing,
+            position_secs: position_secs.max(0.0),
+            sampled_at_ms,
+            server_time_ms: now,
+            volume: page.volume.clamp(0.0, 1.0),
+            muted: page.muted,
+            like: page.like,
+            shuffle: page.shuffle,
+            repeat: page.repeat,
+            accent: page.accent,
+        }
+    }
+
+    fn queue(&self) -> Option<QueueView> {
+        if self.room.is_some() {
+            self.room_queue.clone()
+        } else {
+            self.page_queue.clone()
+        }
+    }
+
+    /// Everything a phone needs right after connecting.
+    fn messages(&self, now: u64) -> Vec<ServerMsg> {
+        let mut out = vec![ServerMsg::Hello { version: PROTOCOL_VERSION }, ServerMsg::State(self.player_state(now))];
+        out.push(ServerMsg::Queue(self.queue().unwrap_or(QueueView { items: vec![], shared: false })));
+        out.push(ServerMsg::Lyrics { lyrics: self.lyrics.clone() });
+        out.push(ServerMsg::Room { room: self.room.clone() });
+        out
+    }
+}
+
+type PageReply = Result<Value, String>;
+
+/// Fan-out to every connected phone, plus the page request/reply plumbing.
+pub struct RemoteHub {
+    tx: broadcast::Sender<Arc<str>>,
+    snapshot: Mutex<Snapshot>,
+    pending: Mutex<HashMap<u32, oneshot::Sender<PageReply>>>,
+    next_request: AtomicU32,
+    clients: AtomicUsize,
+}
+
+impl Default for RemoteHub {
+    fn default() -> Self {
+        Self {
+            tx: broadcast::channel(64).0,
+            snapshot: Mutex::new(Snapshot::default()),
+            pending: Mutex::new(HashMap::new()),
+            next_request: AtomicU32::new(1),
+            clients: AtomicUsize::new(0),
+        }
+    }
+}
+
+impl RemoteHub {
+    fn send(&self, msg: &ServerMsg) {
+        if let Ok(text) = serde_json::to_string(msg) {
+            let _ = self.tx.send(Arc::from(text));
+        }
+    }
+
+    fn broadcast_state(&self) {
+        let msg = ServerMsg::State(self.snapshot.lock().player_state(now_ms()));
+        self.send(&msg);
+    }
+
+    fn broadcast_queue(&self) {
+        let queue = self.snapshot.lock().queue().unwrap_or(QueueView { items: vec![], shared: false });
+        self.send(&ServerMsg::Queue(queue));
+    }
+
+    pub fn client_count(&self) -> usize {
+        self.clients.load(Ordering::SeqCst)
+    }
+
+    pub fn on_track(&self, track: crate::discord_rpc::TrackPayload) {
+        self.snapshot.lock().track = Some(track);
+        self.broadcast_state();
+    }
+
+    pub fn on_lyrics(&self, lyrics: Value) {
+        self.snapshot.lock().lyrics = lyrics.clone();
+        self.send(&ServerMsg::Lyrics { lyrics });
+    }
+
+    pub fn on_room(&self, room: Option<&crate::sync_room::RoomState>) {
+        let view = room.map(room_view);
+        let queue = room.map(|r| QueueView {
+            shared: true,
+            items: r
+                .queue
+                .iter()
+                .map(|q| QueueEntry {
+                    id: q.id.clone(),
+                    video_id: q.video_id.clone(),
+                    title: q.title.clone(),
+                    artist: q.artist.clone(),
+                    thumbnail: Some(format!("https://i.ytimg.com/vi/{}/default.jpg", q.video_id)),
+                    current: false,
+                })
+                .collect(),
+        });
+        {
+            let mut snap = self.snapshot.lock();
+            snap.room = view.clone();
+            snap.room_queue = queue;
+        }
+        self.send(&ServerMsg::Room { room: view });
+        self.broadcast_queue();
+    }
+
+    pub fn on_reaction(&self, from: String, emoji: String) {
+        self.send(&ServerMsg::Reaction { from, emoji });
+    }
+
+    /// `remote_publish` from the page.
+    pub fn publish(&self, kind: &str, data: Value) -> Result<(), String> {
+        match kind {
+            "state" => {
+                let state: PageState = serde_json::from_value(data).map_err(|e| e.to_string())?;
+                self.snapshot.lock().page = Some(state);
+                self.broadcast_state();
+            }
+            "queue" => {
+                let items: Vec<QueueEntry> = serde_json::from_value(data).map_err(|e| e.to_string())?;
+                self.snapshot.lock().page_queue = Some(QueueView { items, shared: false });
+                self.broadcast_queue();
+            }
+            other => return Err(format!("Unknown remote_publish kind `{other}`")),
+        }
+        Ok(())
+    }
+
+    /// `remote_reply` from the page.
+    pub fn resolve(&self, id: u32, reply: PageReply) {
+        if let Some(tx) = self.pending.lock().remove(&id) {
+            let _ = tx.send(reply);
+        }
+    }
+
+    fn begin_request(&self) -> (u32, oneshot::Receiver<PageReply>) {
+        let id = self.next_request.fetch_add(1, Ordering::Relaxed);
+        let (tx, rx) = oneshot::channel();
+        self.pending.lock().insert(id, tx);
+        (id, rx)
+    }
+
+    async fn await_reply(&self, id: u32, rx: oneshot::Receiver<PageReply>) -> PageReply {
+        match tokio::time::timeout(PAGE_REPLY_TIMEOUT, rx).await {
+            Ok(Ok(reply)) => reply,
+            _ => {
+                self.pending.lock().remove(&id);
+                Err("remote.error.timeout".into())
+            }
+        }
+    }
+}
+
+fn room_view(room: &crate::sync_room::RoomState) -> RoomView {
+    RoomView {
+        is_host: room.is_host,
+        me: room.current_user_id.clone(),
+        members: room
+            .members
+            .iter()
+            .map(|m| RoomMemberView {
+                id: m.id.clone(),
+                nickname: m.nickname.clone(),
+                role: serde_json::to_value(m.role)
+                    .ok()
+                    .and_then(|v| v.as_str().map(str::to_string))
+                    .unwrap_or_else(|| "dj".into()),
+                is_host: m.is_host,
+            })
+            .collect(),
+        skip_votes: room.skip_votes.clone(),
+        votes_needed: crate::sync_room::votes_needed(room.members.len()),
+    }
+}
+
+/// Whether the server is serving, its pairing token, and the phone hub.
+/// `enabled` is fixed at startup (turning the remote on/off takes a
+/// restart); the bound port is set once the listener binds, which can fail
+/// (e.g. the port is taken).
 pub struct RemoteServerStatus {
     enabled: bool,
     /// 0 = not bound (yet, or bind failed).
     bound_port: AtomicU16,
+    token: RwLock<String>,
+    token_path: Option<PathBuf>,
+    /// Bumped when the token is replaced; open sessions close on it.
+    token_generation: watch::Sender<u64>,
+    pub hub: RemoteHub,
 }
 
-pub const REMOTE_OFF_ERROR: &str = "Remote is turned off";
-
 impl RemoteServerStatus {
-    pub fn new(enabled: bool) -> Self {
+    /// `token_path`: where the pairing token is kept; `None` keeps a fresh
+    /// one in memory only (tests).
+    pub fn new(enabled: bool, token_path: Option<PathBuf>) -> Self {
+        let token = token_path.as_deref().map(load_or_create_token).unwrap_or_else(generate_token);
         Self {
             enabled,
             bound_port: AtomicU16::new(0),
+            token: RwLock::new(token),
+            token_path,
+            token_generation: watch::channel(0).0,
+            hub: RemoteHub::default(),
         }
     }
 
@@ -277,417 +533,521 @@ impl RemoteServerStatus {
         };
         remote_availability(self.enabled, bound)
     }
+
+    pub fn token(&self) -> String {
+        self.token.read().clone()
+    }
+
+    fn token_matches(&self, candidate: &str) -> bool {
+        constant_time_eq(candidate, &self.token.read())
+    }
+
+    /// Unpairs every phone: a new token (saved), and every open connection
+    /// is closed.
+    pub fn regenerate_token(&self) -> Result<String, String> {
+        let token = generate_token();
+        if let Some(path) = &self.token_path {
+            write_token(path, &token).map_err(|e| e.to_string())?;
+        }
+        *self.token.write() = token.clone();
+        self.token_generation.send_modify(|g| *g += 1);
+        Ok(token)
+    }
 }
 
-/// Pure decision behind `RemoteServerStatus::serving_port`.
-pub fn remote_availability(enabled: bool, bound_port: Option<u16>) -> Result<u16, String> {
-    match (enabled, bound_port) {
-        (false, _) => Err(REMOTE_OFF_ERROR.to_string()),
-        (true, Some(port)) => Ok(port),
-        (true, None) => {
-            Err("Remote server isn't running (its port may be in use by another app)".to_string())
+type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send>>;
+
+/// Carries out phone messages. The app's implementation talks to the page
+/// and Listen Together; tests plug in their own.
+pub trait RemoteActions: Send + Sync + 'static {
+    /// `Ok(Some(msg))` answers the phone with `msg` instead of a plain
+    /// `result`.
+    fn handle(&self, msg: ClientMsg) -> BoxFuture<Result<Option<ServerMsg>, String>>;
+    /// A phone connected or left; `count` is how many are connected now.
+    fn clients_changed(&self, _count: usize) {}
+}
+
+struct ServerCtx {
+    status: Arc<RemoteServerStatus>,
+    port: u16,
+    actions: Arc<dyn RemoteActions>,
+}
+
+fn security_headers(res: &mut Response, host: &str) {
+    let h = res.headers_mut();
+    h.insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
+    h.insert(header::REFERRER_POLICY, HeaderValue::from_static("no-referrer"));
+    h.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+    let csp = format!(
+        "default-src 'self'; img-src 'self' https: data: blob:; style-src 'self' 'unsafe-inline'; \
+         font-src 'self' data:; connect-src 'self' ws://{host}; manifest-src 'self'; frame-ancestors 'none'; base-uri 'none'"
+    );
+    if let Ok(v) = HeaderValue::from_str(&csp) {
+        h.insert(header::CONTENT_SECURITY_POLICY, v);
+    }
+}
+
+fn forbidden() -> Response {
+    let body = "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'>\
+        <title>YTMD</title><body style='font:16px Roboto,Arial,sans-serif;background:#030303;color:#fff;padding:16px'>\
+        <p>Scan the QR code in YTMD again (menu → Phone remote).</p>\
+        <p style='color:#aaa'>Zeskanuj ponownie kod QR w YTMD (menu → Pilot w telefonie).</p>";
+    (StatusCode::FORBIDDEN, [(header::CONTENT_TYPE, "text/html; charset=utf-8")], body).into_response()
+}
+
+/// Paths a phone fetches without credentials (the manifest request omits
+/// cookies); none of them reveal or control anything.
+fn is_public_path(path: &str) -> bool {
+    matches!(path, "/manifest.webmanifest" | "/remote-icon.png")
+}
+
+/// Host check, token-for-cookie exchange and the auth gate, in that order.
+async fn guard(State(ctx): State<Arc<ServerCtx>>, req: Request, next: Next) -> Response {
+    let host = req
+        .headers()
+        .get(header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    if !host_allowed(&host, ctx.port) {
+        return (StatusCode::MISDIRECTED_REQUEST, "Unknown host").into_response();
+    }
+
+    let path = req.uri().path().to_string();
+    if is_public_path(&path) {
+        let mut res = next.run(req).await;
+        security_headers(&mut res, &host);
+        return res;
+    }
+
+    if let Some(t) = query_param(req.uri().query(), "t") {
+        if !ctx.status.token_matches(&t) {
+            return forbidden();
+        }
+        let cookie = format!("{COOKIE_NAME}={t}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000");
+        let location = if path.is_empty() { "/".to_string() } else { path };
+        let mut res = Response::builder()
+            .status(StatusCode::SEE_OTHER)
+            .header(header::LOCATION, location)
+            .header(header::SET_COOKIE, cookie)
+            .header(header::CACHE_CONTROL, "no-store")
+            .body(Body::empty())
+            .unwrap_or_default();
+        security_headers(&mut res, &host);
+        return res;
+    }
+
+    let authed = cookie_value(req.headers(), COOKIE_NAME).is_some_and(|c| ctx.status.token_matches(&c));
+    if !authed {
+        return forbidden();
+    }
+
+    // A WebSocket from another page would carry that page's Origin.
+    if let Some(origin) = req.headers().get(header::ORIGIN).and_then(|v| v.to_str().ok()) {
+        if origin != format!("http://{host}") {
+            return (StatusCode::FORBIDDEN, "Cross-origin request").into_response();
+        }
+    }
+
+    let mut res = next.run(req).await;
+    security_headers(&mut res, &host);
+    res
+}
+
+#[derive(rust_embed::RustEmbed)]
+#[folder = "../dist-remote/"]
+#[allow_missing = true]
+struct RemoteAssets;
+
+const NOT_BUILT_PAGE: &str = "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'>\
+    <title>YTMD</title><body style='font:16px Roboto,Arial,sans-serif;background:#030303;color:#fff;padding:16px'>\
+    <p>The phone remote wasn't built into this copy of YTMD (run <code>bun run build</code>).</p>";
+
+fn embedded(path: &str) -> Option<Response> {
+    let file = RemoteAssets::get(path)?;
+    let mime = file.metadata.mimetype().to_string();
+    let cache = if path.starts_with("assets/") { "public, max-age=31536000, immutable" } else { "no-cache" };
+    Some(
+        Response::builder()
+            .header(header::CONTENT_TYPE, mime)
+            .header(header::CACHE_CONTROL, cache)
+            .body(Body::from(file.data.into_owned()))
+            .unwrap_or_default(),
+    )
+}
+
+async fn static_files(method: Method, uri: Uri) -> Response {
+    if method != Method::GET && method != Method::HEAD {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let path = uri.path().trim_start_matches('/');
+    if path.is_empty() || path == "index.html" || path == "remote.html" {
+        return embedded("remote.html").unwrap_or_else(|| {
+            ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], NOT_BUILT_PAGE).into_response()
+        });
+    }
+    // Only the phone app's own files; `..` can't escape an embedded set.
+    embedded(path).unwrap_or_else(|| StatusCode::NOT_FOUND.into_response())
+}
+
+async fn ws_upgrade(State(ctx): State<Arc<ServerCtx>>, ws: WebSocketUpgrade) -> Response {
+    let hub = &ctx.status.hub;
+    if hub.clients.fetch_add(1, Ordering::SeqCst) >= MAX_CLIENTS {
+        hub.clients.fetch_sub(1, Ordering::SeqCst);
+        return (StatusCode::SERVICE_UNAVAILABLE, "Too many phones connected").into_response();
+    }
+    ctx.actions.clients_changed(hub.client_count());
+    ws.max_message_size(MAX_WS_MESSAGE_BYTES)
+        .on_upgrade(move |socket| async move {
+            ws_session(socket, ctx.clone()).await;
+            let hub = &ctx.status.hub;
+            hub.clients.fetch_sub(1, Ordering::SeqCst);
+            ctx.actions.clients_changed(hub.client_count());
+        })
+        .into_response()
+}
+
+async fn ws_session(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
+    let hub = &ctx.status.hub;
+    let mut events = hub.tx.subscribe();
+    let mut token_gen = ctx.status.token_generation.subscribe();
+    token_gen.borrow_and_update();
+    let (reply_tx, mut replies) = mpsc::channel::<ServerMsg>(32);
+
+    let initial = hub.snapshot.lock().messages(now_ms());
+    for msg in initial {
+        if send_msg(&mut socket, &msg).await.is_err() {
+            return;
+        }
+    }
+
+    let mut ping = tokio::time::interval(WS_PING_EVERY);
+    ping.tick().await;
+    loop {
+        tokio::select! {
+            event = events.recv() => match event {
+                Ok(text) => {
+                    if socket.send(Message::Text(text.as_ref().into())).await.is_err() {
+                        return;
+                    }
+                }
+                Err(broadcast::error::RecvError::Lagged(_)) => {
+                    let catch_up = hub.snapshot.lock().messages(now_ms());
+                    for msg in catch_up {
+                        if send_msg(&mut socket, &msg).await.is_err() {
+                            return;
+                        }
+                    }
+                }
+                Err(broadcast::error::RecvError::Closed) => return,
+            },
+            Some(reply) = replies.recv() => {
+                if send_msg(&mut socket, &reply).await.is_err() {
+                    return;
+                }
+            }
+            incoming = socket.recv() => match incoming {
+                Some(Ok(Message::Text(text))) => handle_incoming(&ctx, text.as_str(), &reply_tx),
+                Some(Ok(Message::Close(_))) | None | Some(Err(_)) => return,
+                Some(Ok(_)) => {}
+            },
+            _ = token_gen.changed() => {
+                let _ = socket.send(Message::Close(None)).await;
+                return;
+            }
+            _ = ping.tick() => {
+                if socket.send(Message::Ping(Vec::new().into())).await.is_err() {
+                    return;
+                }
+            }
         }
     }
 }
 
-pub fn get_remote_info(port: u16, token: &str) -> RemoteInfo {
-    let ip = get_local_ip();
-    let url = format!("http://{}:{}/?t={}", ip, port, token);
-    let qr_svg = generate_qr_svg(&url);
-
-    RemoteInfo {
-        ip,
-        port,
-        url,
-        qr_svg,
-    }
+async fn send_msg(socket: &mut WebSocket, msg: &ServerMsg) -> Result<(), axum::Error> {
+    let text = serde_json::to_string(msg).unwrap_or_default();
+    socket.send(Message::Text(text.into())).await
 }
 
-pub fn start_remote_server(app_handle: AppHandle, port: u16, token: String, status: Arc<RemoteServerStatus>) {
-    let token: Arc<str> = Arc::from(token);
-    let connection_limiter = Arc::new(tokio::sync::Semaphore::new(MAX_CONNECTIONS));
-
-    tauri::async_runtime::spawn(async move {
-        let addr = SocketAddr::from(([0, 0, 0, 0], port));
-        let listener = match TcpListener::bind(addr).await {
-            Ok(l) => {
-                log::info!("[YTMD Remote] Server listening on http://0.0.0.0:{}", port);
-                status.mark_bound(port);
-                l
-            }
-            Err(e) => {
-                log::warn!("[YTMD Remote] Failed to bind port {}: {}", port, e);
-                return;
-            }
+fn handle_incoming(ctx: &Arc<ServerCtx>, text: &str, reply_tx: &mpsc::Sender<ServerMsg>) {
+    let msg: ClientMsg = match serde_json::from_str(text) {
+        Ok(m) => m,
+        Err(e) => {
+            log::debug!("[YTMD Remote] Ignoring a malformed phone message: {e}");
+            return;
+        }
+    };
+    let id = msg.id();
+    let actions = ctx.actions.clone();
+    let reply_tx = reply_tx.clone();
+    // Page round trips (search, queue edits) take a while; the session keeps
+    // streaming meanwhile.
+    tokio::spawn(async move {
+        let outcome = actions.handle(msg).await;
+        let reply = match (outcome, id) {
+            (Ok(Some(msg)), _) => Some(msg),
+            (Ok(None), Some(id)) => Some(ServerMsg::Result { id, ok: true, error: None }),
+            (Err(error), Some(id)) => Some(ServerMsg::Result { id, ok: false, error: Some(error) }),
+            (_, None) => None,
         };
-
-        loop {
-            if let Ok((mut socket, _)) = listener.accept().await {
-                let permit = match try_acquire_connection_permit(&connection_limiter) {
-                    Some(p) => p,
-                    None => {
-                        // Fan-out cap reached: reject immediately instead of
-                        // spawning an unbounded number of tasks.
-                        let _ = socket
-                            .write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
-                            .await;
-                        continue;
-                    }
-                };
-                let handle = app_handle.clone();
-                let token = token.clone();
-                tokio::spawn(async move {
-                    let _permit = permit; // held for the task's lifetime, freeing a slot on drop
-                    // Bounded: an accepted connection that never sends a
-                    // request (deliberately or by a bad client) would
-                    // otherwise leak this task and its socket forever, since
-                    // the read below had no timeout.
-                    let read_result =
-                        tokio::time::timeout(std::time::Duration::from_secs(10), read_http_request(&mut socket)).await;
-                    let buf = match read_result {
-                        Ok(Ok(buf)) => buf,
-                        Ok(Err(RequestReadError::TooLarge)) => {
-                            let body = "Payload Too Large";
-                            let response = format!(
-                                "HTTP/1.1 413 Payload Too Large\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
-                                body.len(),
-                                body
-                            );
-                            let _ = socket.write_all(response.as_bytes()).await;
-                            return;
-                        }
-                        _ => return,
-                    };
-                    {
-                        let request_str = String::from_utf8_lossy(&buf);
-                        let first_line = request_str.lines().next().unwrap_or("");
-                        let parts: Vec<&str> = first_line.split_whitespace().collect();
-
-                        if parts.is_empty() {
-                            return;
-                        }
-
-                        let method = parts[0];
-                        let path = parts.get(1).copied().unwrap_or("/");
-
-                        if !token_ok(path, &token) {
-                            write_forbidden(&mut socket).await;
-                            return;
-                        }
-
-                        // Direct Bridge Invoke API for Preload Scripts
-                        if method == "POST" && path.starts_with("/api/invoke") {
-                            let mut result = serde_json::Value::Null;
-
-                            // Parse request JSON body
-                            if let Some(body_start) = request_str.find("\r\n\r\n") {
-                                let body_str = &request_str[body_start + 4..];
-                                if let Ok(req) = serde_json::from_str::<InvokeRequest>(body_str.trim()) {
-                                    match req.cmd.as_str() {
-                                        "get_config" => {
-                                            if let Some(state) = handle.try_state::<Arc<crate::AppState>>() {
-                                                let cfg = state.config_manager.load();
-                                                result = serde_json::to_value(cfg).unwrap_or(serde_json::Value::Null);
-                                            }
-                                        }
-                                        "get_remote_info" => {
-                                            let info = get_remote_info(port, &token);
-                                            result = serde_json::to_value(info).unwrap_or(serde_json::Value::Null);
-                                        }
-                                        "toggle_settings_window" => {
-                                            if let Some(w) = handle.get_webview_window("settings") {
-                                                if w.is_visible().unwrap_or(false) {
-                                                    let _ = w.hide();
-                                                } else {
-                                                    let _ = w.show();
-                                                    let _ = w.set_focus();
-                                                }
-                                            }
-                                            result = serde_json::json!({ "success": true });
-                                        }
-                                        "toggle_mini_player" => {
-                                            if let Some(w) = handle.get_webview_window("miniplayer") {
-                                                if w.is_visible().unwrap_or(false) {
-                                                    let _ = w.hide();
-                                                } else {
-                                                    let _ = w.show();
-                                                    let _ = w.set_focus();
-                                                }
-                                            }
-                                            result = serde_json::json!({ "success": true });
-                                        }
-                                        "toggle_local_library_window" => {
-                                            if let Some(w) = handle.get_webview_window("local") {
-                                                if w.is_visible().unwrap_or(false) {
-                                                    let _ = w.hide();
-                                                } else {
-                                                    let _ = w.show();
-                                                    let _ = w.set_focus();
-                                                }
-                                            }
-                                            result = serde_json::json!({ "success": true });
-                                        }
-                                        "toggle_sync_window" => {
-                                            if let Some(w) = handle.get_webview_window("sync") {
-                                                if w.is_visible().unwrap_or(false) {
-                                                    let _ = w.hide();
-                                                } else {
-                                                    let _ = w.show();
-                                                    let _ = w.set_focus();
-                                                }
-                                            }
-                                            result = serde_json::json!({ "success": true });
-                                        }
-                                        "update_track_info" => {
-                                            if let Some(args_val) = req.args {
-                                                if let Ok(wrapper) = serde_json::from_value::<UpdateTrackWrapper>(args_val) {
-                                                    if let Some(state) = handle.try_state::<Arc<crate::AppState>>() {
-                                                        let _ = crate::commands::update_track_info(
-                                                            handle.clone(),
-                                                            state,
-                                                            wrapper.track,
-                                                        );
-                                                    }
-                                                }
-                                            }
-                                            result = serde_json::json!({ "success": true });
-                                        }
-                                        "notify_track_change" => {
-                                            if let Some(args_val) = req.args {
-                                                #[derive(Deserialize)]
-                                                struct NotifyArgs {
-                                                    title: String,
-                                                    artist: String,
-                                                }
-                                                if let Ok(p) = serde_json::from_value::<NotifyArgs>(args_val) {
-                                                    if let Some(state) = handle.try_state::<Arc<crate::AppState>>() {
-                                                        let _ = crate::commands::notify_track_change(
-                                                            handle.clone(),
-                                                            state,
-                                                            p.title,
-                                                            p.artist,
-                                                        );
-                                                    }
-                                                }
-                                            }
-                                            result = serde_json::json!({ "success": true });
-                                        }
-                                        "fetch_lyrics" => {
-                                            if let Some(args_val) = req.args {
-                                                #[derive(Deserialize)]
-                                                struct LyricsArgs {
-                                                    artist: String,
-                                                    title: String,
-                                                    #[serde(rename = "albumName")]
-                                                    album_name: Option<String>,
-                                                    duration: Option<f64>,
-                                                }
-                                                if let Ok(lr) = serde_json::from_value::<LyricsArgs>(args_val) {
-                                                    if let Ok(data) = crate::commands::fetch_lyrics(
-                                                        lr.artist,
-                                                        lr.title,
-                                                        lr.album_name,
-                                                        lr.duration,
-                                                    )
-                                                    .await
-                                                    {
-                                                        result = data;
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        "download_track" => {
-                                            if let Some(args_val) = req.args {
-                                                if let Ok(dr) = serde_json::from_value::<DownloadRequestWrapper>(args_val) {
-                                                    if let Some(state) = handle.try_state::<Arc<crate::AppState>>() {
-                                                        let _ = crate::commands::download_track(
-                                                            handle.clone(),
-                                                            state,
-                                                            dr.request,
-                                                        )
-                                                        .await;
-                                                    }
-                                                }
-                                            }
-                                            result = serde_json::json!({ "success": true });
-                                        }
-                                        _ => {}
-                                    }
-                                }
-                            }
-
-                            let res_body = serde_json::json!({
-                                "status": "ok",
-                                "result": result
-                            }).to_string();
-
-                            let response = format!(
-                                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
-                                res_body.len(),
-                                res_body
-                            );
-                            let _ = socket.write_all(response.as_bytes()).await;
-                            return;
-                        }
-
-                        if method == "POST" && path.starts_with("/api/command") {
-                            let cmd = query_param(path, "cmd").unwrap_or_else(|| "play_pause".to_string());
-                            let _ = handle.emit("player-command", cmd);
-                            let response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"status\":\"ok\"}";
-                            let _ = socket.write_all(response.as_bytes()).await;
-                        } else if method == "POST" && path.starts_with("/api/volume") {
-                            if let Some(val_str) = query_param(path, "v") {
-                                if let Ok(vol) = val_str.parse::<f64>() {
-                                    let _ = handle.emit("player-volume", vol);
-                                }
-                            }
-                            let response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"status\":\"ok\"}";
-                            let _ = socket.write_all(response.as_bytes()).await;
-                        } else if method == "POST" && path.starts_with("/api/seek") {
-                            if let Some(val_str) = query_param(path, "s") {
-                                if let Ok(pos) = val_str.parse::<f64>() {
-                                    let _ = handle.emit("player-seek", pos);
-                                }
-                            }
-                            let response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"status\":\"ok\"}";
-                            let _ = socket.write_all(response.as_bytes()).await;
-                        } else {
-                            // Serve Mobile Remote Web App
-                            let html = get_mobile_html(&token);
-                            let response = format!(
-                                "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\n\r\n{}",
-                                html.len(),
-                                html
-                            );
-                            let _ = socket.write_all(response.as_bytes()).await;
-                        }
-                    }
-                });
-            }
+        if let Some(reply) = reply {
+            let _ = reply_tx.send(reply).await;
         }
     });
 }
 
-fn get_mobile_html(token: &str) -> String {
-    format!(
-        r#"<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>YTMD Web Remote</title>
-  <style>
-    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-    body {{
-      background: #09090b;
-      color: #fafafa;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      display: flex;
-      flex-direction: column;
-      height: 100vh;
-      justify-content: space-between;
-      padding: 24px;
-      user-select: none;
-    }}
-    .header {{ text-align: center; }}
-    .badge {{
-      display: inline-block;
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 0.05em;
-      background: #27272a;
-      color: #38bdf8;
-      padding: 4px 10px;
-      border-radius: 9999px;
-      margin-bottom: 8px;
-    }}
-    .title {{ font-size: 20px; font-weight: 700; }}
-    .controls {{ display: flex; flex-direction: column; gap: 16px; align-items: center; width: 100%; max-width: 320px; margin: 0 auto; }}
-    .btn-row {{ display: flex; gap: 16px; justify-content: center; width: 100%; }}
-    .btn {{
-      background: #18181b;
-      border: 1px solid #27272a;
-      color: #fafafa;
-      padding: 16px 20px;
-      border-radius: 12px;
-      font-size: 16px;
-      font-weight: 600;
-      flex: 1;
-      text-align: center;
-      cursor: pointer;
-    }}
-    .btn-primary {{ background: #38bdf8; color: #09090b; border: none; font-size: 20px; }}
-    .slider-box {{ width: 100%; margin-top: 12px; }}
-    .slider-label {{ font-size: 12px; color: #a1a1aa; margin-bottom: 6px; display: block; }}
-    input[type=range] {{ width: 100%; accent-color: #38bdf8; }}
-  </style>
-</head>
-<body>
-  <div class="header">
-    <div class="badge">YTMD WI-FI REMOTE</div>
-    <div class="title">Now Playing Controller</div>
-  </div>
-  <div class="controls">
-    <div class="btn-row">
-      <button class="btn" onclick="sendCmd('previous')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg> Prev
-      </button>
-      <button class="btn btn-primary" onclick="sendCmd('play_pause')">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> Play / Pause
-      </button>
-      <button class="btn" onclick="sendCmd('next')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m6 18 8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg> Next
-      </button>
-    </div>
-    <div class="btn-row">
-      <button class="btn" onclick="sendCmd('like')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg> Like
-      </button>
-      <button class="btn" onclick="sendCmd('dislike')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3"/></svg> Dislike
-      </button>
-      <button class="btn" onclick="sendCmd('mute')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4V5z"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg> Mute
-      </button>
-    </div>
-    <div class="slider-box">
-      <span class="slider-label">Volume</span>
-      <input type="range" min="0" max="1" step="0.05" value="1" oninput="sendVol(this.value)">
-    </div>
-  </div>
-  <div style="text-align: center; font-size: 12px; color: #52525b;">Connected via Local Area Network</div>
-  <script>
-    const TOKEN = "{token}";
-    function sendCmd(cmd) {{ fetch('/api/command?cmd=' + encodeURIComponent(cmd) + '&t=' + TOKEN, {{ method: 'POST' }}); }}
-    function sendVol(v) {{ fetch('/api/volume?v=' + encodeURIComponent(v) + '&t=' + TOKEN, {{ method: 'POST' }}); }}
-  </script>
-</body>
-</html>"#,
-        token = token
-    )
+fn router(ctx: Arc<ServerCtx>) -> Router {
+    use tower::limit::ConcurrencyLimitLayer;
+    use tower_http::limit::RequestBodyLimitLayer;
+    use tower_http::timeout::TimeoutLayer;
+
+    Router::new()
+        .route("/ws", get(ws_upgrade))
+        .fallback(static_files)
+        .layer(middleware::from_fn_with_state(ctx.clone(), guard))
+        .layer(RequestBodyLimitLayer::new(MAX_BODY_BYTES))
+        .layer(TimeoutLayer::with_status_code(StatusCode::REQUEST_TIMEOUT, REQUEST_TIMEOUT))
+        .layer(ConcurrencyLimitLayer::new(MAX_CONCURRENT_REQUESTS))
+        .with_state(ctx)
+}
+
+/// The page action a phone message becomes (`remote-action` event payload).
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum PageAction {
+    Command { command: &'static str },
+    Seek { position_secs: f64 },
+    Volume { volume: f64 },
+    QueueJump { item_id: String },
+    QueueMove { item_id: String, to_index: usize },
+    QueueRemove { item_id: String },
+    Search { query: String },
+    Play { video_id: String },
+    Enqueue { video_id: String, next: bool },
+}
+
+#[derive(Clone, Serialize)]
+struct PageActionEvent {
+    id: Option<u32>,
+    action: PageAction,
+}
+
+/// The app's `RemoteActions`: YTM page actions go out as `remote-action`
+/// events; Listen Together actions go straight to the room, whose host
+/// rules then apply as for any other guest request.
+struct AppActions {
+    app: AppHandle,
+    status: Arc<RemoteServerStatus>,
+}
+
+impl AppActions {
+    fn fire(&self, action: PageAction) -> Result<Option<ServerMsg>, String> {
+        self.app
+            .emit("remote-action", PageActionEvent { id: None, action })
+            .map_err(|e| e.to_string())?;
+        Ok(None)
+    }
+
+    async fn request(app: &AppHandle, status: &RemoteServerStatus, action: PageAction) -> PageReply {
+        let hub = &status.hub;
+        let (id, rx) = hub.begin_request();
+        if let Err(e) = app.emit("remote-action", PageActionEvent { id: Some(id), action }) {
+            hub.resolve(id, Err(e.to_string()));
+        }
+        hub.await_reply(id, rx).await
+    }
+
+    fn state(&self) -> Arc<crate::AppState> {
+        self.app.state::<Arc<crate::AppState>>().inner().clone()
+    }
+
+    fn sink(&self) -> Arc<dyn crate::sync_room::SyncEventSink> {
+        Arc::new(self.app.clone())
+    }
+}
+
+impl RemoteActions for AppActions {
+    fn handle(&self, msg: ClientMsg) -> BoxFuture<Result<Option<ServerMsg>, String>> {
+        let state = self.state();
+        let in_room = state.sync_room.get_room_state().is_some();
+        let app = self.app.clone();
+        let status = self.status.clone();
+        let sink = self.sink();
+
+        let now: Result<Option<ServerMsg>, String> = match msg {
+            ClientMsg::Cmd { command, .. } => self.fire(PageAction::Command { command: command.as_page_command() }),
+            ClientMsg::Seek { position_secs, .. } => {
+                if !position_secs.is_finite() || position_secs < 0.0 {
+                    return Box::pin(async { Err("remote.error.invalid".to_string()) });
+                }
+                self.fire(PageAction::Seek { position_secs })
+            }
+            ClientMsg::Volume { volume, .. } => {
+                if !volume.is_finite() {
+                    return Box::pin(async { Err("remote.error.invalid".to_string()) });
+                }
+                self.fire(PageAction::Volume { volume: volume.clamp(0.0, 1.0) })
+            }
+            ClientMsg::Play { video_id, .. } => {
+                if !crate::sync_room::is_video_id(&video_id) {
+                    return Box::pin(async { Err("remote.error.invalid".to_string()) });
+                }
+                self.fire(PageAction::Play { video_id })
+            }
+            ClientMsg::React { emoji, .. } => {
+                if !in_room {
+                    Err("remote.error.noRoom".into())
+                } else if emoji.is_empty() || emoji.chars().count() > MAX_EMOJI_CHARS {
+                    Err("remote.error.invalid".into())
+                } else {
+                    crate::sync_room::send_reaction(&state.sync_room, &sink, &emoji).map(|_| None)
+                }
+            }
+            ClientMsg::VoteSkip { .. } => {
+                if in_room {
+                    crate::sync_room::vote_skip(&state.sync_room, &sink).map(|_| None)
+                } else {
+                    Err("remote.error.noRoom".into())
+                }
+            }
+            ClientMsg::QueueJump { item_id, .. } if in_room => {
+                crate::sync_room::queue_play(&state.sync_room, &sink, &item_id).map(|_| None)
+            }
+            ClientMsg::QueueRemove { item_id, .. } if in_room => {
+                crate::sync_room::queue_remove(&state.sync_room, &sink, &item_id).map(|_| None)
+            }
+            ClientMsg::QueueMove { item_id, to_index, .. } if in_room => {
+                crate::sync_room::queue_move(&state.sync_room, &sink, &item_id, to_index).map(|_| None)
+            }
+            ClientMsg::Enqueue { video_id, next, .. } => {
+                if !crate::sync_room::is_video_id(&video_id) {
+                    return Box::pin(async { Err("remote.error.invalid".to_string()) });
+                }
+                if in_room {
+                    return Box::pin(async move {
+                        crate::commands::add_to_sync_queue(app, &state, &video_id, next).await.map(|_| None)
+                    });
+                }
+                return Box::pin(async move {
+                    Self::request(&app, &status, PageAction::Enqueue { video_id, next }).await.map(|_| None)
+                });
+            }
+            ClientMsg::QueueJump { item_id, .. } => {
+                return Box::pin(async move {
+                    Self::request(&app, &status, PageAction::QueueJump { item_id }).await.map(|_| None)
+                });
+            }
+            ClientMsg::QueueRemove { item_id, .. } => {
+                return Box::pin(async move {
+                    Self::request(&app, &status, PageAction::QueueRemove { item_id }).await.map(|_| None)
+                });
+            }
+            ClientMsg::QueueMove { item_id, to_index, .. } => {
+                return Box::pin(async move {
+                    Self::request(&app, &status, PageAction::QueueMove { item_id, to_index }).await.map(|_| None)
+                });
+            }
+            ClientMsg::Search { id, query } => {
+                let query: String = query.trim().chars().take(MAX_QUERY_CHARS).collect();
+                if query.is_empty() {
+                    return Box::pin(async move { Ok(Some(ServerMsg::SearchResults { id, results: vec![] })) });
+                }
+                return Box::pin(async move {
+                    let data = Self::request(&app, &status, PageAction::Search { query }).await?;
+                    let results: Vec<SearchResult> = serde_json::from_value(data).map_err(|e| e.to_string())?;
+                    Ok(Some(ServerMsg::SearchResults { id, results }))
+                });
+            }
+        };
+        Box::pin(async move { now })
+    }
+
+    fn clients_changed(&self, count: usize) {
+        let _ = self.app.emit("remote-clients", count);
+    }
+}
+
+/// Mirrors app events into the phone hub.
+fn follow_app_events(app: &AppHandle, status: &Arc<RemoteServerStatus>) {
+    let s = status.clone();
+    app.listen("track-changed", move |e| {
+        if let Ok(track) = serde_json::from_str(e.payload()) {
+            s.hub.on_track(track);
+        }
+    });
+    let s = status.clone();
+    app.listen("lyrics-changed", move |e| {
+        if let Ok(lyrics) = serde_json::from_str::<Value>(e.payload()) {
+            s.hub.on_lyrics(lyrics);
+        }
+    });
+    let s = status.clone();
+    app.listen("sync-room-updated", move |e| {
+        if let Ok(room) = serde_json::from_str::<crate::sync_room::RoomState>(e.payload()) {
+            s.hub.on_room(Some(&room));
+        }
+    });
+    let s = status.clone();
+    app.listen("sync-room-left", move |_| s.hub.on_room(None));
+    let s = status.clone();
+    app.listen("sync-reaction", move |e| {
+        if let Ok(r) = serde_json::from_str::<crate::sync_room::ReactionPayload>(e.payload()) {
+            s.hub.on_reaction(r.from, r.emoji);
+        }
+    });
+}
+
+async fn serve(listener: tokio::net::TcpListener, ctx: Arc<ServerCtx>) {
+    let app = router(ctx).into_make_service_with_connect_info::<SocketAddr>();
+    if let Err(e) = axum::serve(listener, app).await {
+        log::warn!("[YTMD Remote] Server stopped: {e}");
+    }
+}
+
+pub fn start_remote_server(app_handle: AppHandle, port: u16, status: Arc<RemoteServerStatus>) {
+    follow_app_events(&app_handle, &status);
+    if let Some(state) = app_handle.try_state::<Arc<crate::AppState>>() {
+        status.hub.on_room(state.sync_room.get_room_state().as_ref());
+    }
+    let actions: Arc<dyn RemoteActions> = Arc::new(AppActions { app: app_handle, status: status.clone() });
+
+    tauri::async_runtime::spawn(async move {
+        let addr = SocketAddr::from(([0, 0, 0, 0], port));
+        let listener = match tokio::net::TcpListener::bind(addr).await {
+            Ok(l) => {
+                log::info!("[YTMD Remote] Server listening on http://0.0.0.0:{port}");
+                status.mark_bound(port);
+                l
+            }
+            Err(e) => {
+                log::warn!("[YTMD Remote] Failed to bind port {port}: {e}");
+                return;
+            }
+        };
+        serve(listener, Arc::new(ServerCtx { status, port, actions })).await;
+    });
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures_util::{SinkExt, StreamExt};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     #[test]
     fn test_get_local_ip_returns_valid_ip() {
-        let ip = get_local_ip();
-        assert!(!ip.is_empty());
+        assert!(!get_local_ip().is_empty());
     }
 
     #[test]
     fn test_generate_qr_svg() {
         let svg = generate_qr_svg("http://192.168.1.100:9863");
-        assert!(svg.contains("<svg"));
-        assert!(svg.contains("</svg>"));
+        assert!(svg.contains("<svg") && svg.contains("</svg>"));
     }
 
     #[test]
     fn test_remote_availability() {
         assert_eq!(remote_availability(false, None), Err(REMOTE_OFF_ERROR.to_string()));
-        // Disabled wins even if something claimed a port.
         assert_eq!(remote_availability(false, Some(9863)), Err(REMOTE_OFF_ERROR.to_string()));
         assert_eq!(remote_availability(true, Some(9863)), Ok(9863));
         assert!(remote_availability(true, None).unwrap_err().contains("isn't running"));
@@ -695,29 +1055,25 @@ mod tests {
 
     #[test]
     fn test_remote_status_reports_bound_port() {
-        let status = RemoteServerStatus::new(true);
+        let status = RemoteServerStatus::new(true, None);
         assert!(status.serving_port().is_err());
         status.mark_bound(9870);
         assert_eq!(status.serving_port(), Ok(9870));
-        assert_eq!(RemoteServerStatus::new(false).serving_port(), Err(REMOTE_OFF_ERROR.to_string()));
+        assert_eq!(RemoteServerStatus::new(false, None).serving_port(), Err(REMOTE_OFF_ERROR.to_string()));
     }
 
     #[test]
     fn test_get_remote_info() {
         let info = get_remote_info(9863, "test-token");
         assert_eq!(info.port, 9863);
-        assert!(info.url.contains("9863"));
-        assert!(info.url.contains("t=test-token"));
+        assert!(info.url.contains("9863") && info.url.contains("t=test-token"));
     }
 
     #[test]
     fn test_generate_token_is_random_and_long_enough() {
-        let a = generate_token();
-        let b = generate_token();
-        assert_eq!(a.len(), 32);
-        assert_eq!(b.len(), 32);
+        let (a, b) = (generate_token(), generate_token());
+        assert!(is_well_formed_token(&a) && is_well_formed_token(&b));
         assert_ne!(a, b, "two generated tokens collided — RNG is broken");
-        assert!(a.chars().all(|c| c.is_ascii_alphanumeric()));
     }
 
     #[test]
@@ -725,114 +1081,307 @@ mod tests {
         assert!(constant_time_eq("abc123", "abc123"));
         assert!(!constant_time_eq("abc123", "abc124"));
         assert!(!constant_time_eq("abc123", "abc12"));
-        assert!(!constant_time_eq("", "a"));
         assert!(constant_time_eq("", ""));
     }
 
     #[test]
-    fn test_query_param_extracts_value() {
-        assert_eq!(
-            query_param("/api/command?cmd=next&t=abc", "cmd"),
-            Some("next".to_string())
-        );
-        assert_eq!(
-            query_param("/api/command?cmd=next&t=abc", "t"),
-            Some("abc".to_string())
-        );
-        assert_eq!(query_param("/api/command?cmd=next", "t"), None);
-        assert_eq!(query_param("/", "t"), None);
+    fn test_token_is_kept_across_restarts_and_owner_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("remote_token");
+        let first = load_or_create_token(&path);
+        assert!(is_well_formed_token(&first));
+        assert_eq!(load_or_create_token(&path), first, "a restart must keep the paired phones working");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600);
+        }
+
+        std::fs::write(&path, "garbage").unwrap();
+        let replaced = load_or_create_token(&path);
+        assert!(is_well_formed_token(&replaced) && replaced != first);
     }
 
     #[test]
-    fn test_token_ok_rejects_missing_or_wrong_token() {
-        let expected = "secret-token";
-        assert!(token_ok("/?t=secret-token", expected));
-        assert!(!token_ok("/?t=wrong-token", expected));
-        assert!(!token_ok("/", expected));
-        assert!(!token_ok("/api/invoke", expected));
+    fn test_regenerate_replaces_and_saves_the_token() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("remote_token");
+        let status = RemoteServerStatus::new(true, Some(path.clone()));
+        let old = status.token();
+        let generation = status.token_generation.subscribe();
+        let new = status.regenerate_token().unwrap();
+        assert_ne!(old, new);
+        assert!(!status.token_matches(&old));
+        assert!(status.token_matches(&new));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), new);
+        assert!(generation.has_changed().unwrap(), "open sessions must be told to close");
     }
 
     #[test]
-    fn test_mobile_html_embeds_token_for_same_origin_fetches() {
-        let html = get_mobile_html("secret-token");
-        assert!(html.contains("const TOKEN = \"secret-token\";"));
-        assert!(!html.contains("Access-Control-Allow-Origin"));
+    fn test_host_allowed_only_for_ip_literals_and_localhost_on_our_port() {
+        assert!(host_allowed("192.168.1.20:9863", 9863));
+        assert!(host_allowed("10.0.0.5:9863", 9863));
+        assert!(host_allowed("localhost:9863", 9863));
+        assert!(host_allowed("127.0.0.1:9863", 9863));
+        assert!(host_allowed("[fe80::1]:9863", 9863));
+        // DNS rebinding arrives under the attacker's name.
+        assert!(!host_allowed("evil.example:9863", 9863));
+        assert!(!host_allowed("192.168.1.20.nip.io:9863", 9863));
+        assert!(!host_allowed("192.168.1.20:80", 9863));
+        assert!(!host_allowed("192.168.1.20", 9863));
+        assert!(!host_allowed("", 9863));
     }
 
     #[test]
-    fn test_connection_permit_enforces_cap() {
-        let limiter = Arc::new(tokio::sync::Semaphore::new(2));
-        let p1 = try_acquire_connection_permit(&limiter).expect("first permit should succeed");
-        let p2 = try_acquire_connection_permit(&limiter).expect("second permit should succeed");
+    fn test_cookie_value_parsing() {
+        let mut h = HeaderMap::new();
+        h.insert(header::COOKIE, HeaderValue::from_static("a=1; ytmd_remote=abc; b=2"));
+        assert_eq!(cookie_value(&h, COOKIE_NAME).as_deref(), Some("abc"));
+        assert_eq!(cookie_value(&h, "missing"), None);
+    }
+
+    #[test]
+    fn test_room_view_and_queue_from_room_state() {
+        use crate::sync_room::{MemberRole, QueueItem, RoomMember, RoomState};
+        let room = RoomState {
+            room_code: "YTMD-SECRET".into(),
+            is_host: false,
+            current_user_id: "m2".into(),
+            members: vec![
+                RoomMember { id: "m1".into(), nickname: "Host".into(), is_host: true, joined_at_ms: 1, role: MemberRole::Host, client_hash: "h".into() },
+                RoomMember { id: "m2".into(), nickname: "Me".into(), is_host: false, joined_at_ms: 2, role: MemberRole::Listener, client_hash: "g".into() },
+            ],
+            playback_state: None,
+            default_role: MemberRole::Dj,
+            require_approval: false,
+            queue: vec![QueueItem {
+                id: "q1".into(),
+                video_id: "aaaaaaaaaaa".into(),
+                title: "Maniac".into(),
+                artist: "Carpenter Brut".into(),
+                added_by: "Host".into(),
+                added_by_id: "m1".into(),
+            }],
+            skip_votes: vec!["m1".into()],
+            banned: vec![],
+            pending: vec![],
+            reconnecting: false,
+        };
+        let hub = RemoteHub::default();
+        hub.on_room(Some(&room));
+        let snap = hub.snapshot.lock();
+        let view = snap.room.clone().unwrap();
+        assert_eq!(view.members[1].role, "listener");
+        assert_eq!(view.votes_needed, 2);
+        let text = serde_json::to_string(&view).unwrap();
+        assert!(!text.contains("YTMD-SECRET"), "the room code (also its key) never goes to phones");
+        let queue = snap.queue().unwrap();
+        assert!(queue.shared);
+        assert_eq!(queue.items[0].id, "q1");
+    }
+
+    #[test]
+    fn test_player_state_uses_the_newer_position_reading() {
+        let hub = RemoteHub::default();
+        hub.on_track(crate::discord_rpc::TrackPayload {
+            title: "Maniac".into(),
+            artist: "Carpenter Brut".into(),
+            album: None,
+            cover_url: None,
+            duration_secs: 300,
+            current_time_secs: 10,
+            is_playing: true,
+            video_id: Some("aaaaaaaaaaa".into()),
+            sampled_at_ms: Some(1_000),
+        });
+        hub.publish("state", serde_json::json!({ "playing": false, "position_secs": 42.0, "sampled_at_ms": 2_000, "volume": 0.4, "like": "like", "repeat": "one" }))
+            .unwrap();
+        let state = hub.snapshot.lock().player_state(3_000);
+        assert_eq!(state.position_secs, 42.0);
+        assert_eq!(state.sampled_at_ms, 2_000);
+        assert!(!state.playing);
+        assert_eq!(state.like, LikeStatus::Like);
+        assert_eq!(state.repeat, RepeatMode::One);
+        assert_eq!(state.track.unwrap().title, "Maniac");
+        assert!(hub.publish("bogus", Value::Null).is_err());
+    }
+
+    #[tokio::test]
+    async fn test_page_request_times_out_cleanly_and_resolves() {
+        let hub = RemoteHub::default();
+        let (id, rx) = hub.begin_request();
+        hub.resolve(id, Ok(serde_json::json!([1])));
+        assert_eq!(hub.await_reply(id, rx).await, Ok(serde_json::json!([1])));
+        hub.resolve(999, Ok(Value::Null)); // unknown id: ignored
+        assert!(hub.pending.lock().is_empty());
+    }
+
+    // ---- a real server on a loopback port ----
+
+    struct EchoActions;
+    impl RemoteActions for EchoActions {
+        fn handle(&self, msg: ClientMsg) -> BoxFuture<Result<Option<ServerMsg>, String>> {
+            Box::pin(async move {
+                match msg {
+                    ClientMsg::Search { id, query } => Ok(Some(ServerMsg::SearchResults {
+                        id,
+                        results: vec![SearchResult { video_id: "aaaaaaaaaaa".into(), title: query, subtitle: String::new(), thumbnail: None }],
+                    })),
+                    ClientMsg::VoteSkip { .. } => Err("remote.error.noRoom".into()),
+                    _ => Ok(None),
+                }
+            })
+        }
+    }
+
+    async fn spawn_server() -> (u16, Arc<RemoteServerStatus>) {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let status = Arc::new(RemoteServerStatus::new(true, None));
+        let ctx = Arc::new(ServerCtx { status: status.clone(), port, actions: Arc::new(EchoActions) });
+        tokio::spawn(serve(listener, ctx));
+        (port, status)
+    }
+
+    /// One raw HTTP/1.1 request; returns (status, headers text, body).
+    async fn http(port: u16, method: &str, path: &str, host: &str, extra: &str) -> (u16, String, String) {
+        let mut s = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        let req = format!("{method} {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\nContent-Length: 0\r\n{extra}\r\n");
+        s.write_all(req.as_bytes()).await.unwrap();
+        let mut buf = Vec::new();
+        s.read_to_end(&mut buf).await.unwrap();
+        let text = String::from_utf8_lossy(&buf).to_string();
+        let (head, body) = text.split_once("\r\n\r\n").unwrap_or((&text, ""));
+        let status = head.split_whitespace().nth(1).and_then(|c| c.parse().ok()).unwrap_or(0);
+        (status, head.to_string(), body.to_string())
+    }
+
+    #[tokio::test]
+    async fn test_token_is_exchanged_for_a_strict_httponly_cookie() {
+        let (port, status) = spawn_server().await;
+        let host = format!("127.0.0.1:{port}");
+        let (code, head, _) = http(port, "GET", &format!("/?t={}", status.token()), &host, "").await;
+        assert_eq!(code, 303);
+        let head = head.to_lowercase();
+        assert!(head.contains("location: /\r\n"), "{head}");
+        assert!(head.contains("set-cookie: ytmd_remote="));
+        assert!(head.contains("httponly") && head.contains("samesite=strict"));
+
+        let (code, _, _) = http(port, "GET", "/?t=wrongwrongwrongwrongwrongwrong12", &host, "").await;
+        assert_eq!(code, 403);
+        let (code, _, _) = http(port, "GET", "/", &host, "").await;
+        assert_eq!(code, 403, "no cookie, no page");
+        let cookie = format!("Cookie: {COOKIE_NAME}={}\r\n", status.token());
+        let (code, head, _) = http(port, "GET", "/", &host, &cookie).await;
+        assert_eq!(code, 200);
+        assert!(head.to_lowercase().contains("content-security-policy"));
+    }
+
+    #[tokio::test]
+    async fn test_foreign_host_is_refused_even_with_the_token() {
+        let (port, status) = spawn_server().await;
+        let cookie = format!("Cookie: {COOKIE_NAME}={}\r\n", status.token());
+        let (code, _, _) = http(port, "GET", "/", &format!("attacker.example:{port}"), &cookie).await;
+        assert_eq!(code, 421);
+    }
+
+    #[tokio::test]
+    async fn test_old_invoke_endpoint_is_gone() {
+        let (port, status) = spawn_server().await;
+        let host = format!("127.0.0.1:{port}");
+        let cookie = format!("Cookie: {COOKIE_NAME}={}\r\n", status.token());
+        let (code, _, _) = http(port, "POST", "/api/invoke", &host, &cookie).await;
+        assert_eq!(code, 404, "the LAN must not reach download_track/get_config any more");
+        let (code, _, _) = http(port, "POST", "/api/command?cmd=next", &host, &cookie).await;
+        assert_eq!(code, 404);
+    }
+
+    #[tokio::test]
+    async fn test_manifest_needs_no_cookie() {
+        let (port, _) = spawn_server().await;
+        let (code, _, _) = http(port, "GET", "/manifest.webmanifest", &format!("127.0.0.1:{port}"), "").await;
+        // 404 when the phone app isn't built (cargo test), never 403.
+        assert!(code == 200 || code == 404, "{code}");
+    }
+
+    async fn ws_connect(
+        port: u16,
+        cookie: Option<&str>,
+        origin: Option<&str>,
+    ) -> Result<
+        tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+        tokio_tungstenite::tungstenite::Error,
+    > {
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+        let mut req = format!("ws://127.0.0.1:{port}/ws").into_client_request().unwrap();
+        if let Some(c) = cookie {
+            req.headers_mut().insert(header::COOKIE, HeaderValue::from_str(&format!("{COOKIE_NAME}={c}")).unwrap());
+        }
+        if let Some(o) = origin {
+            req.headers_mut().insert(header::ORIGIN, HeaderValue::from_str(o).unwrap());
+        }
+        tokio_tungstenite::connect_async(req).await.map(|(ws, _)| ws)
+    }
+
+    async fn next_json(
+        ws: &mut tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+    ) -> ServerMsg {
+        loop {
+            let msg = tokio::time::timeout(Duration::from_secs(3), ws.next()).await.unwrap().unwrap().unwrap();
+            if let tokio_tungstenite::tungstenite::Message::Text(t) = msg {
+                return serde_json::from_str(t.as_str()).unwrap();
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_websocket_session_round_trip() {
+        let (port, status) = spawn_server().await;
+        assert!(ws_connect(port, None, None).await.is_err(), "no cookie, no socket");
         assert!(
-            try_acquire_connection_permit(&limiter).is_none(),
-            "a third connection must be rejected once the cap is reached"
+            ws_connect(port, Some(&status.token()), Some("http://evil.example")).await.is_err(),
+            "a socket opened by another site is refused"
         );
 
-        drop(p1);
-        let p3 = try_acquire_connection_permit(&limiter);
-        assert!(p3.is_some(), "releasing a permit should free a slot for a new connection");
+        let mut ws = ws_connect(port, Some(&status.token()), Some(&format!("http://127.0.0.1:{port}"))).await.unwrap();
+        assert_eq!(next_json(&mut ws).await, ServerMsg::Hello { version: PROTOCOL_VERSION });
+        assert!(matches!(next_json(&mut ws).await, ServerMsg::State(_)));
+        assert!(matches!(next_json(&mut ws).await, ServerMsg::Queue(_)));
+        assert!(matches!(next_json(&mut ws).await, ServerMsg::Lyrics { .. }));
+        assert!(matches!(next_json(&mut ws).await, ServerMsg::Room { room: None }));
+        assert_eq!(status.hub.client_count(), 1);
 
-        drop(p2);
-        drop(p3);
-    }
+        let send = |v: Value| tokio_tungstenite::tungstenite::Message::Text(v.to_string().into());
+        ws.send(send(serde_json::json!({ "type": "search", "id": 7, "query": "maniac" }))).await.unwrap();
+        match next_json(&mut ws).await {
+            ServerMsg::SearchResults { id, results } => {
+                assert_eq!(id, 7);
+                assert_eq!(results[0].title, "maniac");
+            }
+            other => panic!("{other:?}"),
+        }
+        ws.send(send(serde_json::json!({ "type": "vote_skip", "id": 8 }))).await.unwrap();
+        assert_eq!(next_json(&mut ws).await, ServerMsg::Result { id: 8, ok: false, error: Some("remote.error.noRoom".into()) });
+        ws.send(send(serde_json::json!({ "type": "cmd", "id": 9, "command": "next" }))).await.unwrap();
+        assert_eq!(next_json(&mut ws).await, ServerMsg::Result { id: 9, ok: true, error: None });
 
-    #[tokio::test]
-    async fn test_read_http_request_reads_body_larger_than_one_os_read() {
-        // The old implementation did a single fixed 8KB `read()`, so any
-        // body larger than that was silently truncated. This body is ~25x
-        // that, spanning many internal 8KB reads.
-        let (mut client, mut server) = tokio::io::duplex(2 * 1024 * 1024);
-        let body = "x".repeat(200_000);
-        let request = format!(
-            "POST /api/invoke HTTP/1.1\r\nContent-Length: {}\r\n\r\n{}",
-            body.len(),
-            body
-        );
+        // Broadcasts reach the phone.
+        status.hub.on_reaction("Kay".into(), "🔥".into());
+        assert_eq!(next_json(&mut ws).await, ServerMsg::Reaction { from: "Kay".into(), emoji: "🔥".into() });
 
-        let write_task = tokio::spawn(async move {
-            client.write_all(request.as_bytes()).await.unwrap();
-        });
-
-        let result = tokio::time::timeout(std::time::Duration::from_secs(5), read_http_request(&mut server))
-            .await
-            .expect("must not hang")
-            .expect("should successfully read the full request");
-        write_task.await.unwrap();
-
-        let text = String::from_utf8(result).unwrap();
-        let body_start = text.find("\r\n\r\n").unwrap() + 4;
-        assert_eq!(&text[body_start..], body.as_str());
-    }
-
-    #[tokio::test]
-    async fn test_read_http_request_rejects_body_over_max_size() {
-        let (mut client, mut server) = tokio::io::duplex(4 * 1024 * 1024);
-        let body = "x".repeat(MAX_REQUEST_SIZE + 1);
-        let request = format!(
-            "POST /api/invoke HTTP/1.1\r\nContent-Length: {}\r\n\r\n{}",
-            body.len(),
-            body
-        );
-
-        let write_task = tokio::spawn(async move {
-            let _ = client.write_all(request.as_bytes()).await;
-        });
-
-        let result = tokio::time::timeout(std::time::Duration::from_secs(5), read_http_request(&mut server))
-            .await
-            .expect("must not hang even when rejecting an oversized request");
-
-        assert_eq!(result, Err(RequestReadError::TooLarge));
-        let _ = write_task.await;
-    }
-
-    #[tokio::test]
-    async fn test_read_http_request_returns_closed_on_empty_connection() {
-        let (client, mut server) = tokio::io::duplex(1024);
-        drop(client); // peer closes without sending anything
-
-        let result = read_http_request(&mut server).await;
-        assert_eq!(result, Err(RequestReadError::Closed));
+        // Revoking closes the session.
+        status.regenerate_token().unwrap();
+        let closed = tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                match ws.next().await {
+                    None | Some(Err(_)) | Some(Ok(tokio_tungstenite::tungstenite::Message::Close(_))) => break,
+                    _ => {}
+                }
+            }
+        })
+        .await;
+        assert!(closed.is_ok(), "revoking must drop open phones");
     }
 }

@@ -47,6 +47,12 @@ rustls = { version = "0.23", features = ["ring"] }
 # already in the tree via rustls and tauri.
 ring = "0.17"
 base64 = "0.22"
+# Phone remote server (src/remote_server.rs): routing, WebSocket, request
+# limits, and the phone app embedded from dist-remote/.
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "ws", "query"] }
+tower = { version = "0.5", features = ["limit"] }
+tower-http = { version = "0.6", features = ["limit", "timeout"] }
+rust-embed = { version = "8", features = ["mime-guess"] }
 
 # Screen-lock detection (src/screen_lock.rs). zbus is already in the tree via
 # notify-rust with its default async-io backend; keeping that backend (rather
@@ -63,3 +69,5 @@ windows = { version = "0.61", features = ["Win32_System_Com", "Win32_System_Powe
 [dev-dependencies]
 ctor = "0.4"
 tempfile = "3.10"
+futures-util = "0.3"
+tokio-tungstenite = "0.29"
