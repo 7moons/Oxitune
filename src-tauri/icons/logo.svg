@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 130 130">
+  <defs>
+    <linearGradient id="celadon" gradientUnits="userSpaceOnUse" x1="25" y1="25" x2="105" y2="105">
+      <stop offset="0" stop-color="#138a8a"/>
+      <stop offset="1" stop-color="#d6e9e2"/>
+    </linearGradient>
+  </defs>
+  <rect width="130" height="130" rx="30" fill="#0f0f17"/>
+  <circle cx="65" cy="65" r="40" fill="none" stroke="url(#celadon)" stroke-width="10"/>
+  <path d="M44 65 q10.5 -16 21 0 t21 0" fill="none" stroke="url(#celadon)" stroke-width="7" stroke-linecap="round"/>
+</svg>
