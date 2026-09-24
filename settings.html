@@ -388,10 +388,18 @@
             <div class="setting-text">
               <span class="setting-title" data-i18n="plugins.media.title">Folder for saved songs</span>
               <span class="setting-desc mono" id="plugins-media-dir"></span>
-              <span class="setting-desc" data-i18n="plugins.media.desc">Plugins that save songs use yt-dlp, which you install yourself, and put them only here.</span>
+              <span class="setting-desc" data-i18n="plugins.media.desc">Plugins that save songs put them only here.</span>
             </div>
             <button id="plugins-media-open" class="btn btn-tonal" data-i18n="plugins.media.open">Open</button>
             <button id="plugins-media-pick" class="btn btn-tonal" data-i18n="plugins.media.pick">Change</button>
+          </div>
+          <div id="plugins-tools" class="setting-row is-hidden">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="plugins.tools.title">yt-dlp and ffmpeg</span>
+              <span class="setting-desc" id="plugins-tools-status"></span>
+              <span class="setting-desc" data-i18n="plugins.tools.desc">Downloaded from their official GitHub releases and checked against the published checksums. YTMD updates its yt-dlp weekly.</span>
+            </div>
+            <button id="plugins-tools-install" class="btn btn-tonal" data-i18n="plugins.tools.install">Install</button>
           </div>
 
           <h3 class="subsection-heading" data-i18n="plugins.available">Available</h3>

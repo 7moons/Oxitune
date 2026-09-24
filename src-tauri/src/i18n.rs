@@ -56,6 +56,9 @@ pub enum Text {
     CrashBody,
     CrashOpenLogs,
     Close,
+    ToolsTitle,
+    ToolsInstall,
+    Cancel,
 }
 
 pub fn t(text: Text) -> &'static str {
@@ -95,6 +98,12 @@ pub fn tr(lang: Lang, text: Text) -> &'static str {
         (Lang::Pl, CrashOpenLogs) => "Otwórz folder logów",
         (Lang::En, Close) => "Close",
         (Lang::Pl, Close) => "Zamknij",
+        (Lang::En, ToolsTitle) => "Install yt-dlp and ffmpeg?",
+        (Lang::Pl, ToolsTitle) => "Zainstalować yt-dlp i ffmpeg?",
+        (Lang::En, ToolsInstall) => "Install",
+        (Lang::Pl, ToolsInstall) => "Zainstaluj",
+        (Lang::En, Cancel) => "Cancel",
+        (Lang::Pl, Cancel) => "Anuluj",
     }
 }
 
@@ -103,6 +112,19 @@ pub fn update_body(version: &str) -> String {
     match lang() {
         Lang::En => format!("Version {version} is ready to install from Settings."),
         Lang::Pl => format!("Wersję {version} można zainstalować w Ustawieniach."),
+    }
+}
+
+/// The consent dialog before YTMD downloads yt-dlp/ffmpeg for a plugin.
+pub fn tools_body(plugin: &str) -> String {
+    let size = if cfg!(windows) { "~170 MB" } else { "~140 MB" };
+    match lang() {
+        Lang::En => format!(
+            "\"{plugin}\" needs yt-dlp and ffmpeg to save songs. YTMD will download them ({size}) from their official GitHub releases, check them against the published checksums and keep them in its own folder. yt-dlp is updated weekly."
+        ),
+        Lang::Pl => format!(
+            "„{plugin}” potrzebuje yt-dlp i ffmpeg, żeby zapisywać utwory. YTMD pobierze je ({size}) z ich oficjalnych wydań na GitHubie, sprawdzi sumy kontrolne i zachowa we własnym folderze. yt-dlp będzie aktualizowany co tydzień."
+        ),
     }
 }
 
@@ -123,7 +145,7 @@ mod tests {
     #[test]
     fn test_every_text_has_both_languages() {
         use Text::*;
-        for text in [TrayPlayPause, TrayNext, TrayPrevious, TrayMiniPlayer, TraySettings, TrayShowHide, TrayQuit, UpdateTitle, NowPlaying, CrashTitle, CrashBody, CrashOpenLogs, Close] {
+        for text in [TrayPlayPause, TrayNext, TrayPrevious, TrayMiniPlayer, TraySettings, TrayShowHide, TrayQuit, UpdateTitle, NowPlaying, CrashTitle, CrashBody, CrashOpenLogs, Close, ToolsTitle, ToolsInstall, Cancel] {
             assert!(!tr(Lang::En, text).is_empty());
             assert!(!tr(Lang::Pl, text).is_empty());
         }

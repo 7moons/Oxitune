@@ -32,6 +32,8 @@
     "allow-plugins-restore-official",
     "allow-plugins-pick-media-dir",
     "allow-plugins-open-media-dir",
+    "allow-plugins-media-tools-status",
+    "allow-plugins-install-media-tools",
     "allow-plugins-available",
     "allow-plugins-install",
     "allow-plugins-check-updates",

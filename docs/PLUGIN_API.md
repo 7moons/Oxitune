@@ -127,13 +127,21 @@ interface Ytmd {
 
   net?: { fetchText(url): Promise<string>; fetchJson(url): Promise<unknown> };  // network
 
-  ui?: { toast(text: string): void; addStyle(css: string): () => void };        // ui
+  ui?: {                                           // ui
+    toast(text: string, options?: { id?: string; durationMs?: number;
+                                    action?: { label: string; onClick(): void } }): void;
+    addStyle(css: string): () => void;
+  };
 
   media?: {                                        // media:save
     formats: readonly ('mp3' | 'm4a' | 'opus' | 'flac')[];
     save(videoId: string, options?: { format?: string }): Promise<string>;  // job id
     cancel(job: string): Promise<void>;
     onProgress(fn: (p: MediaProgress) => void): () => void;
+    tools(): Promise<{ ytdlp: 'managed' | 'system' | 'missing'; ffmpeg: 'managed' | 'system' | 'missing';
+                       ytdlpVersion: string | null; installable: boolean; installing: boolean }>;
+    installTools(): Promise<'done' | 'declined' | 'failed'>;   // YTMD asks the user first
+    onToolsProgress(fn: (p: { state: string; tool: string | null; percent: number; error: string | null }) => void): () => void;
   };
 }
 
@@ -170,8 +178,13 @@ falls back to `default`.
 ### Saving songs (`media:save`)
 
 YTMD runs yt-dlp for the plugin; the plugin never runs anything itself.
-The user installs yt-dlp (and ffmpeg) — YTMD never downloads them — and
-picks the folder in Settings → Plugins (default: the system's music folder
+yt-dlp and ffmpeg come from the system, or YTMD installs them into
+`~/.ytmd/tools/` when the plugin calls `installTools()` **and the user
+agrees in a dialog YTMD shows itself** (or presses Install in Settings):
+from yt-dlp's latest GitHub release and yt-dlp's FFmpeg-Builds, https to
+GitHub hosts only, checked against the SHA-256 checksum file published with
+each release; only `ffmpeg`/`ffprobe` are taken from the archive, under
+fixed names. YTMD refreshes its yt-dlp weekly. The user picks the folder in Settings → Plugins (default: the system's music folder
 + `YTMD`). The plugin supplies only an 11-character video id and a format
 from `formats`; the command line is fixed (`--ignore-config`, no shell, the
 URL is always `music.youtube.com/watch?v=<id>`, files go only into that

@@ -205,6 +205,55 @@ pub fn plugins_open_media_dir(app: AppHandle, plugins: Plugins<'_>) -> Result<()
     app.opener().open_path(dir.to_string_lossy(), None::<&str>).map_err(|e| e.to_string())
 }
 
+fn tools_emitter(app: &AppHandle) -> super::media_tools::EmitInstall {
+    let app = app.clone();
+    Arc::new(move |p| {
+        let _ = app.emit("plugin-media-tools", p);
+    })
+}
+
+/// For a plugin's request: YTMD's own dialog first (the page can't answer
+/// it), then the install. Everything is reported as `plugin-media-tools`.
+pub fn ask_and_install_tools(app: AppHandle, plugins: Arc<PluginManager>, plugin_name: String) {
+    use super::media_tools::{InstallProgress, InstallState};
+    use crate::i18n::{t, Text};
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+    let emit = tools_emitter(&app);
+    tauri::async_runtime::spawn(async move {
+        let body = crate::i18n::tools_body(&plugin_name);
+        let dialog_app = app.clone();
+        let agreed = tauri::async_runtime::spawn_blocking(move || {
+            dialog_app
+                .dialog()
+                .message(body)
+                .title(t(Text::ToolsTitle))
+                .kind(MessageDialogKind::Info)
+                .buttons(MessageDialogButtons::OkCancelCustom(t(Text::ToolsInstall).into(), t(Text::Cancel).into()))
+                .blocking_show()
+        })
+        .await
+        .unwrap_or(false);
+        if !agreed {
+            emit(InstallProgress { state: InstallState::Declined, tool: None, percent: 0.0, error: None });
+            return;
+        }
+        let _ = plugins.tools.install(false, emit).await;
+    });
+}
+
+#[tauri::command]
+pub fn plugins_media_tools_status(plugins: Plugins<'_>) -> super::media_tools::ToolStatus {
+    plugins.tools.status()
+}
+
+/// Settings' own button (the click is the consent): installs what's
+/// missing and always refreshes our yt-dlp.
+#[tauri::command]
+pub async fn plugins_install_media_tools(app: AppHandle, plugins: Plugins<'_>) -> Result<(), String> {
+    let tools = Arc::clone(&plugins.tools);
+    tools.install(true, tools_emitter(&app)).await
+}
+
 #[tauri::command]
 pub fn plugins_set_update_interval(plugins: Plugins<'_>, hours: u32) {
     plugins.set_update_interval(hours);
@@ -226,6 +275,10 @@ pub fn start_update_checks(app: AppHandle, plugins: Arc<PluginManager>) {
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_secs(60)).await;
         loop {
+            // yt-dlp we installed goes stale as YouTube changes.
+            if plugins.tools.ytdlp_stale() {
+                let _ = plugins.tools.install(true, tools_emitter(&app)).await;
+            }
             let hours = plugins.state().update_interval_hours;
             if hours > 0 && !plugins.registries().is_empty() {
                 let updated = plugins.check_updates().await;

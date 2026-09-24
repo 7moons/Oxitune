@@ -386,6 +386,22 @@ bridge_commands! {
         plugin_manager(h).media_cancel(&p.id, &p.job)?;
         Ok(Value::Null)
     }
+    // Asks the user (a dialog YTMD shows itself, not the page) and, if they
+    // agree, installs yt-dlp/ffmpeg; progress and the outcome arrive as
+    // `plugin-media-tools`.
+    "plugin_media_install_tools" => |h, state, args| {
+        let p: PluginIdArgs = parse_args("plugin_media_install_tools", args)?;
+        let plugins = plugin_manager(h);
+        let plugin = plugins.check_permission(&p.id, crate::plugins::media_save::PERMISSION)?;
+        crate::plugins::commands::ask_and_install_tools(h.clone(), plugins, plugin.manifest.name);
+        Ok(Value::Null)
+    }
+    "plugin_media_tools_status" => |h, state, args| {
+        let p: PluginIdArgs = parse_args("plugin_media_tools_status", args)?;
+        let plugins = plugin_manager(h);
+        plugins.check_permission(&p.id, crate::plugins::media_save::PERMISSION)?;
+        to_data(plugins.tools.status())
+    }
     "plugin_error" => |h, state, args| {
         let p: PluginErrorArgs = parse_args("plugin_error", args)?;
         to_data(plugin_manager(h).report_error(&p.id, &p.message))

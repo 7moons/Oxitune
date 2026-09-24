@@ -18,6 +18,8 @@ import { t } from './ui/i18n';
 import {
   MEDIA_FORMATS,
   MediaProgress,
+  MediaToolStatus,
+  MediaToolsProgress,
   PLUGIN_API_VERSION,
   Permission,
   PluginContext,
@@ -72,6 +74,8 @@ export class ExternalPlugin implements YTMDPlugin {
   private readonly tickListeners = new Set<(secs: number) => void>();
   private readonly settingsListeners = new Set<(values: Record<string, unknown>) => void>();
   private readonly mediaListeners = new Set<(progress: MediaProgress) => void>();
+  private readonly toolsListeners = new Set<(progress: MediaToolsProgress) => void>();
+  private readonly toolsWaiters = new Set<(progress: MediaToolsProgress) => void>();
   private readonly unloaders: (() => void)[] = [];
   private readonly styleNodes: HTMLStyleElement[] = [];
 
@@ -198,12 +202,37 @@ export class ExternalPlugin implements YTMDPlugin {
             (job) => String(job)
           ),
         cancel: (job) => invokeBackend('plugin_media_cancel', { id, job: String(job) }).then(() => undefined),
-        onProgress: (fn) => this.listenOn(this.mediaListeners, 'media.onProgress', fn)
+        onProgress: (fn) => this.listenOn(this.mediaListeners, 'media.onProgress', fn),
+        tools: () => invokeBackend('plugin_media_tools_status', { id }).then((s) => s as MediaToolStatus),
+        installTools: () =>
+          new Promise((resolve, reject) => {
+            const waiter = (p: MediaToolsProgress) => {
+              if (p.state === 'done' || p.state === 'declined' || p.state === 'failed') {
+                this.toolsWaiters.delete(waiter);
+                resolve(p.state);
+              }
+            };
+            this.toolsWaiters.add(waiter);
+            invokeBackend('plugin_media_install_tools', { id }).catch((e: unknown) => {
+              this.toolsWaiters.delete(waiter);
+              reject(e);
+            });
+          }),
+        onToolsProgress: (fn) => this.listenOn(this.toolsListeners, 'media.onToolsProgress', fn)
       };
     }
     if (this.has('ui')) {
       api.ui = {
-        toast: (text) => showToast(String(text).slice(0, MAX_TOAST_CHARS)),
+        toast: (text, options) => {
+          const action = options?.action;
+          showToast(String(text).slice(0, MAX_TOAST_CHARS), {
+            id: options?.id ? `${id}:${String(options.id)}` : undefined,
+            durationMs: typeof options?.durationMs === 'number' ? Math.min(Math.max(options.durationMs, 1000), 60000) : undefined,
+            action: action
+              ? { label: String(action.label).slice(0, 40), onClick: this.safe('ui.toast action', () => action.onClick()) }
+              : undefined
+          });
+        },
         addStyle: (css) => this.addStyle(css)
       };
     }
@@ -230,6 +259,13 @@ export class ExternalPlugin implements YTMDPlugin {
     } catch (e) {
       this.report('startup', e);
     }
+  }
+
+  /** A `plugin-media-tools` event (installs are app-wide). */
+  mediaTools(progress: MediaToolsProgress): void {
+    if (!this.has('media:save')) return;
+    this.toolsListeners.forEach((fn) => fn({ ...progress }));
+    [...this.toolsWaiters].forEach((fn) => fn(progress));
   }
 
   /** A `plugin-media-progress` event for this plugin. */
@@ -272,6 +308,7 @@ export class ExternalPlugin implements YTMDPlugin {
     this.tickListeners.clear();
     this.settingsListeners.clear();
     this.mediaListeners.clear();
+    this.toolsListeners.clear();
   }
 }
 
@@ -319,6 +356,11 @@ export function installPluginHost(): void {
 export function externalPlugins(hooks: HostHooks): ExternalPlugin[] {
   hostHooks = hooks;
   for (const plugin of external.values()) plugin.start(hooks);
+  return [...external.values()];
+}
+
+/** Every installed plugin defined on this page. */
+export function definedExternalPlugins(): ExternalPlugin[] {
   return [...external.values()];
 }
 

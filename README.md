@@ -46,7 +46,7 @@ YTMD wraps music.youtube.com with what a desktop player should have: media keys 
 ### Plugins
 - A versioned plugin API ([`docs/PLUGIN_API.md`](docs/PLUGIN_API.md)): a manifest with a closed set of permissions, shown before you install and again before any update that asks for more; per-plugin settings, storage and network access limited to the hosts it lists; errors isolated per plugin, repeatedly failing plugins switched off.
 - Install from the built-in **official registry** or **registries you add**: every registry's index must be signed with that registry's key, every archive must match its signed checksum, installs are atomic. Updates are checked automatically (configurable). Developer mode loads a plugin from a folder, with a warning.
-- **Saving songs** is an add-on too (`app.ytmd.downloader` in the official registry): a player-bar button that saves the current song with yt-dlp (install yt-dlp and ffmpeg yourself) into a folder you choose; the add-on only says which song, YTMD runs yt-dlp with a fixed command line.
+- **Saving songs** is an add-on too (`app.ytmd.downloader` in the official registry): a player-bar button that saves the current song with yt-dlp into a folder you choose. If yt-dlp or ffmpeg is missing, one click (and your OK in YTMD's own dialog) installs them from their official GitHub releases, checked against the published checksums; YTMD keeps its yt-dlp up to date. The add-on only says which song; YTMD runs yt-dlp with a fixed command line.
 - YTMD's own features are built-in plugins on the same API. A ready-to-publish registry with an example theme, an ad blocker and SponsorBlock lives in [`_plugins-export/`](_plugins-export).
 
 ### Settings, data and logs

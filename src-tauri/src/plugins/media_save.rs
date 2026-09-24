@@ -1,8 +1,8 @@
 //! The `media:save` permission: saving a song to the user's folder with
 //! yt-dlp (docs/PLUGIN_API.md). Built for the downloader add-on, but nothing
 //! here trusts the plugin beyond two values: an 11-character video id and a
-//! format from `FORMATS`. yt-dlp must be installed by the user (we never
-//! download it); it runs with a fixed argument list, `--ignore-config` (so no
+//! format from `FORMATS`. yt-dlp comes from the system or from
+//! `media_tools` (installed only when the user agrees); it runs with a fixed argument list, `--ignore-config` (so no
 //! config file can add `--exec`), into the folder the user picked in
 //! Settings, and never through a shell.
 
@@ -60,14 +60,15 @@ struct Job {
 }
 
 pub struct MediaJobs {
-    program: OsString,
+    /// Tests run a stand-in instead of the real yt-dlp.
+    program: Option<OsString>,
     slots: Arc<Semaphore>,
     jobs: Mutex<HashMap<String, Job>>,
 }
 
 impl Default for MediaJobs {
     fn default() -> Self {
-        Self::with_program("yt-dlp")
+        Self { program: None, slots: Arc::new(Semaphore::new(MAX_PARALLEL)), jobs: Mutex::new(HashMap::new()) }
     }
 }
 
@@ -76,8 +77,9 @@ pub fn valid_video_id(id: &str) -> bool {
 }
 
 /// The complete yt-dlp command line. Only `video_id` and `format` come from
-/// the plugin, both checked by the caller; `dir` is the user's choice.
-pub fn ytdlp_args(dir: &Path, video_id: &str, format: &str) -> Vec<OsString> {
+/// the plugin, both checked by the caller; `dir` is the user's choice and
+/// `ffmpeg_dir` our own ffmpeg, if installed.
+pub fn ytdlp_args(dir: &Path, video_id: &str, format: &str, ffmpeg_dir: Option<&Path>) -> Vec<OsString> {
     let mut args: Vec<OsString> = [
         "--ignore-config",
         "--no-playlist",
@@ -100,6 +102,10 @@ pub fn ytdlp_args(dir: &Path, video_id: &str, format: &str) -> Vec<OsString> {
     .iter()
     .map(OsString::from)
     .collect();
+    if let Some(ffmpeg) = ffmpeg_dir {
+        args.push("--ffmpeg-location".into());
+        args.push(ffmpeg.as_os_str().to_owned());
+    }
     if format == "mp3" {
         // ffmpeg alone can embed covers in MP3; the other formats need
         // extra tools and would fail the whole save without them.
@@ -142,6 +148,13 @@ fn parse_line(line: &str) -> Line {
 }
 
 fn failure_message(stderr_tail: Option<&str>) -> String {
+    // "ERROR: Postprocessing: ffprobe and ffmpeg not found. Please install…"
+    if stderr_tail.is_some_and(|l| {
+        let l = l.to_ascii_lowercase();
+        l.contains("ffmpeg not found") || l.contains("ffprobe not found")
+    }) {
+        return "plugins.error.ffmpegMissing".into();
+    }
     match stderr_tail.map(str::trim).filter(|l| !l.is_empty()) {
         Some(line) => format!("plugins.error.mediaFailed:{}", line.chars().take(MAX_ERROR_CHARS).collect::<String>()),
         None => "plugins.error.mediaFailed".into(),
@@ -149,8 +162,9 @@ fn failure_message(stderr_tail: Option<&str>) -> String {
 }
 
 impl MediaJobs {
+    #[cfg(test)]
     pub fn with_program(program: impl Into<OsString>) -> Self {
-        Self { program: program.into(), slots: Arc::new(Semaphore::new(MAX_PARALLEL)), jobs: Mutex::new(HashMap::new()) }
+        Self { program: Some(program.into()), ..Self::default() }
     }
 
     /// Queues a save and returns its job id at once; progress, the result
@@ -161,6 +175,7 @@ impl MediaJobs {
         video_id: &str,
         format: &str,
         dir: PathBuf,
+        tools: super::media_tools::ToolPaths,
         emit: Emit,
     ) -> Result<String, String> {
         if !valid_video_id(video_id) {
@@ -193,7 +208,7 @@ impl MediaJobs {
         let this = Arc::clone(self);
         let format = format.to_string();
         tauri::async_runtime::spawn(async move {
-            let last = this.run(base.clone(), dir, &format, cancel_rx, &emit).await;
+            let last = this.run(base.clone(), dir, &format, tools, cancel_rx, &emit).await;
             this.jobs.lock().remove(&base.job);
             emit(last);
         });
@@ -220,7 +235,15 @@ impl MediaJobs {
     }
 
     /// Runs one job to its end and returns the final progress event.
-    async fn run(&self, base: Progress, dir: PathBuf, format: &str, mut cancel: oneshot::Receiver<()>, emit: &Emit) -> Progress {
+    async fn run(
+        &self,
+        base: Progress,
+        dir: PathBuf,
+        format: &str,
+        tools: super::media_tools::ToolPaths,
+        mut cancel: oneshot::Receiver<()>,
+        emit: &Emit,
+    ) -> Progress {
         let with = |state: JobState, percent: f64| Progress { state, percent, ..base.clone() };
         let failed = |error: String| Progress { error: Some(error), ..with(JobState::Failed, 0.0) };
         emit(with(JobState::Queued, 0.0));
@@ -236,8 +259,9 @@ impl MediaJobs {
             return failed(format!("plugins.error.mediaFolder:{e}"));
         }
 
-        let mut cmd = tokio::process::Command::new(&self.program);
-        cmd.args(ytdlp_args(&dir, &base.video_id, format))
+        let program = self.program.clone().unwrap_or(tools.ytdlp);
+        let mut cmd = tokio::process::Command::new(program);
+        cmd.args(ytdlp_args(&dir, &base.video_id, format, tools.ffmpeg_dir.as_deref()))
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -314,6 +338,10 @@ impl MediaJobs {
 mod tests {
     use super::*;
 
+    fn no_tools() -> super::super::media_tools::ToolPaths {
+        super::super::media_tools::ToolPaths { ytdlp: "yt-dlp".into(), ffmpeg_dir: None }
+    }
+
     #[test]
     fn test_video_ids_and_formats_are_checked() {
         assert!(valid_video_id("dQw4w9WgXcQ"));
@@ -324,13 +352,13 @@ mod tests {
         let jobs = Arc::new(MediaJobs::default());
         let emit: Emit = Arc::new(|_| {});
         let dir = PathBuf::from("/tmp/x");
-        assert_eq!(jobs.start("p", "--exec=touch", "mp3", dir.clone(), emit.clone()).unwrap_err(), "plugins.error.badVideoId");
-        assert_eq!(jobs.start("p", "dQw4w9WgXcQ", "exe", dir, emit).unwrap_err(), "plugins.error.badFormat");
+        assert_eq!(jobs.start("p", "--exec=touch", "mp3", dir.clone(), no_tools(), emit.clone()).unwrap_err(), "plugins.error.badVideoId");
+        assert_eq!(jobs.start("p", "dQw4w9WgXcQ", "exe", dir, no_tools(), emit).unwrap_err(), "plugins.error.badFormat");
     }
 
     #[test]
     fn test_the_command_line_is_fixed() {
-        let args = ytdlp_args(Path::new("/music/YTMD"), "dQw4w9WgXcQ", "opus");
+        let args = ytdlp_args(Path::new("/music/YTMD"), "dQw4w9WgXcQ", "opus", None);
         let args: Vec<String> = args.iter().map(|a| a.to_string_lossy().into_owned()).collect();
         assert_eq!(args[0], "--ignore-config", "no config file can add --exec or change paths");
         assert!(!args.iter().any(|a| a.starts_with("--exec") || a == "--batch-file" || a == "--config-location"));
@@ -339,8 +367,10 @@ mod tests {
         let p = args.iter().position(|a| a == "-P").unwrap();
         assert_eq!(args[p + 1], "/music/YTMD");
         assert!(!args.contains(&"--embed-thumbnail".to_string()), "only for mp3");
-        let mp3: Vec<String> = ytdlp_args(Path::new("/m"), "dQw4w9WgXcQ", "mp3").iter().map(|a| a.to_string_lossy().into_owned()).collect();
+        let mp3: Vec<String> = ytdlp_args(Path::new("/m"), "dQw4w9WgXcQ", "mp3", Some(Path::new("/tools"))).iter().map(|a| a.to_string_lossy().into_owned()).collect();
         assert!(mp3.contains(&"--embed-thumbnail".to_string()));
+        let f = mp3.iter().position(|a| a == "--ffmpeg-location").unwrap();
+        assert_eq!(mp3[f + 1], "/tools", "our own ffmpeg, when installed");
     }
 
     #[test]
@@ -357,6 +387,10 @@ mod tests {
     fn test_failure_message() {
         assert_eq!(failure_message(Some("  ERROR: Video unavailable ")), "plugins.error.mediaFailed:ERROR: Video unavailable");
         assert_eq!(failure_message(None), "plugins.error.mediaFailed");
+        assert_eq!(
+            failure_message(Some("ERROR: Postprocessing: ffprobe and ffmpeg not found. Please install or provide the path")),
+            "plugins.error.ffmpegMissing"
+        );
         assert_eq!(failure_message(Some(&"é".repeat(500))).chars().count(), "plugins.error.mediaFailed:".len() + MAX_ERROR_CHARS);
     }
 
@@ -383,7 +417,7 @@ mod tests {
         let jobs = Arc::new(MediaJobs::with_program("ytmd-test-no-such-program"));
         let dir = tempfile::tempdir().unwrap();
         let (emit, seen) = collect();
-        jobs.start("p", "dQw4w9WgXcQ", "mp3", dir.path().to_path_buf(), emit).unwrap();
+        jobs.start("p", "dQw4w9WgXcQ", "mp3", dir.path().to_path_buf(), no_tools(), emit).unwrap();
         let last = wait_final(&seen).await;
         assert_eq!(last.state, JobState::Failed);
         assert_eq!(last.error.as_deref(), Some("plugins.error.ytdlpMissing"));
@@ -411,7 +445,7 @@ mod tests {
         );
         let jobs = Arc::new(MediaJobs::with_program(program));
         let (emit, seen) = collect();
-        let job = jobs.start("p", "dQw4w9WgXcQ", "mp3", tmp.path().join("out"), emit).unwrap();
+        let job = jobs.start("p", "dQw4w9WgXcQ", "mp3", tmp.path().join("out"), no_tools(), emit).unwrap();
         let last = wait_final(&seen).await;
         assert_eq!(last.state, JobState::Done);
         assert_eq!(last.job, job);
@@ -428,7 +462,7 @@ mod tests {
         let program = fake_ytdlp(tmp.path(), "echo 'WARNING: x' >&2; echo 'ERROR: Video unavailable' >&2; exit 1");
         let jobs = Arc::new(MediaJobs::with_program(program));
         let (emit, seen) = collect();
-        jobs.start("p", "dQw4w9WgXcQ", "mp3", tmp.path().to_path_buf(), emit).unwrap();
+        jobs.start("p", "dQw4w9WgXcQ", "mp3", tmp.path().to_path_buf(), no_tools(), emit).unwrap();
         let last = wait_final(&seen).await;
         assert_eq!(last.error.as_deref(), Some("plugins.error.mediaFailed:ERROR: Video unavailable"));
     }
@@ -444,7 +478,7 @@ mod tests {
         let url = std::env::var("YTMD_E2E_URL").expect("YTMD_E2E_URL");
         for format in FORMATS {
             let dir = tempfile::tempdir().unwrap();
-            let mut args = ytdlp_args(dir.path(), "dQw4w9WgXcQ", format);
+            let mut args = ytdlp_args(dir.path(), "dQw4w9WgXcQ", format, None);
             *args.last_mut().unwrap() = url.clone().into();
             let out = tokio::process::Command::new(&program).args(&args).output().await.unwrap();
             let stdout = String::from_utf8_lossy(&out.stdout);
@@ -464,7 +498,7 @@ mod tests {
         let program = fake_ytdlp(tmp.path(), "echo ytmd-progress:1/100; sleep 30");
         let jobs = Arc::new(MediaJobs::with_program(program));
         let (emit, seen) = collect();
-        let job = jobs.start("p", "dQw4w9WgXcQ", "mp3", tmp.path().to_path_buf(), emit).unwrap();
+        let job = jobs.start("p", "dQw4w9WgXcQ", "mp3", tmp.path().to_path_buf(), no_tools(), emit).unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         assert_eq!(jobs.cancel("other", &job).unwrap_err(), "plugins.error.noSuchJob");
         jobs.cancel("p", &job).unwrap();

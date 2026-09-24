@@ -475,6 +475,8 @@ pub fn run() {
             plugins::commands::plugins_restore_official,
             plugins::commands::plugins_pick_media_dir,
             plugins::commands::plugins_open_media_dir,
+            plugins::commands::plugins_media_tools_status,
+            plugins::commands::plugins_install_media_tools,
             plugins::commands::plugins_available,
             plugins::commands::plugins_install,
             plugins::commands::plugins_check_updates,

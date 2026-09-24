@@ -2,7 +2,14 @@ import { PlayerObserver } from './observer';
 import { PlayerBridge } from './bridge';
 import { startResume } from './resume';
 import { HostContext, PluginRegistry } from '../plugins/registry';
-import { ExternalPlugin, announceSwitchedOff, externalPlugin, externalPlugins, installPluginHost } from './pluginHost';
+import {
+  ExternalPlugin,
+  announceSwitchedOff,
+  definedExternalPlugins,
+  externalPlugin,
+  externalPlugins,
+  installPluginHost
+} from './pluginHost';
 import { LyricsPlugin } from '../plugins/lyrics';
 import { VolumePlugin } from '../plugins/volume';
 import { NotificationsPlugin } from '../plugins/notifications';
@@ -15,7 +22,7 @@ import { LocalFilesPlugin } from '../plugins/local-files';
 import { SyncRoomPlugin, routeRoomPlayerCommand } from '../plugins/sync-room';
 import { PowerPlugin } from '../plugins/power';
 import { RemotePlugin } from '../plugins/remote';
-import { MediaProgress, TrackInfo } from '../plugins/types';
+import { MediaProgress, MediaToolsProgress, TrackInfo } from '../plugins/types';
 import { configureNavMenu, mountNavMenu } from './ui/navMenu';
 import { ICONS, showToast } from './ui/kit';
 import { t } from './ui/i18n';
@@ -259,6 +266,9 @@ async function initYTMD() {
   });
   listenEvent<MediaProgress>('plugin-media-progress', (p) => {
     if (p?.plugin) externalPlugin(p.plugin)?.mediaProgress(p);
+  });
+  listenEvent<MediaToolsProgress>('plugin-media-tools', (p) => {
+    if (p?.state) definedExternalPlugins().forEach((plugin) => plugin.mediaTools(p));
   });
 
   listenEvent<string>('player-command', (payload) => handlePlayerCommand(payload));

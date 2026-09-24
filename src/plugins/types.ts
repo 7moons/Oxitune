@@ -203,7 +203,12 @@ export interface YtmdApi {
     keys(): Promise<string[]>;
   };
   net?: { fetchText(url: string): Promise<string>; fetchJson(url: string): Promise<unknown> };
-  ui?: { toast(text: string): void; addStyle(css: string): Unlisten };
+  ui?: {
+    /** A YouTube Music-style toast; `id` updates a toast in place, `action`
+     * adds one button. */
+    toast(text: string, options?: ToastOptions): void;
+    addStyle(css: string): Unlisten;
+  };
   media?: {
     /** Formats `save` accepts. */
     readonly formats: readonly MediaFormat[];
@@ -212,7 +217,35 @@ export interface YtmdApi {
     save(videoId: string, options?: { format?: MediaFormat }): Promise<string>;
     cancel(job: string): Promise<void>;
     onProgress(fn: (progress: MediaProgress) => void): Unlisten;
+    /** Whether yt-dlp/ffmpeg are there (YTMD's own copies or the system's). */
+    tools(): Promise<MediaToolStatus>;
+    /** Asks the user (in a YTMD dialog) to install yt-dlp and ffmpeg, then
+     * installs them; resolves with how it ended. */
+    installTools(): Promise<'done' | 'declined' | 'failed'>;
+    onToolsProgress(fn: (progress: MediaToolsProgress) => void): Unlisten;
   };
+}
+
+export interface ToastOptions {
+  id?: string;
+  durationMs?: number;
+  action?: { label: string; onClick: () => void };
+}
+
+export interface MediaToolStatus {
+  ytdlp: 'managed' | 'system' | 'missing';
+  ytdlpVersion: string | null;
+  ffmpeg: 'managed' | 'system' | 'missing';
+  installable: boolean;
+  installing: boolean;
+}
+
+/** `plugin-media-tools`: installing yt-dlp/ffmpeg. */
+export interface MediaToolsProgress {
+  state: 'downloading' | 'installing' | 'done' | 'failed' | 'declined';
+  tool: 'yt-dlp' | 'ffmpeg' | null;
+  percent: number;
+  error: string | null;
 }
 
 export const MEDIA_FORMATS = ['mp3', 'm4a', 'opus', 'flac'] as const;

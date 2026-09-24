@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-plugins-install-media-tools"
+description = "Enables the plugins_install_media_tools command without any pre-configured scope."
+commands.allow = ["plugins_install_media_tools"]
+
+[[permission]]
+identifier = "deny-plugins-install-media-tools"
+description = "Denies the plugins_install_media_tools command without any pre-configured scope."
+commands.deny = ["plugins_install_media_tools"]

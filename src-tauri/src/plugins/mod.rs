@@ -16,6 +16,7 @@ pub mod archive;
 pub mod commands;
 pub mod manifest;
 pub mod media_save;
+pub mod media_tools;
 pub mod registry;
 
 use archive::LoadedPlugin;
@@ -138,6 +139,8 @@ pub struct PluginManager {
     /// Something changed that the page only picks up on reload.
     reload_needed: std::sync::atomic::AtomicBool,
     pub media: std::sync::Arc<media_save::MediaJobs>,
+    /// yt-dlp and ffmpeg we installed (`~/.ytmd/tools`).
+    pub tools: std::sync::Arc<media_tools::Tools>,
 }
 
 impl PluginManager {
@@ -147,7 +150,14 @@ impl PluginManager {
             .ok()
             .and_then(|raw| serde_json::from_slice::<PluginState>(&raw).ok())
             .unwrap_or_default();
-        Self { root, state: Mutex::new(state), reload_needed: Default::default(), media: Default::default() }
+        let tools_dir = root.parent().map(|p| p.join("tools")).unwrap_or_else(|| root.join("tools"));
+        Self {
+            root,
+            state: Mutex::new(state),
+            reload_needed: Default::default(),
+            media: Default::default(),
+            tools: std::sync::Arc::new(media_tools::Tools::new(tools_dir)),
+        }
     }
 
     fn installed_dir(&self) -> PathBuf {
@@ -413,7 +423,7 @@ impl PluginManager {
 
     pub fn media_save(&self, id: &str, video_id: &str, format: &str, emit: media_save::Emit) -> Result<String, String> {
         self.check_permission(id, media_save::PERMISSION)?;
-        self.media.start(id, video_id, format, self.media_dir(), emit)
+        self.media.start(id, video_id, format, self.media_dir(), self.tools.paths(), emit)
     }
 
     pub fn media_cancel(&self, id: &str, job: &str) -> Result<(), String> {

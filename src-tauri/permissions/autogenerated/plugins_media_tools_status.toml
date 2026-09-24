@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-plugins-media-tools-status"
+description = "Enables the plugins_media_tools_status command without any pre-configured scope."
+commands.allow = ["plugins_media_tools_status"]
+
+[[permission]]
+identifier = "deny-plugins-media-tools-status"
+description = "Denies the plugins_media_tools_status command without any pre-configured scope."
+commands.deny = ["plugins_media_tools_status"]

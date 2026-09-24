@@ -61,6 +61,11 @@ semver = "1"
 tar = "0.4"
 flate2 = "1"
 minisign-verify = "0.2"
+# Installing yt-dlp/ffmpeg for media:save: ffmpeg ships as .zip (Windows,
+# zip is already here via the updater; deflate via the flate2 we have) and
+# .tar.xz (Linux; lzma-rs is pure Rust, two tiny deps).
+zip = { version = "4.6", default-features = false, features = ["deflate-flate2"] }
+lzma-rs = "0.3"
 
 # Screen-lock detection (src/screen_lock.rs). zbus is already in the tree via
 # notify-rust with its default async-io backend; keeping that backend (rather

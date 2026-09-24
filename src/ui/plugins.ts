@@ -288,6 +288,53 @@ function renderRegistries(registries: Registry[], refresh: () => void): void {
   }
 }
 
+interface ToolStatus {
+  ytdlp: 'managed' | 'system' | 'missing';
+  ytdlpVersion: string | null;
+  ffmpeg: 'managed' | 'system' | 'missing';
+  installable: boolean;
+  installing: boolean;
+}
+
+function toolText(found: ToolStatus['ytdlp'], version: string | null = null): string {
+  if (found === 'managed') return version ? tr('plugins.tools.managedVersion', { version }) : tr('plugins.tools.managed');
+  return tr(found === 'system' ? 'plugins.tools.system' : 'plugins.tools.missing');
+}
+
+let toolsBusy = false;
+
+async function refreshTools(): Promise<void> {
+  if (toolsBusy) return;
+  let status: ToolStatus;
+  try {
+    status = (await invoke('plugins_media_tools_status')) as ToolStatus;
+  } catch {
+    return;
+  }
+  const text = $('plugins-tools-status');
+  if (text) text.textContent = `yt-dlp: ${toolText(status.ytdlp, status.ytdlpVersion)} · ffmpeg: ${toolText(status.ffmpeg)}`;
+  const button = $<HTMLButtonElement>('plugins-tools-install');
+  if (button) {
+    button.textContent = tr(status.ytdlp === 'managed' ? 'plugins.tools.update' : 'plugins.tools.install');
+    button.disabled = status.installing || !status.installable;
+  }
+}
+
+async function installTools(): Promise<void> {
+  const button = $<HTMLButtonElement>('plugins-tools-install');
+  toolsBusy = true;
+  if (button) button.disabled = true;
+  try {
+    await invoke('plugins_install_media_tools');
+    showToast(tr('plugins.tools.done'));
+  } catch (e) {
+    showToast(errorText(e), { durationMs: 8000 });
+  } finally {
+    toolsBusy = false;
+    void refreshTools();
+  }
+}
+
 export async function refreshPlugins(): Promise<void> {
   let overview: Overview;
   try {
@@ -304,6 +351,8 @@ export async function refreshPlugins(): Promise<void> {
   renderRegistries(overview.registries, refresh);
   $('registry-restore-btn')?.classList.toggle('is-hidden', !overview.officialHidden);
   $('plugins-media')?.classList.toggle('is-hidden', !overview.mediaInUse);
+  $('plugins-tools')?.classList.toggle('is-hidden', !overview.mediaInUse);
+  if (overview.mediaInUse) void refreshTools();
   const mediaDir = $('plugins-media-dir');
   if (mediaDir) mediaDir.textContent = overview.mediaDir;
   const interval = $<HTMLSelectElement>('plugins-update-interval');
@@ -315,6 +364,15 @@ export function initPluginsSection(): void {
   void refreshPlugins();
   $('plugins-restart-btn')?.addEventListener('click', () => void invoke('restart_app'));
   $('plugins-browse-btn')?.addEventListener('click', () => void showAvailable(refresh));
+  $('plugins-tools-install')?.addEventListener('click', () => void installTools());
+  void window.__TAURI__?.event.listen<{ state: string; tool: string | null; percent: number }>('plugin-media-tools', (e) => {
+    const text = $('plugins-tools-status');
+    const p = e.payload;
+    if (!text || !p) return;
+    if (p.state === 'downloading') text.textContent = tr('plugins.tools.progress', { tool: p.tool ?? 'yt-dlp', percent: Math.round(p.percent) });
+    else if (p.state === 'installing') text.textContent = tr('plugins.tools.finishing');
+    else if (!toolsBusy) void refreshTools();
+  });
   $('plugins-media-open')?.addEventListener('click', () => {
     invoke('plugins_open_media_dir').catch((e) => showToast(errorText(e)));
   });

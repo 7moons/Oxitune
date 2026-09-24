@@ -2,6 +2,9 @@
 // current song with `ytmd.media.save` (the media:save permission). YTMD
 // runs yt-dlp with a fixed command line into the folder the user chose in
 // Settings → Plugins; this plugin only says which song and which format.
+// When yt-dlp or ffmpeg is missing it offers to install them: YTMD asks the
+// user in its own dialog, downloads them from their GitHub releases and
+// checks their checksums; then the song is saved.
 
 var ICON_SAVE = 'M5 20h14v-2H5v2zm7-18v10.17l-3.59-3.58L7 10l5 5 5-5-1.41-1.41L13 12.17V2h-2z';
 var ICON_STOP = 'M6 6h12v12H6z';
@@ -16,7 +19,14 @@ var TEXT = {
     cancelled: 'Stopped saving',
     failed: 'Couldn’t save the song',
     noSong: 'Nothing to save yet: play a song first',
-    ytdlpMissing: 'yt-dlp isn’t installed. Install yt-dlp and ffmpeg, then try again.',
+    ytdlpMissing: 'Saving songs needs yt-dlp and ffmpeg.',
+    ffmpegMissing: 'Saving songs needs ffmpeg.',
+    install: 'Install',
+    installing: 'Installing {tool}… {percent}%',
+    installingFinish: 'Finishing the install…',
+    installed: 'yt-dlp and ffmpeg are ready',
+    installFailed: 'Couldn’t install yt-dlp and ffmpeg. Check your connection and try again.',
+    unsupported: 'YTMD can’t install yt-dlp and ffmpeg on this system; install them yourself.',
     busy: 'Too many songs are being saved. Try again in a moment.',
     folder: 'Couldn’t write to the folder for saved songs (Settings → Plugins)'
   },
@@ -29,7 +39,14 @@ var TEXT = {
     cancelled: 'Przerwano zapisywanie',
     failed: 'Nie udało się zapisać utworu',
     noSong: 'Nie ma czego zapisać: najpierw włącz utwór',
-    ytdlpMissing: 'yt-dlp nie jest zainstalowany. Zainstaluj yt-dlp i ffmpeg, potem spróbuj ponownie.',
+    ytdlpMissing: 'Do zapisywania utworów potrzebne są yt-dlp i ffmpeg.',
+    ffmpegMissing: 'Do zapisywania utworów potrzebny jest ffmpeg.',
+    install: 'Zainstaluj',
+    installing: 'Instalowanie {tool}… {percent}%',
+    installingFinish: 'Kończenie instalacji…',
+    installed: 'yt-dlp i ffmpeg są gotowe',
+    installFailed: 'Nie udało się zainstalować yt-dlp i ffmpeg. Sprawdź połączenie i spróbuj ponownie.',
+    unsupported: 'YTMD nie może zainstalować yt-dlp i ffmpeg w tym systemie; zainstaluj je samodzielnie.',
     busy: 'Zapisuje się zbyt wiele utworów. Spróbuj za chwilę.',
     folder: 'Nie można zapisać w folderze na zapisane utwory (Ustawienia → Wtyczki)'
   }
@@ -56,6 +73,7 @@ function errorMessage(lang, error) {
     key = key.slice(0, colon);
   }
   if (key === 'plugins.error.ytdlpMissing') return text(lang, 'ytdlpMissing');
+  if (key === 'plugins.error.ffmpegMissing') return text(lang, 'ffmpegMissing');
   if (key === 'plugins.error.busy') return text(lang, 'busy');
   if (key === 'plugins.error.mediaFolder') return text(lang, 'folder');
   var base = text(lang, 'failed');
@@ -78,6 +96,27 @@ function progressMessage(lang, progress) {
 
 function isFinal(state) {
   return state === 'done' || state === 'failed' || state === 'cancelled';
+}
+
+/** Errors the Install button can fix. */
+function needsTools(error) {
+  var key = String(error || '').split(':')[0];
+  return key === 'plugins.error.ytdlpMissing' || key === 'plugins.error.ffmpegMissing';
+}
+
+/** The missing-tools message for a status from `ytmd.media.tools()`, or
+ * null when everything is there. */
+function missingToolsMessage(lang, status) {
+  if (!status) return null;
+  if (status.ytdlp === 'missing') return text(lang, 'ytdlpMissing');
+  if (status.ffmpeg === 'missing') return text(lang, 'ffmpegMissing');
+  return null;
+}
+
+/** The toast while tools install. */
+function installMessage(lang, progress) {
+  if (progress.state === 'installing') return text(lang, 'installingFinish');
+  return text(lang, 'installing', { tool: progress.tool || 'yt-dlp', percent: Math.round(progress.percent || 0) });
 }
 
 function start(ytmd) {
@@ -111,6 +150,51 @@ function start(ytmd) {
     button.replaceChildren(icon(busy ? ICON_STOP : ICON_SAVE));
   }
 
+  // Installing yt-dlp/ffmpeg: YTMD asks the user first, in its own dialog.
+  var installing = false;
+  ytmd.media.onToolsProgress(function (p) {
+    if (!installing || p.state === 'done' || p.state === 'failed' || p.state === 'declined') return;
+    ytmd.ui.toast(installMessage(lang(), p), { id: 'tools', durationMs: 60000 });
+  });
+
+  function install(then) {
+    if (installing) return;
+    installing = true;
+    ytmd.media
+      .installTools()
+      .then(function (result) {
+        installing = false;
+        if (result === 'done') {
+          ytmd.ui.toast(text(lang(), 'installed'), { id: 'tools' });
+          if (then) then();
+        } else if (result === 'failed') {
+          ytmd.ui.toast(text(lang(), 'installFailed'), { id: 'tools', durationMs: 10000 });
+        }
+      })
+      .catch(function () {
+        installing = false;
+        ytmd.ui.toast(text(lang(), 'installFailed'), { id: 'tools', durationMs: 10000 });
+      });
+  }
+
+  /** A toast that explains what's missing, with an Install button. */
+  function offerInstall(message, status, then) {
+    if (status && status.installable === false) {
+      ytmd.ui.toast(message + ' ' + text(lang(), 'unsupported'), { durationMs: 10000 });
+      return;
+    }
+    ytmd.ui.toast(message, {
+      id: 'tools',
+      durationMs: 20000,
+      action: {
+        label: text(lang(), 'install'),
+        onClick: function () {
+          install(then);
+        }
+      }
+    });
+  }
+
   function onClick() {
     if (job) {
       ytmd.media.cancel(job.id).catch(function () {});
@@ -121,6 +205,19 @@ function start(ytmd) {
       ytmd.ui.toast(text(lang(), 'noSong'));
       return;
     }
+    ytmd.media
+      .tools()
+      .then(function (status) {
+        var missing = missingToolsMessage(lang(), status);
+        if (missing) offerInstall(missing, status, onClick);
+        else saveTrack(track);
+      })
+      .catch(function () {
+        saveTrack(track);
+      });
+  }
+
+  function saveTrack(track) {
     var format = ytmd.settings.get('format') || 'mp3';
     job = { id: '', videoId: track.videoId };
     render(0);
@@ -133,7 +230,9 @@ function start(ytmd) {
       .catch(function (e) {
         job = null;
         render(0);
-        ytmd.ui.toast(errorMessage(lang(), e && e.message ? e.message : e));
+        var error = e && e.message ? e.message : e;
+        if (needsTools(error)) offerInstall(errorMessage(lang(), error), null, onClick);
+        else ytmd.ui.toast(errorMessage(lang(), error));
       });
   }
 
@@ -158,7 +257,8 @@ function start(ytmd) {
       job = null;
       render(0);
       var message = progressMessage(lang(), p);
-      if (message) ytmd.ui.toast(message);
+      if (p.state === 'failed' && needsTools(p.error)) offerInstall(message, null, onClick);
+      else if (message) ytmd.ui.toast(message);
       return;
     }
     render(p.percent);
@@ -179,5 +279,13 @@ if (typeof ytmd !== 'undefined') {
 }
 
 if (typeof module !== 'undefined') {
-  module.exports = { errorMessage: errorMessage, progressMessage: progressMessage, isFinal: isFinal, text: text };
+  module.exports = {
+    errorMessage: errorMessage,
+    progressMessage: progressMessage,
+    isFinal: isFinal,
+    text: text,
+    needsTools: needsTools,
+    missingToolsMessage: missingToolsMessage,
+    installMessage: installMessage
+  };
 }

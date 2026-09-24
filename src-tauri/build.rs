@@ -59,6 +59,8 @@ const APP_COMMANDS: &[&str] = &[
     "plugins_restore_official",
     "plugins_pick_media_dir",
     "plugins_open_media_dir",
+    "plugins_media_tools_status",
+    "plugins_install_media_tools",
     "plugins_available",
     "plugins_install",
     "plugins_check_updates",

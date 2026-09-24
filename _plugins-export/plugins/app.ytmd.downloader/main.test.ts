@@ -1,6 +1,23 @@
 import { describe, expect, test } from 'bun:test';
 
-const { errorMessage, progressMessage, isFinal, text } = require('./main.js');
+const { errorMessage, progressMessage, isFinal, text, needsTools, missingToolsMessage, installMessage } = require('./main.js');
+
+describe('Downloader: installing yt-dlp and ffmpeg', () => {
+  test('offers the install only for missing tools', () => {
+    expect(needsTools('plugins.error.ytdlpMissing')).toBe(true);
+    expect(needsTools('plugins.error.ffmpegMissing')).toBe(true);
+    expect(needsTools('plugins.error.mediaFailed:ERROR: x')).toBe(false);
+    const all = { ytdlp: 'system', ffmpeg: 'managed', ytdlpVersion: null, installable: true, installing: false };
+    expect(missingToolsMessage('en', all)).toBeNull();
+    expect(missingToolsMessage('en', { ...all, ytdlp: 'missing' })).toBe('Saving songs needs yt-dlp and ffmpeg.');
+    expect(missingToolsMessage('pl', { ...all, ffmpeg: 'missing' })).toBe('Do zapisywania utworów potrzebny jest ffmpeg.');
+  });
+
+  test('progress text', () => {
+    expect(installMessage('en', { state: 'downloading', tool: 'ffmpeg', percent: 41.6, error: null })).toBe('Installing ffmpeg… 42%');
+    expect(installMessage('pl', { state: 'installing', tool: 'ffmpeg', percent: 99, error: null })).toBe('Kończenie instalacji…');
+  });
+});
 
 describe('Downloader: messages', () => {
   test('follows YouTube Music’s language, English otherwise', () => {
@@ -11,7 +28,8 @@ describe('Downloader: messages', () => {
   });
 
   test('explains the errors YTMD reports', () => {
-    expect(errorMessage('en', 'plugins.error.ytdlpMissing')).toContain('yt-dlp isn’t installed');
+    expect(errorMessage('en', 'plugins.error.ytdlpMissing')).toBe('Saving songs needs yt-dlp and ffmpeg.');
+    expect(errorMessage('pl', 'plugins.error.ffmpegMissing')).toBe('Do zapisywania utworów potrzebny jest ffmpeg.');
     expect(errorMessage('pl', 'plugins.error.busy')).toContain('Spróbuj za chwilę');
     expect(errorMessage('en', 'plugins.error.mediaFolder:Permission denied')).toContain('Settings → Plugins');
     expect(errorMessage('en', 'plugins.error.mediaFailed:ERROR: Video unavailable')).toBe(
