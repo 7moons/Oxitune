@@ -25,7 +25,8 @@ pub(crate) use features::votes_needed;
 pub use features::{parse_video_id, REACTIONS};
 pub(crate) use features::pick_successor;
 
-use crate::sync_crypto::{client_hash, RoomCipher};
+use crate::sync_crypto::{Identity, LegacyCipher, Opened, RoomCipher};
+pub use crate::sync_crypto::{generate_room_code, parse_room_code};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -55,10 +56,14 @@ const RECONNECT_RETRY: Duration = Duration::from_secs(2);
 /// from one malformed/hostile LAN connection). Generous for our messages.
 const MAX_LINE_LEN: u64 = 64 * 1024;
 
-/// Sent in every `Join`. The host turns away guests below it with
-/// `RejectReason::Outdated`: before 2 a `Join` carried no `client_id`, so a
-/// kicked guest could come straight back.
-pub(crate) const PROTOCOL_VERSION: u32 = 2;
+/// Sent in every `Join`; the host turns away guests below it with
+/// `RejectReason::Outdated`. 3: 130-bit codes, HKDF, every message signed
+/// by the sender's install key, replay protection (`sync_crypto.rs`).
+/// Protocol-2 clients can't open v3 traffic at all; a v3 host answers their
+/// `Join` in the old format with `Outdated`, so they are told to update.
+pub(crate) const PROTOCOL_VERSION: u32 = 3;
+/// Most LAN join handshakes the host runs at once.
+const MAX_PENDING_HANDSHAKES: usize = 32;
 const MAX_NICKNAME_CHARS: usize = 32;
 /// `user_id` in the `Leave` a host sends when it ends the room for everyone.
 /// Guests never get this id (theirs come from `generate_user_id`, always
@@ -220,7 +225,9 @@ pub struct RoomLeftPayload {
 pub(crate) struct JoinRequest {
     pub user_id: String,
     pub nickname: String,
-    pub client_id: String,
+    /// `client_hash` of the key that signed the `Join`: who this guest is,
+    /// proven by the transport layer, never a field the guest filled in.
+    pub client_hash: String,
     pub protocol: u32,
 }
 
@@ -341,6 +348,14 @@ impl RoomStateWire {
         self.members.iter().any(|m| m.id == member_id)
     }
 
+    pub(crate) fn host_hash(&self) -> Option<&str> {
+        self.members.iter().find(|m| m.is_host).map(|m| m.client_hash.as_str())
+    }
+
+    pub(crate) fn member_hash(&self, member_id: &str) -> Option<&str> {
+        self.members.iter().find(|m| m.id == member_id).map(|m| m.client_hash.as_str())
+    }
+
     pub(crate) fn into_local_view(self, is_host: bool, current_user_id: String) -> RoomState {
         RoomState {
             room_code: self.room_code,
@@ -365,16 +380,16 @@ impl RoomStateWire {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub(crate) enum WireMessage {
-    /// `client_id` is stable per install (see `load_or_create_client_id`);
-    /// both fields are missing from pre-2 guests, which the host rejects.
+    /// The sender's identity is its signing key (`Opened::sender`), not a
+    /// field here.
     Join {
         user_id: String,
         nickname: String,
         #[serde(default)]
-        client_id: String,
-        #[serde(default)]
         protocol: u32,
     },
+    /// LAN beacon body (sealed and signed like everything else).
+    Beacon { tcp_port: u16 },
     State { room: RoomStateWire },
     Playback { state: SyncPlaybackState },
     /// Guest -> host: leaving. Host -> room with `HOST_CLOSED_USER_ID`: the
@@ -530,9 +545,21 @@ pub(crate) fn stale_members(
         .collect()
 }
 
-/// The LAN beacon: the room's topic id (see `RoomCipher`), never its code.
+/// The LAN beacon: the room's topic id (see `RoomCipher`) in the clear so
+/// guests skip other rooms cheaply, and the TCP port sealed and signed by
+/// the host, so nobody without the code can point guests elsewhere and the
+/// guest learns the host's key before it connects.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Beacon {
+    v: u32,
+    t: String,
+    p: String,
+}
+
+/// Protocol-2 beacon, sent only so old clients find us and get told to
+/// update.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct LegacyBeacon {
     topic_id: String,
     tcp_port: u16,
 }
@@ -642,8 +669,8 @@ pub struct SyncRoomManager {
     /// Whether rooms also use the internet (MQTT) transport. Only turned off
     /// by tests that must not depend on public brokers.
     internet_enabled: bool,
-    /// Our install-wide id, sent in every `Join`.
-    client_id: String,
+    /// This install's signing key in rooms (`~/.ytmd/sync_identity`).
+    identity: Arc<Identity>,
     host_book: Mutex<HostBook>,
 }
 
@@ -651,30 +678,6 @@ impl Default for SyncRoomManager {
     fn default() -> Self {
         Self::new()
     }
-}
-
-/// This install's identity in rooms, stored next to the config
-/// (`~/.ytmd/sync_client_id`) rather than in `config.json`, which every
-/// window can rewrite through `save_config`. Created on first use; if the
-/// file can't be written the id only lasts until restart.
-pub fn load_or_create_client_id(path: &std::path::Path) -> String {
-    if let Ok(existing) = std::fs::read_to_string(path) {
-        let id = existing.trim();
-        if is_valid_client_id(id) {
-            return id.to_string();
-        }
-    }
-    use rand::Rng;
-    let bytes: [u8; 16] = rand::rng().random();
-    let id: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
-    if let Err(e) = std::fs::write(path, &id) {
-        log::warn!("Listen Together: couldn't save client id to {}: {e}", path.display());
-    }
-    id
-}
-
-fn is_valid_client_id(id: &str) -> bool {
-    (16..=64).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
 }
 
 fn clean_nickname(raw: &str) -> String {
@@ -707,20 +710,50 @@ impl SyncRoomManager {
             leave_epoch: AtomicU64::new(0),
             liveness,
             internet_enabled,
-            client_id: generate_user_id(),
+            identity: Arc::new(Identity::generate()),
             host_book: Mutex::new(HostBook::default()),
         }
     }
 
-    /// The app passes its persisted id (`load_or_create_client_id`); without
-    /// it every run is a new identity and bans don't outlive a restart.
-    pub fn with_client_id(mut self, client_id: String) -> Self {
-        self.client_id = client_id;
+    /// The app passes its persisted identity (`Identity::load_or_create`);
+    /// without it every run is a new identity and bans don't outlive a
+    /// restart.
+    pub fn with_identity(mut self, identity: Arc<Identity>) -> Self {
+        self.identity = identity;
         self
     }
 
-    pub(crate) fn client_id(&self) -> &str {
-        &self.client_id
+    /// Test installs: the same label is the same identity.
+    #[cfg(test)]
+    pub(crate) fn with_client_id(self, label: &str) -> Self {
+        self.with_identity(Arc::new(Identity::for_test(label)))
+    }
+
+    pub(crate) fn identity(&self) -> &Arc<Identity> {
+        &self.identity
+    }
+
+    pub(crate) fn cipher(&self, code: &str) -> RoomCipher {
+        RoomCipher::new(code, self.identity.clone())
+    }
+
+    /// Whether `member_id` is in the room under the key `sender` (host
+    /// side: a guest request must come from the key the member joined with).
+    pub(crate) fn member_is(&self, member_id: &str, sender: &str) -> bool {
+        self.state
+            .lock()
+            .as_ref()
+            .and_then(|r| r.member(member_id))
+            .is_some_and(|m| m.client_hash == sender)
+    }
+
+    /// Guest side: the `client_hash` of the room's host, as last signed by
+    /// the host we pinned.
+    pub(crate) fn host_hash(&self) -> Option<String> {
+        self.state
+            .lock()
+            .as_ref()
+            .and_then(|r| r.members.iter().find(|m| m.is_host).map(|m| m.client_hash.clone()))
     }
 
     /// Starts a new session generation and returns it.
@@ -750,10 +783,10 @@ impl SyncRoomManager {
     /// id comes back in `Admission::replaced` so the caller can drop that
     /// connection.
     pub(crate) fn admit_member(&self, join: JoinRequest) -> Result<JoinDecision, RejectReason> {
-        if join.protocol < PROTOCOL_VERSION || join.client_id.is_empty() {
+        if join.protocol < PROTOCOL_VERSION || join.client_hash.is_empty() {
             return Err(RejectReason::Outdated);
         }
-        let hash = client_hash(&join.client_id);
+        let hash = join.client_hash.clone();
         let mut guard = self.state.lock();
         let room = guard.as_mut().filter(|r| r.is_host).ok_or(RejectReason::Closed)?;
         if room.banned.iter().any(|b| b.client_hash == hash) {
@@ -1120,19 +1153,6 @@ fn now_ms() -> u64 {
         .as_millis() as u64
 }
 
-/// 10 chars from a 32-char alphabet is ~50 bits of entropy, and the code is
-/// also the room's encryption secret (see `sync_crypto.rs`). No visually
-/// confusable chars, so it's easy to read aloud or type.
-pub fn generate_room_code() -> String {
-    use rand::Rng;
-    const CHARS: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-    let mut rng = rand::rng();
-    let code: String = (0..10)
-        .map(|_| CHARS[rng.random_range(0..CHARS.len())] as char)
-        .collect();
-    format!("YTMD-{}", code)
-}
-
 pub(crate) fn generate_user_id() -> String {
     use rand::Rng;
     let n: u64 = rand::rng().random();
@@ -1162,7 +1182,7 @@ pub async fn create_room(
             is_host: true,
             joined_at_ms: now_ms(),
             role: MemberRole::Host,
-            client_hash: client_hash(manager.client_id()),
+            client_hash: manager.identity().client_hash().to_string(),
         }],
         playback_state: None,
         default_role: MemberRole::Dj,
@@ -1188,7 +1208,12 @@ async fn start_hosting(
         .await
         .map_err(|e| format!("Failed to start sync server: {e}"))?;
     let tcp_port = listener.local_addr().map_err(|e| e.to_string())?.port();
-    let cipher = Arc::new(RoomCipher::new(&room.room_code));
+    let cipher = Arc::new(manager.cipher(&room.room_code));
+    // Only to tell protocol-2 guests to update (PBKDF2, a few ms).
+    let legacy = {
+        let code = room.room_code.clone();
+        Arc::new(tokio::task::spawn_blocking(move || LegacyCipher::new(&code)).await.map_err(|e| e.to_string())?)
+    };
 
     let generation = manager.begin_session();
     *manager.state.lock() = Some(room.clone());
@@ -1196,16 +1221,21 @@ async fn start_hosting(
     manager.last_seen.lock().clear();
     *manager.host_book.lock() = book;
 
-    let accept_task =
-        tauri::async_runtime::spawn(accept_loop(listener, manager.clone(), sink.clone(), cipher.clone()));
-    let beacon_task = tauri::async_runtime::spawn(beacon_loop(cipher.topic_id().to_string(), tcp_port));
+    let accept_task = tauri::async_runtime::spawn(accept_loop(
+        listener,
+        manager.clone(),
+        sink.clone(),
+        cipher.clone(),
+        legacy.clone(),
+    ));
+    let beacon_task = tauri::async_runtime::spawn(beacon_loop(cipher.clone(), legacy.topic_id().to_string(), tcp_port));
     let liveness_task =
         tauri::async_runtime::spawn(host_liveness_loop(manager.clone(), sink.clone(), generation));
     // Also host on every public MQTT broker, each in the background: a guest
     // joins through whichever it reaches first. LAN hosting works without.
     let internet_shutdown = manager.internet_enabled.then(|| {
         let (tx, rx) = watch::channel(false);
-        crate::p2p_sync::host_on_all_brokers(manager.clone(), sink.clone(), cipher.clone(), generation, rx);
+        crate::p2p_sync::host_on_all_brokers(manager.clone(), sink.clone(), cipher.clone(), legacy.clone(), generation, rx);
         tx
     });
 
@@ -1228,9 +1258,18 @@ async fn accept_loop(
     manager: Arc<SyncRoomManager>,
     sink: Arc<dyn SyncEventSink>,
     cipher: Arc<RoomCipher>,
+    legacy: Arc<LegacyCipher>,
 ) {
+    // Anyone on the LAN can connect; unauthenticated handshakes are capped so
+    // a flood of idle connections can't pile up tasks and buffers. Members
+    // are capped separately (`MAX_MEMBERS`).
+    let handshakes = Arc::new(tokio::sync::Semaphore::new(MAX_PENDING_HANDSHAKES));
     while let Ok((stream, _)) = listener.accept().await {
-        tokio::spawn(peer_task(stream, manager.clone(), sink.clone(), cipher.clone()));
+        let Ok(permit) = handshakes.clone().try_acquire_owned() else {
+            drop(stream);
+            continue;
+        };
+        tokio::spawn(peer_task(stream, manager.clone(), sink.clone(), cipher.clone(), legacy.clone(), permit));
     }
 }
 
@@ -1241,7 +1280,14 @@ async fn write_sealed(write_half: &mut OwnedWriteHalf, cipher: &RoomCipher, msg:
     }
 }
 
-async fn peer_task(stream: TcpStream, manager: Arc<SyncRoomManager>, sink: Arc<dyn SyncEventSink>, cipher: Arc<RoomCipher>) {
+async fn peer_task(
+    stream: TcpStream,
+    manager: Arc<SyncRoomManager>,
+    sink: Arc<dyn SyncEventSink>,
+    cipher: Arc<RoomCipher>,
+    legacy: Arc<LegacyCipher>,
+    handshake_permit: tokio::sync::OwnedSemaphorePermit,
+) {
     let (read_half, mut write_half) = stream.into_split();
     let mut reader = BufReader::new(read_half);
     let mut line = String::new();
@@ -1251,12 +1297,23 @@ async fn peer_task(stream: TcpStream, manager: Arc<SyncRoomManager>, sink: Arc<d
         _ => return,
     }
     let join = match cipher.open_line(&line) {
-        Some(WireMessage::Join { user_id, nickname, client_id, protocol }) => {
-            JoinRequest { user_id, nickname, client_id, protocol }
+        Some(Opened { msg: WireMessage::Join { user_id, nickname, protocol }, sender }) => {
+            JoinRequest { user_id, nickname, client_hash: sender, protocol }
         }
-        _ => return, // not our room's key, or not a join
+        Some(_) => return,
+        None => {
+            // A protocol-2 guest: tell it to update, in its own format.
+            if let Some(WireMessage::Join { user_id, .. }) = legacy.open_line(&line) {
+                let reject = WireMessage::Rejected { user_id, reason: RejectReason::Outdated };
+                if let Some(reply) = legacy.seal_line(&reject) {
+                    let _ = write_half.write_all(reply.as_bytes()).await;
+                }
+            }
+            return; // not our room's key, or not a join
+        }
     };
     let member_id = join.user_id.clone();
+    let member_hash = join.client_hash.clone();
 
     let admission = match manager.admit_member(join) {
         Ok(JoinDecision::Admitted(a)) => *a,
@@ -1293,6 +1350,7 @@ async fn peer_task(stream: TcpStream, manager: Arc<SyncRoomManager>, sink: Arc<d
         manager.unregister_peer(old);
     }
 
+    drop(handshake_permit);
     let (tx, mut rx) = mpsc::unbounded_channel::<WireMessage>();
     manager.register_peer(member_id.clone(), tx);
     // The current room, not the admission snapshot: approval may have been
@@ -1311,9 +1369,11 @@ async fn peer_task(stream: TcpStream, manager: Arc<SyncRoomManager>, sink: Arc<d
                     // open or parse are ignored so newer guests don't break
                     // this host.
                     Ok(_) => {
-                        manager.touch_member(&member_id);
-                        if let Some(msg) = cipher.open_line(&line) {
-                            manager.handle_guest_message(&member_id, msg, &sink);
+                        // Only lines signed by the key this member joined
+                        // with count, even on its own connection.
+                        if let Some(opened) = cipher.open_line(&line).filter(|o| o.sender == member_hash) {
+                            manager.touch_member(&member_id);
+                            manager.handle_guest_message(&member_id, opened.msg, &sink);
                         }
                     }
                 }
@@ -1360,7 +1420,8 @@ async fn host_liveness_loop(manager: Arc<SyncRoomManager>, sink: Arc<dyn SyncEve
     }
 }
 
-async fn beacon_loop(topic_id: String, tcp_port: u16) {
+async fn beacon_loop(cipher: Arc<RoomCipher>, legacy_topic_id: String, tcp_port: u16) {
+    use base64::Engine;
     let sock = match UdpSocket::bind("0.0.0.0:0").await {
         Ok(s) => s,
         Err(_) => return,
@@ -1368,11 +1429,21 @@ async fn beacon_loop(topic_id: String, tcp_port: u16) {
     if sock.set_broadcast(true).is_err() {
         return;
     }
-    let Ok(payload) = serde_json::to_vec(&Beacon { topic_id, tcp_port }) else {
+    let Ok(legacy) = serde_json::to_vec(&LegacyBeacon { topic_id: legacy_topic_id, tcp_port }) else {
         return;
     };
     loop {
-        let _ = sock.send_to(&payload, ("255.255.255.255", DISCOVERY_UDP_PORT)).await;
+        // Sealed fresh each time: a new counter, so guests' replay checks
+        // never see the same beacon twice.
+        let sealed = cipher.seal_msg(&WireMessage::Beacon { tcp_port }).map(|p| Beacon {
+            v: PROTOCOL_VERSION,
+            t: cipher.topic_id().to_string(),
+            p: base64::engine::general_purpose::STANDARD.encode(p),
+        });
+        if let Some(payload) = sealed.and_then(|b| serde_json::to_vec(&b).ok()) {
+            let _ = sock.send_to(&payload, ("255.255.255.255", DISCOVERY_UDP_PORT)).await;
+        }
+        let _ = sock.send_to(&legacy, ("255.255.255.255", DISCOVERY_UDP_PORT)).await;
         tokio::time::sleep(BEACON_INTERVAL).await;
     }
 }
@@ -1434,7 +1505,18 @@ pub async fn join_room(
     if code.trim().is_empty() {
         return Err("sync.error.codeRequired".to_string());
     }
-    join_inner(manager, sink, &code, &nickname).await
+    let code = parse_room_code(&code)?;
+    join_inner(manager, sink, &code, &nickname, &[]).await
+}
+
+/// Whether a `State` signed by `sender` may be taken as the room's host.
+/// The signer must be the host the state itself names, and one of
+/// `expected_hosts` when we know who that should be (a reconnect, a LAN
+/// beacon); an empty list is a fresh join, which trusts the first host key
+/// it sees and pins it from then on.
+pub(crate) fn host_state_trusted(room: &RoomStateWire, sender: &str, expected_hosts: &[String]) -> bool {
+    let named = room.host_hash() == Some(sender);
+    named && (expected_hosts.is_empty() || expected_hosts.iter().any(|h| h == sender))
 }
 
 /// Finds the room (LAN first, then the internet) and joins it. Also used to
@@ -1445,12 +1527,15 @@ async fn join_inner(
     sink: Arc<dyn SyncEventSink>,
     code: &str,
     nickname: &str,
+    expected_hosts: &[String],
 ) -> Result<RoomState, String> {
-    let cipher = Arc::new(RoomCipher::new(code));
-    match discover_host(cipher.topic_id()).await {
-        Ok(host_addr) => connect_to_host(manager, sink, host_addr, nickname.to_string(), cipher).await,
+    let cipher = Arc::new(manager.cipher(code));
+    match discover_host(&cipher, expected_hosts).await {
+        Ok((host_addr, host_hash)) => {
+            connect_to_host(manager, sink, host_addr, nickname.to_string(), cipher, &[host_hash]).await
+        }
         Err(_) if manager.internet_enabled => {
-            crate::p2p_sync::join_room(manager, sink, cipher, nickname.to_string()).await
+            crate::p2p_sync::join_room(manager, sink, cipher, nickname.to_string(), expected_hosts.to_vec()).await
         }
         Err(_) => Err(ERR_NOT_FOUND.to_string()),
     }
@@ -1464,6 +1549,7 @@ async fn connect_to_host(
     host_addr: SocketAddr,
     nickname: String,
     cipher: Arc<RoomCipher>,
+    expected_hosts: &[String],
 ) -> Result<RoomState, String> {
     let stream = tokio::time::timeout(JOIN_HANDSHAKE_TIMEOUT, TcpStream::connect(host_addr))
         .await
@@ -1474,12 +1560,7 @@ async fn connect_to_host(
     let (read_half, mut write_half) = stream.into_split();
     let mut reader = BufReader::new(read_half);
 
-    let join_msg = WireMessage::Join {
-        user_id: user_id.clone(),
-        nickname,
-        client_id: manager.client_id().to_string(),
-        protocol: PROTOCOL_VERSION,
-    };
+    let join_msg = WireMessage::Join { user_id: user_id.clone(), nickname, protocol: PROTOCOL_VERSION };
     if !write_sealed(&mut write_half, &cipher, &join_msg).await {
         return Err("Failed to send join request.".to_string());
     }
@@ -1494,10 +1575,16 @@ async fn connect_to_host(
         if n == 0 {
             return Err("Host closed the connection (room may be full or closed).".to_string());
         }
-        match cipher.open_line(&line) {
-            Some(WireMessage::State { room }) => break room,
-            Some(WireMessage::Rejected { reason, .. }) => return Err(reason.message_key()),
-            Some(WireMessage::Pending { .. }) => {
+        let Some(Opened { msg, sender }) = cipher.open_line(&line) else {
+            return Err("Unexpected response from host.".to_string());
+        };
+        let from_expected = expected_hosts.is_empty() || expected_hosts.contains(&sender);
+        match msg {
+            WireMessage::State { room } if room.has_member(&user_id) && host_state_trusted(&room, &sender, expected_hosts) => {
+                break room
+            }
+            WireMessage::Rejected { reason, .. } if from_expected => return Err(reason.message_key()),
+            WireMessage::Pending { .. } if from_expected => {
                 sink.join_pending();
                 wait = APPROVAL_TIMEOUT;
             }
@@ -1585,9 +1672,16 @@ pub(crate) fn apply_host_message(
     sink: &Arc<dyn SyncEventSink>,
     my_id: &str,
     generation: u64,
-    msg: WireMessage,
+    opened: Opened,
 ) -> Option<Option<GuestEnd>> {
-    match msg {
+    // Only the host we pinned speaks for the room. Anyone else holding the
+    // code (another guest, a kicked member) can seal messages, but not sign
+    // them with the host's key.
+    if manager.host_hash().as_deref() != Some(opened.sender.as_str()) {
+        log::debug!("Listen Together: ignored a message not signed by the host");
+        return None;
+    }
+    match opened.msg {
         // The host dropped us (e.g. evicted after a network blip): its
         // broadcasts may keep arriving, but we're no longer a member.
         WireMessage::State { room } if !room.has_member(my_id) => Some(Some(GuestEnd::Left(LeaveReason::Lost))),
@@ -1644,10 +1738,10 @@ async fn guest_reader_loop(
             // is a crash or a lost network.
             Ok(Ok(0)) | Ok(Err(_)) => break GuestEnd::Left(LeaveReason::Lost),
             Ok(Ok(_)) => {
-                let Some(msg) = cipher.open_line(&line) else {
+                let Some(opened) = cipher.open_line(&line) else {
                     continue;
                 };
-                match apply_host_message(&manager, &sink, &my_id, generation, msg) {
+                match apply_host_message(&manager, &sink, &my_id, generation, opened) {
                     None => {}
                     Some(None) => return,
                     Some(Some(end)) => break end,
@@ -1682,12 +1776,24 @@ pub(crate) fn guest_ended(manager: &Arc<SyncRoomManager>, sink: Arc<dyn SyncEven
                 }
             });
         }
-        GuestEnd::Handoff { .. } => {
-            tauri::async_runtime::spawn(reconnect(manager.clone(), sink, last_room, false));
+        GuestEnd::Handoff { new_host_id, room, .. } => {
+            // The handoff was signed by the host we trusted and names the
+            // next host: only that key may take us back in.
+            let expected: Vec<String> = room.member_hash(&new_host_id).map(str::to_string).into_iter().collect();
+            tauri::async_runtime::spawn(reconnect(manager.clone(), sink, last_room, false, expected));
         }
         GuestEnd::Left(LeaveReason::Lost) => {
-            let take_over = pick_successor(&last_room.members).as_deref() == Some(me.as_str());
-            tauri::async_runtime::spawn(reconnect(manager.clone(), sink, last_room, take_over));
+            let successor = pick_successor(&last_room.members);
+            let take_over = successor.as_deref() == Some(me.as_str());
+            // Either the same host (our own network blipped) or the member
+            // every peer picks as its successor.
+            let expected: Vec<String> = last_room
+                .members
+                .iter()
+                .filter(|m| m.is_host || Some(&m.id) == successor.as_ref())
+                .map(|m| m.client_hash.clone())
+                .collect();
+            tauri::async_runtime::spawn(reconnect(manager.clone(), sink, last_room, take_over, expected));
         }
     }
 }
@@ -1697,7 +1803,13 @@ pub(crate) fn guest_ended(manager: &Arc<SyncRoomManager>, sink: Arc<dyn SyncEven
 /// room can't be found, but only after the internet itself was reachable: a
 /// guest whose own network dropped must not start a second copy of a room
 /// that's still running.
-async fn reconnect(manager: Arc<SyncRoomManager>, sink: Arc<dyn SyncEventSink>, last_room: RoomState, take_over: bool) {
+async fn reconnect(
+    manager: Arc<SyncRoomManager>,
+    sink: Arc<dyn SyncEventSink>,
+    last_room: RoomState,
+    take_over: bool,
+    expected_hosts: Vec<String>,
+) {
     let epoch = manager.leave_epoch.load(Ordering::SeqCst);
     let code = last_room.room_code.clone();
     let nickname = last_room
@@ -1721,7 +1833,7 @@ async fn reconnect(manager: Arc<SyncRoomManager>, sink: Arc<dyn SyncEventSink>, 
         if manager.leave_epoch.load(Ordering::SeqCst) != epoch {
             return;
         }
-        match join_inner(&manager, sink.clone(), &code, &nickname).await {
+        match join_inner(&manager, sink.clone(), &code, &nickname, &expected_hosts).await {
             Ok(_) => {
                 if manager.leave_epoch.load(Ordering::SeqCst) != epoch {
                     leave_room(&manager);
@@ -1784,7 +1896,7 @@ async fn resume_room(
             is_host: true,
             joined_at_ms: me.joined_at_ms,
             role: MemberRole::Host,
-            client_hash: client_hash(manager.client_id()),
+            client_hash: manager.identity().client_hash().to_string(),
         }],
         playback_state: snapshot.playback_state,
         default_role: snapshot.default_role,
@@ -1798,15 +1910,21 @@ async fn resume_room(
     start_hosting(manager, sink, room, book).await
 }
 
-async fn discover_host(topic_id: &str) -> Result<SocketAddr, String> {
-    discover_host_on_port(DISCOVERY_UDP_PORT, topic_id, DISCOVERY_TIMEOUT).await
+async fn discover_host(cipher: &RoomCipher, expected_hosts: &[String]) -> Result<(SocketAddr, String), String> {
+    discover_host_on_port(DISCOVERY_UDP_PORT, cipher, expected_hosts, DISCOVERY_TIMEOUT).await
 }
 
+/// Waits for a beacon of our room: right topic id, port sealed with the
+/// room key and signed (by one of `expected_hosts`, when given). Returns the
+/// host's address (the beacon's source IP, only ever used to connect; the
+/// TCP handshake still has to prove the key) and the signer's hash.
 async fn discover_host_on_port(
     discovery_port: u16,
-    topic_id: &str,
+    cipher: &RoomCipher,
+    expected_hosts: &[String],
     timeout_budget: Duration,
-) -> Result<SocketAddr, String> {
+) -> Result<(SocketAddr, String), String> {
+    use base64::Engine;
     let sock = UdpSocket::bind(("0.0.0.0", discovery_port)).await.map_err(|_| {
         format!("Couldn't listen for the host on port {discovery_port}: another YTMD may be searching already.")
     })?;
@@ -1817,9 +1935,18 @@ async fn discover_host_on_port(
         let Ok(Ok((n, src))) = tokio::time::timeout(remaining, sock.recv_from(&mut buf)).await else {
             return Err("Room not found on this network.".to_string());
         };
-        if let Ok(beacon) = serde_json::from_slice::<Beacon>(&buf[..n]) {
-            if beacon.topic_id == topic_id {
-                return Ok(SocketAddr::new(src.ip(), beacon.tcp_port));
+        let Ok(beacon) = serde_json::from_slice::<Beacon>(&buf[..n]) else {
+            continue;
+        };
+        if beacon.v != PROTOCOL_VERSION || beacon.t != cipher.topic_id() || beacon.p.len() > 1024 {
+            continue;
+        }
+        let Ok(sealed) = base64::engine::general_purpose::STANDARD.decode(&beacon.p) else {
+            continue;
+        };
+        if let Some(Opened { msg: WireMessage::Beacon { tcp_port }, sender }) = cipher.open_msg(&sealed) {
+            if tcp_port != 0 && (expected_hosts.is_empty() || expected_hosts.contains(&sender)) {
+                return Ok((SocketAddr::new(src.ip(), tcp_port), sender));
             }
         }
     }
@@ -1969,7 +2096,9 @@ pub fn transfer_host(manager: &Arc<SyncRoomManager>, sink: Arc<dyn SyncEventSink
     as_guest.pending.clear();
     *manager.state.lock() = Some(as_guest.clone());
     manager.begin_session();
-    tauri::async_runtime::spawn(reconnect(manager.clone(), sink, as_guest, false));
+    // Only the member we handed the room to may take us back in.
+    let expected: Vec<String> = as_guest.member(member_id).map(|m| m.client_hash.clone()).into_iter().collect();
+    tauri::async_runtime::spawn(reconnect(manager.clone(), sink, as_guest, false, expected));
     Ok(())
 }
 
@@ -2022,6 +2151,7 @@ fn shut_down(manager: &Arc<SyncRoomManager>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sync_crypto::{client_hash, test_cipher};
     use std::net::Ipv4Addr;
     use std::sync::atomic::AtomicUsize;
 
@@ -2071,7 +2201,7 @@ mod tests {
     }
 
     fn local_install(install: &str) -> Arc<SyncRoomManager> {
-        Arc::new(SyncRoomManager::with_options(LivenessConfig::default(), false).with_client_id(install.into()))
+        Arc::new(SyncRoomManager::with_options(LivenessConfig::default(), false).with_client_id(install))
     }
 
     /// Millisecond-scale liveness so eviction/silence tests finish fast.
@@ -2098,17 +2228,17 @@ mod tests {
         }
     }
 
-    fn join_req(user_id: &str, client_id: &str) -> JoinRequest {
+    fn join_req(user_id: &str, install: &str) -> JoinRequest {
         JoinRequest {
             user_id: user_id.to_string(),
             nickname: user_id.to_string(),
-            client_id: client_id.to_string(),
+            client_hash: if install.is_empty() { String::new() } else { client_hash(install) },
             protocol: PROTOCOL_VERSION,
         }
     }
 
-    fn admit(manager: &SyncRoomManager, user_id: &str, client_id: &str) -> Admission {
-        match manager.admit_member(join_req(user_id, client_id)) {
+    fn admit(manager: &SyncRoomManager, user_id: &str, install: &str) -> Admission {
+        match manager.admit_member(join_req(user_id, install)) {
             Ok(JoinDecision::Admitted(a)) => *a,
             Ok(JoinDecision::Pending { .. }) => panic!("{user_id} unexpectedly waits for approval"),
             Err(e) => panic!("{user_id} rejected: {e:?}"),
@@ -2168,7 +2298,7 @@ mod tests {
     ) -> Result<RoomState, String> {
         let code = host.get_room_state().expect("host has a room").room_code;
         let addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), host.host_port().expect("host listens"));
-        connect_to_host(guest, sink, addr, nickname.to_string(), Arc::new(RoomCipher::new(&code))).await
+        connect_to_host(guest, sink, addr, nickname.to_string(), Arc::new(guest.cipher(&code)), &[]).await
     }
 
     // --- Basics ---------------------------------------------------------
@@ -2177,7 +2307,7 @@ mod tests {
     fn test_generate_room_code_format() {
         let code = generate_room_code();
         assert!(code.starts_with("YTMD-"));
-        assert_eq!(code.len(), 15);
+        assert_eq!(code.len(), 31);
         assert!(code[5..].chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit()));
         assert_ne!(generate_room_code(), code);
     }
@@ -2187,13 +2317,12 @@ mod tests {
         let msg = WireMessage::Join {
             user_id: "user-1".to_string(),
             nickname: "Kacper".to_string(),
-            client_id: "install-1".to_string(),
             protocol: PROTOCOL_VERSION,
         };
         let json = serde_json::to_string(&msg).unwrap();
         match serde_json::from_str(&json).unwrap() {
-            WireMessage::Join { user_id, nickname, client_id, .. } => {
-                assert_eq!((user_id.as_str(), nickname.as_str(), client_id.as_str()), ("user-1", "Kacper", "install-1"));
+            WireMessage::Join { user_id, nickname, protocol } => {
+                assert_eq!((user_id.as_str(), nickname.as_str(), protocol), ("user-1", "Kacper", 3));
             }
             _ => panic!("wrong variant"),
         }
@@ -2240,19 +2369,6 @@ mod tests {
         assert!(local.require_approval);
         assert_eq!(local.queue.len(), 1);
         assert!(local.banned.is_empty() && local.pending.is_empty());
-    }
-
-    #[test]
-    fn test_client_id_persists_across_runs() {
-        let dir = std::env::temp_dir().join(format!("ytmd-client-id-{}", rand::random::<u32>()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("sync_client_id");
-        let first = load_or_create_client_id(&path);
-        assert_eq!(first.len(), 32);
-        assert_eq!(load_or_create_client_id(&path), first);
-        std::fs::write(&path, "garbage!").unwrap();
-        assert_ne!(load_or_create_client_id(&path), "garbage!", "an invalid file is replaced");
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -2344,7 +2460,7 @@ mod tests {
     }
 
     #[test]
-    fn test_guests_without_client_id_are_turned_away_as_outdated() {
+    fn test_old_protocol_guests_are_turned_away_as_outdated() {
         let manager = hosting(&[("host", true)]);
         let mut old = join_req("old", "");
         old.protocol = 0;
@@ -2683,7 +2799,7 @@ mod tests {
         let mut room = room_with(&[("host", true), ("other", false)]);
         room.members[1].joined_at_ms = 50;
         room.room_code = generate_room_code();
-        let cipher = Arc::new(RoomCipher::new(&room.room_code));
+        let cipher = Arc::new(RoomCipher::new(&room.room_code, Arc::new(Identity::for_test("install-of-host"))));
         let c = cipher.clone();
         let task = tokio::spawn(async move {
             let (stream, _) = listener.accept().await.unwrap();
@@ -2691,7 +2807,7 @@ mod tests {
             let mut reader = BufReader::new(read_half);
             let mut line = String::new();
             reader.read_line(&mut line).await.unwrap();
-            let Some(WireMessage::Join { user_id, .. }) = c.open_line(&line) else {
+            let Some(Opened { msg: WireMessage::Join { user_id, .. }, .. }) = c.open_line(&line) else {
                 panic!("expected a sealed join");
             };
             let me = RoomMember {
@@ -2717,7 +2833,7 @@ mod tests {
         let (addr, cipher, fake) = vanishing_host(true).await;
         let guest = fast_manager();
         let (sink, dyn_sink) = recording();
-        let joined = connect_to_host(&guest, dyn_sink, addr, "Me".into(), cipher).await.unwrap();
+        let joined = connect_to_host(&guest, dyn_sink, addr, "Me".into(), cipher, &[]).await.unwrap();
 
         assert!(wait_until(|| guest.get_room_state().is_some_and(|r| r.reconnecting), Duration::from_secs(2)).await);
         assert!(
@@ -2739,7 +2855,7 @@ mod tests {
         let (addr, cipher, fake) = vanishing_host(false).await;
         let guest = fast_manager();
         let (sink, dyn_sink) = recording();
-        connect_to_host(&guest, dyn_sink, addr, "Me".into(), cipher).await.unwrap();
+        connect_to_host(&guest, dyn_sink, addr, "Me".into(), cipher, &[]).await.unwrap();
         assert!(wait_until(|| !sink.left.lock().is_empty(), Duration::from_secs(10)).await);
         assert_eq!(sink.left.lock().as_slice(), &[LeaveReason::Lost]);
         assert!(guest.get_room_state().is_none());
@@ -2752,7 +2868,7 @@ mod tests {
         let (addr, cipher, fake) = vanishing_host(true).await;
         let guest = fast_manager();
         let (sink, dyn_sink) = recording();
-        connect_to_host(&guest, dyn_sink, addr, "Me".into(), cipher).await.unwrap();
+        connect_to_host(&guest, dyn_sink, addr, "Me".into(), cipher, &[]).await.unwrap();
         assert!(wait_until(|| guest.get_room_state().is_some_and(|r| r.reconnecting), Duration::from_secs(2)).await);
         leave_room(&guest);
         tokio::time::sleep(Duration::from_secs(4)).await;
@@ -2762,26 +2878,163 @@ mod tests {
         fake.abort();
     }
 
+    // --- Protocol 3: who may speak for whom -----------------------------
+
+    /// A guest in a room whose host is `install-of-host`.
+    fn guest_of(members: &[(&str, bool)]) -> Arc<SyncRoomManager> {
+        let guest = local_install("install-of-me");
+        let mut room = room_with(members);
+        room.is_host = false;
+        room.current_user_id = "me".into();
+        guest.set_local_room(room);
+        guest
+    }
+
+    fn opened(from: &str, msg: WireMessage) -> Opened {
+        Opened { msg, sender: client_hash(from) }
+    }
+
+    /// Anyone with the code can seal messages, but only the host's key makes
+    /// a guest act on `Kicked`, `State`, `HostHandoff` or the room's end.
+    #[test]
+    fn test_guest_obeys_only_the_host_key() {
+        let guest = guest_of(&[("host", true), ("me", false), ("other", false)]);
+        let sink = noop_sink();
+        let generation = guest.begin_session();
+        let kicked = || WireMessage::Kicked { user_id: "me".into() };
+        let closed = || WireMessage::Leave { user_id: HOST_CLOSED_USER_ID.into() };
+        for forger in ["install-of-other", "install-of-me", "stranger"] {
+            assert!(apply_host_message(&guest, &sink, "me", generation, opened(forger, kicked())).is_none(), "{forger}");
+            assert!(apply_host_message(&guest, &sink, "me", generation, opened(forger, closed())).is_none(), "{forger}");
+        }
+        assert!(matches!(
+            apply_host_message(&guest, &sink, "me", generation, opened("install-of-host", kicked())),
+            Some(Some(GuestEnd::Left(LeaveReason::Kicked)))
+        ));
+    }
+
+    /// A member id is bound to the key it joined with: nobody else can send
+    /// requests (or heartbeats, or a leave) as that member.
+    #[test]
+    fn test_member_ids_are_bound_to_their_key() {
+        let manager = hosting(&[("host", true)]);
+        admit(&manager, "mod", "install-of-mod");
+        admit(&manager, "dj", "install-of-dj");
+        assert!(manager.member_is("mod", &client_hash("install-of-mod")));
+        assert!(!manager.member_is("mod", &client_hash("install-of-dj")), "a DJ can't pose as the moderator");
+        assert!(!manager.member_is("host", &client_hash("install-of-dj")), "nor as the host");
+        assert!(!manager.member_is("nobody", &client_hash("install-of-dj")));
+    }
+
+    #[test]
+    fn test_state_must_be_signed_by_the_host_it_names() {
+        let room = RoomStateWire::from(&room_with(&[("host", true), ("me", false)]));
+        let host = client_hash("install-of-host");
+        let me = client_hash("install-of-me");
+        assert!(host_state_trusted(&room, &host, &[]), "fresh join: first host key is taken");
+        assert!(!host_state_trusted(&room, &me, &[]), "a member can't sign the room as host");
+        assert!(host_state_trusted(&room, &host, std::slice::from_ref(&host)));
+        assert!(!host_state_trusted(&room, &host, &[client_hash("install-of-successor")]), "reconnect expects someone else");
+    }
+
+    #[tokio::test]
+    async fn test_old_codes_get_a_clear_error() {
+        let guest = local_manager();
+        let res = join_room(&guest, noop_sink(), "YTMD-ABCDEFGHJK".into(), "G".into()).await;
+        assert_eq!(res.err().as_deref(), Some("sync.error.oldCode"));
+        let res = join_room(&guest, noop_sink(), "hello".into(), "G".into()).await;
+        assert_eq!(res.err().as_deref(), Some("sync.error.badCode"));
+    }
+
+    /// A protocol-2 client that finds a v3 room is told, in its own format,
+    /// that it must update, instead of timing out on "room not found".
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_protocol_2_guest_is_told_to_update() {
+        let host = local_manager();
+        let room = create_room(&host, noop_sink(), "Host".to_string()).await.unwrap();
+        let legacy = LegacyCipher::new(&room.room_code);
+        let join = WireMessage::Join { user_id: "user-old".into(), nickname: "Old".into(), protocol: 2 };
+        let mut raw = TcpStream::connect((Ipv4Addr::LOCALHOST, host.host_port().unwrap())).await.unwrap();
+        raw.write_all(legacy.seal_line(&join).unwrap().as_bytes()).await.unwrap();
+        let mut reader = BufReader::new(raw);
+        let mut reply = String::new();
+        tokio::time::timeout(Duration::from_secs(2), reader.read_line(&mut reply)).await.unwrap().unwrap();
+        assert!(matches!(
+            legacy.open_line(&reply),
+            Some(WireMessage::Rejected { reason: RejectReason::Outdated, .. })
+        ));
+        assert_eq!(host.get_room_state().unwrap().members.len(), 1);
+        end_room(&host);
+    }
+
+    /// Over LAN a guest's connection is its identity, and lines on it signed
+    /// by another key (someone who got hold of the code) are ignored.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_lan_lines_signed_by_another_key_are_ignored() {
+        let host = local_manager();
+        let (host_sink, host_dyn) = recording();
+        let room = create_room(&host, host_dyn, "Host".to_string()).await.unwrap();
+        let guest = test_cipher(&room.room_code);
+        let intruder = test_cipher(&room.room_code);
+        let mut raw = TcpStream::connect((Ipv4Addr::LOCALHOST, host.host_port().unwrap())).await.unwrap();
+        let join = WireMessage::Join { user_id: "user-g".into(), nickname: "G".into(), protocol: PROTOCOL_VERSION };
+        raw.write_all(guest.seal_line(&join).unwrap().as_bytes()).await.unwrap();
+        assert!(wait_until(|| host.get_room_state().map_or(0, |r| r.members.len()) == 2, Duration::from_secs(2)).await);
+        let skip = WireMessage::Control { user_id: "user-g".into(), action: SyncControl::Next };
+        raw.write_all(intruder.seal_line(&skip).unwrap().as_bytes()).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(host_sink.controls.lock().is_empty(), "the intruder's skip must not reach the host page");
+        raw.write_all(guest.seal_line(&skip).unwrap().as_bytes()).await.unwrap();
+        assert!(wait_until(|| host_sink.controls.lock().len() == 1, Duration::from_secs(2)).await);
+        end_room(&host);
+    }
+
     // --- LAN transport ----------------------------------------------------
 
     #[tokio::test]
-    async fn test_discover_matches_topic_id_only() {
+    async fn test_discover_needs_a_beacon_sealed_by_the_room() {
+        use base64::Engine;
         let test_port = 47900;
-        let cipher = RoomCipher::new("YTMD-ABCDEFGHJK");
-        let payload = serde_json::to_vec(&Beacon { topic_id: cipher.topic_id().to_string(), tcp_port: 5555 }).unwrap();
+        let code = generate_room_code();
+        let host = RoomCipher::new(&code, Arc::new(Identity::for_test("host")));
+        let seal = |c: &RoomCipher, port: u16| {
+            serde_json::to_vec(&Beacon {
+                v: PROTOCOL_VERSION,
+                t: c.topic_id().to_string(),
+                p: base64::engine::general_purpose::STANDARD.encode(c.seal_msg(&WireMessage::Beacon { tcp_port: port }).unwrap()),
+            })
+            .unwrap()
+        };
+        // Someone on the LAN copies the topic id but can't seal the port.
+        let forged = serde_json::to_vec(&Beacon { v: PROTOCOL_VERSION, t: host.topic_id().into(), p: "AAAA".into() }).unwrap();
+        let real = seal(&host, 5555);
         let sender_task = tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(100)).await;
             let sock = UdpSocket::bind("0.0.0.0:0").await.unwrap();
-            sock.send_to(&payload, (Ipv4Addr::LOCALHOST, test_port)).await.unwrap();
+            sock.send_to(&forged, (Ipv4Addr::LOCALHOST, test_port)).await.unwrap();
+            sock.send_to(&real, (Ipv4Addr::LOCALHOST, test_port)).await.unwrap();
         });
-        let addr = discover_host_on_port(test_port, cipher.topic_id(), Duration::from_secs(2))
+        let guest = test_cipher(&code);
+        let (addr, signer) = discover_host_on_port(test_port, &guest, &[], Duration::from_secs(2))
             .await
             .expect("expected to discover the host");
         sender_task.await.unwrap();
         assert_eq!(addr.port(), 5555);
+        assert_eq!(signer, client_hash("host"));
 
-        let miss = discover_host_on_port(47901, "someone-else", Duration::from_millis(300)).await;
+        // Another room's beacon, or one from a host we don't expect, is ignored.
+        let other = test_cipher(&generate_room_code());
+        let miss = discover_host_on_port(47901, &other, &[], Duration::from_millis(300)).await;
         assert!(miss.is_err());
+        let beacon = seal(&host, 6666);
+        let task = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            let sock = UdpSocket::bind("0.0.0.0:0").await.unwrap();
+            sock.send_to(&beacon, (Ipv4Addr::LOCALHOST, 47902)).await.unwrap();
+        });
+        let wrong_host = discover_host_on_port(47902, &test_cipher(&code), &[client_hash("someone-else")], Duration::from_millis(500)).await;
+        task.await.unwrap();
+        assert!(wrong_host.is_err());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2820,14 +3073,9 @@ mod tests {
         let host = local_manager();
         create_room(&host, noop_sink(), "Host".to_string()).await.unwrap();
         let port = host.host_port().unwrap();
-        let join = WireMessage::Join {
-            user_id: "user-x".into(),
-            nickname: "X".into(),
-            client_id: "install-x".into(),
-            protocol: PROTOCOL_VERSION,
-        };
+        let join = WireMessage::Join { user_id: "user-x".into(), nickname: "X".into(), protocol: PROTOCOL_VERSION };
         let plain = format!("{}\n", serde_json::to_string(&join).unwrap());
-        let wrong_key = RoomCipher::new("YTMD-WRONGWRONG").seal_line(&join).unwrap();
+        let wrong_key = test_cipher(&generate_room_code()).seal_line(&join).unwrap();
         for line in [plain, wrong_key] {
             let mut raw = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).await.unwrap();
             raw.write_all(line.as_bytes()).await.unwrap();
@@ -2914,15 +3162,10 @@ mod tests {
         let host = fast_manager();
         let (host_sink, host_dyn) = recording();
         let room = create_room(&host, host_dyn, "Host".to_string()).await.unwrap();
-        let cipher = RoomCipher::new(&room.room_code);
+        let cipher = test_cipher(&room.room_code);
 
         let mut raw = TcpStream::connect((Ipv4Addr::LOCALHOST, host.host_port().unwrap())).await.unwrap();
-        let join = WireMessage::Join {
-            user_id: "user-silent".into(),
-            nickname: "Ghost".into(),
-            client_id: "install-silent".into(),
-            protocol: PROTOCOL_VERSION,
-        };
+        let join = WireMessage::Join { user_id: "user-silent".into(), nickname: "Ghost".into(), protocol: PROTOCOL_VERSION };
         raw.write_all(cipher.seal_line(&join).unwrap().as_bytes()).await.unwrap();
         assert!(wait_until(|| host.get_room_state().map_or(0, |r| r.members.len()) == 2, Duration::from_secs(2)).await);
         assert!(

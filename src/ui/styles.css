@@ -1001,8 +1001,10 @@ button {
   gap: 4px;
 }
 .room-code {
-  font: 500 24px/32px var(--font-mono);
-  letter-spacing: 2px;
+  /* 31 characters since sync protocol 3; wraps rather than overflowing. */
+  font: 500 18px/28px var(--font-mono);
+  letter-spacing: 1px;
+  word-break: break-all;
   user-select: text;
 }
 .list-heading {

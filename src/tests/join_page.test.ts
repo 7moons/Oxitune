@@ -2,15 +2,17 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'fs';
 
 const page = readFileSync('pages/join/index.html', 'utf8');
-const rust = readFileSync('src-tauri/src/sync_room.rs', 'utf8');
+const rust = readFileSync('src-tauri/src/sync_crypto.rs', 'utf8');
 const joinLink = readFileSync('src-tauri/src/join_link.rs', 'utf8');
 
 describe('Discord "Listen along" landing page', () => {
-  const alphabet = rust.match(/const CHARS: &\[u8\] = b"([A-Z0-9]+)";\s*let mut rng = rand::rng\(\);\s*let code/)?.[1];
+  const alphabet = rust.match(/pub const CODE_ALPHABET: &\[u8\] = b"([A-Z0-9]+)";/)?.[1];
+  const length = rust.match(/pub const CODE_LEN: usize = (\d+);/)?.[1];
 
   test('accepts exactly the room-code alphabet the app generates', () => {
     expect(alphabet).toBeTruthy();
-    expect(page).toContain(`/^YTMD-[${alphabet}]{10}$/`);
+    expect(length).toBe('26');
+    expect(page).toContain(`/^YTMD-[${alphabet}]{${length}}$/`);
   });
 
   test('reads the code only from the # part and opens the ytmd:// link', () => {

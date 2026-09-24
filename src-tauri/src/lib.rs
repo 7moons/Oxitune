@@ -11,6 +11,7 @@ pub mod p2p_sync;
 pub mod power_manager;
 pub mod remote_server;
 pub mod screen_lock;
+pub mod secure_fs;
 pub mod session;
 pub mod shortcuts;
 pub mod sync_crypto;
@@ -105,11 +106,14 @@ pub fn run() {
     }));
     let start_url = session::start_url(resume_session.as_ref());
 
-    let sync_client_id = config_manager
-        .config_path()
-        .parent()
-        .map(|dir| sync_room::load_or_create_client_id(&dir.join("sync_client_id")))
-        .unwrap_or_else(sync_room::generate_user_id);
+    // This install's Listen Together signing key (sync_crypto.rs).
+    let sync_identity = Arc::new(
+        config_manager
+            .config_path()
+            .parent()
+            .map(|dir| sync_crypto::Identity::load_or_create(&dir.join("sync_identity")))
+            .unwrap_or_else(sync_crypto::Identity::generate),
+    );
 
     let app_state = Arc::new(AppState {
         config_manager,
@@ -117,7 +121,7 @@ pub fn run() {
         mpris: Mutex::new(None),
         current_track: Mutex::new(None),
         invites: join_link::InviteState::default(),
-        sync_room: Arc::new(SyncRoomManager::new().with_client_id(sync_client_id)),
+        sync_room: Arc::new(SyncRoomManager::new().with_identity(sync_identity)),
         power_manager: PowerManager::new(),
         remote_status: Arc::new(remote_server::RemoteServerStatus::new(
             initial_config.remote_enabled,

@@ -13,11 +13,9 @@ use tauri::{AppHandle, Emitter, Manager};
 /// Public landing page (GitHub Pages, `docs/join/index.html`).
 pub const INVITE_PAGE: &str = "https://kayzedd.github.io/ytmd/join/";
 
-/// `YTMD-` plus 10 characters of `sync_room::generate_room_code`'s alphabet.
+/// A current (protocol 3) room code; see `sync_crypto::parse_room_code`.
 pub fn is_valid_room_code(code: &str) -> bool {
-    const ALPHABET: &str = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-    code.strip_prefix("YTMD-")
-        .is_some_and(|rest| rest.len() == 10 && rest.chars().all(|c| ALPHABET.contains(c)))
+    crate::sync_crypto::parse_room_code(code).is_ok_and(|c| c == code)
 }
 
 /// The room code in a `ytmd://join/<code>` link, or `None` for anything
@@ -25,7 +23,10 @@ pub fn is_valid_room_code(code: &str) -> bool {
 pub fn parse_join_link(url: &str) -> Option<String> {
     let rest = url.trim().strip_prefix("ytmd://join/")?;
     let code = rest.trim_end_matches('/').to_ascii_uppercase();
-    is_valid_room_code(&code).then_some(code)
+    if code.len() > 64 || !code.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') {
+        return None;
+    }
+    crate::sync_crypto::parse_room_code(&code).ok()
 }
 
 pub fn invite_url(code: &str) -> String {
@@ -105,15 +106,19 @@ pub fn handle_urls<'a>(app: &AppHandle, urls: impl IntoIterator<Item = &'a str>)
 mod tests {
     use super::*;
 
+    const C: &str = "YTMD-ABCDEFGHJKLMNPQRSTUVWXYZ23";
+
     #[test]
     fn test_parse_join_link_accepts_only_room_codes() {
-        assert_eq!(parse_join_link("ytmd://join/YTMD-ABCDEFGH23"), Some("YTMD-ABCDEFGH23".into()));
-        assert_eq!(parse_join_link("ytmd://join/ytmd-abcdefgh23/"), Some("YTMD-ABCDEFGH23".into()));
+        assert_eq!(parse_join_link(&format!("ytmd://join/{C}")), Some(C.into()));
+        assert_eq!(parse_join_link(&format!("ytmd://join/{}/", C.to_lowercase())), Some(C.into()));
         assert_eq!(parse_join_link("ytmd://join/YTMD-ABC"), None);
+        // Old 10-character codes (protocol 2) aren't joinable any more.
+        assert_eq!(parse_join_link("ytmd://join/YTMD-ABCDEFGH23"), None);
         // I, O, 0 and 1 are never in a code.
-        assert_eq!(parse_join_link("ytmd://join/YTMD-ABCDEFGHI0"), None);
-        assert_eq!(parse_join_link("ytmd://join/YTMD-ABCDEFGH23?x=1"), None);
-        assert_eq!(parse_join_link("https://evil.example/join/YTMD-ABCDEFGH23"), None);
+        assert_eq!(parse_join_link("ytmd://join/YTMD-ABCDEFGHJKLMNPQRSTUVWXYI0"), None);
+        assert_eq!(parse_join_link(&format!("ytmd://join/{C}?x=1")), None);
+        assert_eq!(parse_join_link(&format!("https://evil.example/join/{C}")), None);
         assert_eq!(parse_join_link("--flag"), None);
     }
 
@@ -126,20 +131,20 @@ mod tests {
 
     #[test]
     fn test_invite_url_keeps_the_code_after_the_hash() {
-        let url = invite_url("YTMD-ABCDEFGH23");
+        let url = invite_url("YTMD-ABCDEFGHJKLMNPQRSTUVWXYZ23");
         let (page, fragment) = url.split_once('#').unwrap();
         assert!(page.starts_with("https://"));
         assert!(!page.contains("YTMD-"), "the code must never be in the part sent to the server");
-        assert_eq!(fragment, "YTMD-ABCDEFGH23");
+        assert_eq!(fragment, "YTMD-ABCDEFGHJKLMNPQRSTUVWXYZ23");
     }
 
     #[test]
     fn test_party_id_is_stable_and_does_not_contain_the_code() {
-        let a = party_id("YTMD-ABCDEFGH23");
-        assert_eq!(a, party_id("YTMD-ABCDEFGH23"));
-        assert_ne!(a, party_id("YTMD-ABCDEFGH24"));
+        let a = party_id("YTMD-ABCDEFGHJKLMNPQRSTUVWXYZ23");
+        assert_eq!(a, party_id("YTMD-ABCDEFGHJKLMNPQRSTUVWXYZ23"));
+        assert_ne!(a, party_id("YTMD-ABCDEFGHJKLMNPQRSTUVWXYZ24"));
         assert_eq!(a.len(), 32);
-        assert!(!a.to_uppercase().contains("ABCDEFGH23"));
+        assert!(!a.to_uppercase().contains("ABCDEFGHJKLMNPQRSTUVWXYZ23"));
     }
 
     fn room(code: &str, is_host: bool) -> crate::sync_room::RoomState {
@@ -156,15 +161,15 @@ mod tests {
     #[test]
     fn test_invite_only_for_the_hosted_room_it_was_turned_on_for() {
         let s = InviteState::default();
-        assert_eq!(s.current(Some(&room("YTMD-ABCDEFGH23", true))), None);
+        assert_eq!(s.current(Some(&room("YTMD-ABCDEFGHJKLMNPQRSTUVWXYZ23", true))), None);
 
-        s.set_published(Some("YTMD-ABCDEFGH23".into()));
-        let invite = s.current(Some(&room("YTMD-ABCDEFGH23", true))).unwrap();
-        assert_eq!(invite.url, invite_url("YTMD-ABCDEFGH23"));
+        s.set_published(Some("YTMD-ABCDEFGHJKLMNPQRSTUVWXYZ23".into()));
+        let invite = s.current(Some(&room("YTMD-ABCDEFGHJKLMNPQRSTUVWXYZ23", true))).unwrap();
+        assert_eq!(invite.url, invite_url("YTMD-ABCDEFGHJKLMNPQRSTUVWXYZ23"));
         assert_eq!(invite.max_members, crate::sync_room::MAX_MEMBERS);
 
-        assert_eq!(s.current(Some(&room("YTMD-ABCDEFGH23", false))), None, "guests never publish");
-        assert_eq!(s.current(Some(&room("YTMD-ZZZZZZZZZZ", true))), None, "a later room starts off");
+        assert_eq!(s.current(Some(&room("YTMD-ABCDEFGHJKLMNPQRSTUVWXYZ23", false))), None, "guests never publish");
+        assert_eq!(s.current(Some(&room("YTMD-ZZZZZZZZZZZZZZZZZZZZZZZZZZ", true))), None, "a later room starts off");
         assert_eq!(s.current(None), None);
     }
 }

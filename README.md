@@ -37,15 +37,16 @@ YTMD provides native operating system integration, minimal memory overhead (<100
 
 ### Listen Together (P2P Room Sync)
 - Synchronize your YTMD playback and queue with friends in real time.
-- Generate shareable room codes (`YTMD-XXXX`) with automatic host discovery on local or VPN/Tailscale networks, and over the internet through public MQTT brokers (all tried at once).
+- Shareable room codes (`YTMD-` + 26 characters, 130 random bits; paste them or use the invite link) with automatic host discovery on local or VPN/Tailscale networks, and over the internet through public MQTT brokers (all tried at once).
 - Roles: the host makes people moderators, DJs (control playback) or listeners (listen only) and picks the role newcomers get.
-- The host and moderators can remove people; a removed install can't rejoin that session until the host lets it back in.
+- The host and moderators can remove people; the removed install's key is banned from that session. Anyone who has the code can still try again with a fresh install identity, so turn on join approval for sessions whose code you shared widely.
 - Optional join approval: newcomers wait until the host lets them in.
 - Shared queue: in a session, YouTube Music's "Up next" tab becomes "Queue" and shows the room's shared queue; "Add to queue" and "Play next" from any song's ⋮ menu add to it, DJs reorder it by dragging, and the host plays from it as each song ends or on any skip. Everyone can react with emoji and vote to skip (a majority skips).
 - The host can hand the session to someone else; if the host leaves or vanishes, the next person in line takes over under the same code and everyone reconnects on their own.
-- End-to-end encrypted with a key derived from the room code: the public brokers and the local network only see opaque bytes.
+- End-to-end encrypted with a key derived from the room code (HKDF-SHA256, AES-256-GCM) and every message signed by its sender's install key (Ed25519), with replay protection: brokers and the local network see only an opaque topic id, message sizes, timing and IP addresses. Only the host's key can speak for the room, and a member id can't be used by anyone else's key.
+- Limits worth knowing: the code is the room's secret, so anyone who gets it can read along and ask to join; a removed member who kept the code can keep reading until the session ends (start a new session to cut them off); a first-time guest trusts the first host that answers with the code (after that the host key is pinned).
 - "Check connection" tells whether the current network can reach the sync servers.
-- Everyone in a session needs a YTMD release newer than 0.1.1 (sync protocol 2); older guests are turned away.
+- Everyone in a session needs YTMD 0.3 or newer (sync protocol 3). Older clients are told to update; old 10-character codes are refused.
 
 ### Mobile Web Remote Control
 - Instant QR-code local network remote control.

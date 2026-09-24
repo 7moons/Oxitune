@@ -92,7 +92,7 @@ impl SyncRoomManager {
             let entry = book.pending.remove(user_id).ok_or(ERR_NO_SUCH_MEMBER)?;
             room.pending.retain(|p| p.user_id != user_id);
             let result = if approve {
-                let hash = client_hash(&entry.join.client_id);
+                let hash = entry.join.client_hash.clone();
                 self.admit_locked(room, &mut book, entry.join, hash)
             } else {
                 Err(RejectReason::Denied)
@@ -119,6 +119,11 @@ impl SyncRoomManager {
             let _ = waiter.send(result);
         }
         Ok(())
+    }
+
+    /// Whether `user_id` waits for approval under the key `sender`.
+    pub(crate) fn pending_is(&self, user_id: &str, sender: &str) -> bool {
+        self.host_book.lock().pending.get(user_id).is_some_and(|p| p.join.client_hash == sender)
     }
 
     /// A waiting guest went away (its connection closed or timed out).

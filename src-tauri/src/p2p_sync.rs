@@ -4,13 +4,19 @@
 //! beacon, so both connect out to public brokers and exchange the same
 //! `WireMessage`s as the LAN transport over per-room topics:
 //!
-//!   - `ytmd/v2/{TOPIC_ID}/host`: guests -> host
-//!   - `ytmd/v2/{TOPIC_ID}/broadcast`: host -> every guest
-//!   - `ytmd/v2/{TOPIC_ID}/guest/{USER_ID}`: host -> one guest
+//!   - `ytmd/v3/{TOPIC_ID}/host`: guests -> host
+//!   - `ytmd/v3/{TOPIC_ID}/broadcast`: host -> every guest
+//!   - `ytmd/v3/{TOPIC_ID}/guest/{USER_ID}`: host -> one guest
 //!
 //! `TOPIC_ID` is derived from the room code and every payload is sealed with
-//! the room key (`sync_crypto.rs`), so the brokers see neither the code nor
-//! what's playing.
+//! the room key and signed by its sender (`sync_crypto.rs`), so the brokers
+//! see neither the code nor what's playing, and MQTT has no say in who a
+//! message is from: the host checks every request against the key the
+//! member joined with, and guests only listen to the host's key. What a
+//! broker still sees: topic ids, sizes and timing, and client IPs.
+//!
+//! The host also listens on the protocol-2 topic derived from its code and
+//! answers old clients' joins with `Outdated`, so they are told to update.
 //!
 //! The host is present on every broker it can reach, and a guest tries all
 //! of them at once and keeps the first that answers with the room. Host and
@@ -20,9 +26,9 @@
 //! Windows) settled on a different broker than the host and never found the
 //! room.
 
-use crate::sync_crypto::RoomCipher;
+use crate::sync_crypto::{LegacyCipher, Opened, RoomCipher};
 use crate::sync_room::{
-    generate_user_id, guest_ended, apply_host_message, GuestEnd, JoinDecision, JoinRequest, LeaveReason,
+    generate_user_id, guest_ended, apply_host_message, host_state_trusted, GuestEnd, JoinDecision, JoinRequest, LeaveReason,
     RejectReason, RoomState, RoomStateWire, SyncEventSink, SyncRoomManager, WireMessage, APPROVAL_TIMEOUT,
     ERR_NOT_FOUND, PROTOCOL_VERSION,
 };
@@ -81,15 +87,29 @@ async fn flush_and_disconnect(client: &AsyncClient, eventloop: &mut EventLoop, p
 }
 
 pub(crate) fn room_topic_host(topic_id: &str) -> String {
-    format!("ytmd/v2/{topic_id}/host")
+    format!("ytmd/v3/{topic_id}/host")
 }
 
 pub(crate) fn room_topic_broadcast(topic_id: &str) -> String {
-    format!("ytmd/v2/{topic_id}/broadcast")
+    format!("ytmd/v3/{topic_id}/broadcast")
 }
 
 pub(crate) fn room_topic_guest(topic_id: &str, user_id: &str) -> String {
-    format!("ytmd/v2/{topic_id}/guest/{}", user_id.trim())
+    format!("ytmd/v3/{topic_id}/guest/{}", topic_safe(user_id))
+}
+
+/// Protocol-2 topics, only for answering old clients.
+fn legacy_topic_host(topic_id: &str) -> String {
+    format!("ytmd/v2/{topic_id}/host")
+}
+
+fn legacy_topic_guest(topic_id: &str, user_id: &str) -> String {
+    format!("ytmd/v2/{topic_id}/guest/{}", topic_safe(user_id))
+}
+
+/// A user id as a topic level: no MQTT wildcards or separators, capped.
+fn topic_safe(user_id: &str) -> String {
+    user_id.trim().chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').take(64).collect()
 }
 
 fn create_mqtt_client(prefix: &str, host: &str, port: u16) -> (AsyncClient, EventLoop) {
@@ -201,6 +221,7 @@ pub(crate) fn host_on_all_brokers(
     manager: Arc<SyncRoomManager>,
     sink: Arc<dyn SyncEventSink>,
     cipher: Arc<RoomCipher>,
+    legacy: Arc<LegacyCipher>,
     generation: u64,
     shutdown: watch::Receiver<bool>,
 ) {
@@ -209,6 +230,7 @@ pub(crate) fn host_on_all_brokers(
             manager.clone(),
             sink.clone(),
             cipher.clone(),
+            legacy.clone(),
             generation,
             shutdown.clone(),
             broker,
@@ -217,10 +239,12 @@ pub(crate) fn host_on_all_brokers(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn host_on_broker(
     manager: Arc<SyncRoomManager>,
     sink: Arc<dyn SyncEventSink>,
     cipher: Arc<RoomCipher>,
+    legacy: Arc<LegacyCipher>,
     generation: u64,
     mut shutdown: watch::Receiver<bool>,
     broker: &'static str,
@@ -244,6 +268,7 @@ async fn host_on_broker(
     if client.try_subscribe(room_topic_host(cipher.topic_id()), QoS::AtLeastOnce).is_err() {
         return;
     }
+    let _ = client.try_subscribe(legacy_topic_host(legacy.topic_id()), QoS::AtMostOnce);
     log::info!("Listen Together: hosting over the internet via {broker}");
 
     // Keyed by session and broker, so a loop from an older room can never
@@ -251,20 +276,23 @@ async fn host_on_broker(
     let peer_key = format!("internet:{generation}:{broker}");
     let (tx, rx) = mpsc::unbounded_channel::<WireMessage>();
     manager.register_peer(peer_key.clone(), tx);
-    run_host_loop(client, eventloop, &manager, &sink, &cipher, rx, shutdown).await;
+    run_host_loop(client, eventloop, &manager, &sink, &cipher, &legacy, rx, shutdown).await;
     manager.unregister_peer(&peer_key);
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_host_loop(
     client: AsyncClient,
     mut eventloop: EventLoop,
     manager: &Arc<SyncRoomManager>,
     sink: &Arc<dyn SyncEventSink>,
     cipher: &RoomCipher,
+    legacy: &LegacyCipher,
     mut outbox_rx: mpsc::UnboundedReceiver<WireMessage>,
     mut shutdown: watch::Receiver<bool>,
 ) {
     let host_topic = room_topic_host(cipher.topic_id());
+    let legacy_host_topic = legacy_topic_host(legacy.topic_id());
     let broadcast_topic = room_topic_broadcast(cipher.topic_id());
     // Publishes the broker hasn't acknowledged yet. On stop, the loop waits
     // for all of them: the room's final `Leave` or `HostHandoff` is often
@@ -301,22 +329,36 @@ async fn run_host_loop(
             }
             event = eventloop.poll() => {
                 match event {
+                    Ok(Event::Incoming(Packet::Publish(incoming))) if incoming.topic == legacy_host_topic => {
+                        // A protocol-2 client: tell it to update.
+                        if let Some(WireMessage::Join { user_id, .. }) = legacy.open_msg(&incoming.payload) {
+                            let reject = WireMessage::Rejected { user_id: user_id.clone(), reason: RejectReason::Outdated };
+                            if let Some(payload) = legacy.seal_msg(&reject) {
+                                let _ = client.try_publish(legacy_topic_guest(legacy.topic_id(), &user_id), QoS::AtMostOnce, false, payload);
+                            }
+                        }
+                    }
                     Ok(Event::Incoming(Packet::Publish(incoming))) if incoming.topic == host_topic => {
-                        let Some(msg) = cipher.open_msg(&incoming.payload) else {
+                        let Some(Opened { msg, sender }) = cipher.open_msg(&incoming.payload) else {
                             continue;
                         };
+                        // MQTT has no connection identity: who sent it is the
+                        // key that signed it, and a member id counts only
+                        // with the key it joined with.
                         match msg {
                             // Guests re-send `Join` until they hear back, on
                             // every broker at once; a repeat from a current
                             // member just gets the state again.
-                            WireMessage::Join { user_id, .. } if manager.has_member(&user_id) => {
+                            WireMessage::Join { user_id, .. } if manager.member_is(&user_id, &sender) => {
                                 manager.touch_member(&user_id);
                                 if let Some(room) = manager.get_room_state() {
                                     reply(&user_id, &WireMessage::State { room: RoomStateWire::from(&room) });
                                 }
                             }
-                            WireMessage::Join { user_id, nickname, client_id, protocol } => {
-                                let join = JoinRequest { user_id: user_id.clone(), nickname, client_id, protocol };
+                            // Someone else's member id: never theirs to take.
+                            WireMessage::Join { user_id, .. } if manager.has_member(&user_id) => {}
+                            WireMessage::Join { user_id, nickname, protocol } => {
+                                let join = JoinRequest { user_id: user_id.clone(), nickname, client_hash: sender, protocol };
                                 match manager.admit_member(join) {
                                     Ok(JoinDecision::Admitted(admission)) => {
                                         if let Some(old) = &admission.replaced {
@@ -336,17 +378,23 @@ async fn run_host_loop(
                                     Err(reason) => reply(&user_id, &WireMessage::Rejected { user_id: user_id.clone(), reason }),
                                 }
                             }
-                            WireMessage::Heartbeat { user_id } => manager.touch_member(&user_id),
+                            WireMessage::Heartbeat { user_id } if manager.member_is(&user_id, &sender) => {
+                                manager.touch_member(&user_id)
+                            }
                             WireMessage::Leave { user_id } => {
-                                manager.drop_pending(&user_id, sink);
-                                if let Some(room) = manager.remove_member(&user_id) {
-                                    manager.announce_room(&room, sink);
+                                if manager.pending_is(&user_id, &sender) {
+                                    manager.drop_pending(&user_id, sink);
+                                }
+                                if manager.member_is(&user_id, &sender) {
+                                    if let Some(room) = manager.remove_member(&user_id) {
+                                        manager.announce_room(&room, sink);
+                                    }
                                 }
                             }
                             other => {
-                                if let Some(sender) = sender_of(&other) {
-                                    let sender = sender.to_string();
-                                    manager.handle_guest_message(&sender, other, sink);
+                                if let Some(member) = sender_of(&other).filter(|id| manager.member_is(id, &sender)) {
+                                    let member = member.to_string();
+                                    manager.handle_guest_message(&member, other, sink);
                                 }
                             }
                         }
@@ -365,8 +413,8 @@ async fn run_host_loop(
     }
 }
 
-/// Who sent a guest -> host request (the MQTT transport has no connection
-/// identity, so the message says).
+/// The member id a guest -> host request names; only trusted once
+/// `member_is` matched it to the signing key.
 fn sender_of(msg: &WireMessage) -> Option<&str> {
     match msg {
         WireMessage::Control { user_id, .. }
@@ -397,8 +445,9 @@ pub(crate) async fn join_room(
     sink: Arc<dyn SyncEventSink>,
     cipher: Arc<RoomCipher>,
     nickname: String,
+    expected_hosts: Vec<String>,
 ) -> Result<RoomState, String> {
-    join_room_via(manager, sink, cipher, nickname, PUBLIC_BROKERS, BROKER_TIMEOUTS).await
+    join_room_via(manager, sink, cipher, nickname, expected_hosts, PUBLIC_BROKERS, BROKER_TIMEOUTS).await
 }
 
 /// How one broker's join attempt ended.
@@ -418,17 +467,13 @@ async fn join_room_via(
     sink: Arc<dyn SyncEventSink>,
     cipher: Arc<RoomCipher>,
     nickname: String,
+    expected_hosts: Vec<String>,
     brokers: &[(&'static str, u16)],
     timeouts: BrokerTimeouts,
 ) -> Result<RoomState, String> {
     let user_id = generate_user_id();
-    let join = WireMessage::Join {
-        user_id: user_id.clone(),
-        nickname,
-        client_id: manager.client_id().to_string(),
-        protocol: PROTOCOL_VERSION,
-    };
-    let join_payload = cipher.seal_msg(&join).ok_or("encryption failed")?;
+    let join = WireMessage::Join { user_id: user_id.clone(), nickname, protocol: PROTOCOL_VERSION };
+    let expected_hosts = Arc::new(expected_hosts);
 
     let mut attempts = tokio::task::JoinSet::new();
     for &(host, port) in brokers {
@@ -438,7 +483,8 @@ async fn join_room_via(
             timeouts,
             cipher.clone(),
             user_id.clone(),
-            join_payload.clone(),
+            join.clone(),
+            expected_hosts.clone(),
             sink.clone(),
         ));
     }
@@ -467,15 +513,20 @@ async fn join_room_via(
 /// `JOIN_RETRY_INTERVAL`) and wait up to `join_window` for a `State` that
 /// lists us, or a `Rejected` addressed to us. A `Pending` reply (the host
 /// must approve us) extends the wait to `APPROVAL_TIMEOUT`.
+#[allow(clippy::too_many_arguments)]
 async fn attempt_join(
     host: &'static str,
     port: u16,
     timeouts: BrokerTimeouts,
     cipher: Arc<RoomCipher>,
     user_id: String,
-    join_payload: Vec<u8>,
+    join: WireMessage,
+    expected_hosts: Arc<Vec<String>>,
     sink: Arc<dyn SyncEventSink>,
 ) -> Attempt {
+    // Sealed fresh for every send: each copy has its own counter, so the
+    // host's replay check doesn't drop a retry.
+    let seal_join = || cipher.seal_msg(&join).unwrap_or_default();
     let (client, mut eventloop) = match connect_broker("ytmd-g", host, port, timeouts.connect).await {
         Ok(connected) => connected,
         Err(e) => {
@@ -492,9 +543,7 @@ async fn attempt_join(
     // subscriptions are in place before it sees the Join.
     let queued = client.try_subscribe(&guest_topic, QoS::AtLeastOnce).is_ok()
         && client.try_subscribe(&broadcast_topic, QoS::AtLeastOnce).is_ok()
-        && client
-            .try_publish(&host_topic, QoS::AtLeastOnce, false, join_payload.clone())
-            .is_ok();
+        && client.try_publish(&host_topic, QoS::AtLeastOnce, false, seal_join()).is_ok();
     if !queued {
         return Attempt::NoRoom;
     }
@@ -509,7 +558,7 @@ async fn attempt_join(
             return if waiting_for_approval { Attempt::Rejected(RejectReason::Denied) } else { Attempt::NoRoom };
         }
         if last_join.elapsed() >= JOIN_RETRY_INTERVAL {
-            let _ = client.try_publish(&host_topic, QoS::AtLeastOnce, false, join_payload.clone());
+            let _ = client.try_publish(&host_topic, QoS::AtLeastOnce, false, seal_join());
             last_join = Instant::now();
         }
 
@@ -517,18 +566,22 @@ async fn attempt_join(
             Ok(Ok(Event::Incoming(Packet::Publish(publish))))
                 if publish.topic == guest_topic || publish.topic == broadcast_topic =>
             {
-                match cipher.open_msg(&publish.payload) {
+                let Some(Opened { msg, sender }) = cipher.open_msg(&publish.payload) else {
+                    continue;
+                };
+                let from_expected = expected_hosts.is_empty() || expected_hosts.contains(&sender);
+                match msg {
                     // A broadcast `State` from another guest's join can
                     // arrive before ours is processed; only a state that
-                    // lists us means we're in.
-                    Some(WireMessage::State { room }) if room.has_member(&user_id) => {
+                    // lists us, signed by the host it names, means we're in.
+                    WireMessage::State { room } if room.has_member(&user_id) && host_state_trusted(&room, &sender, &expected_hosts) => {
                         return Attempt::Joined(Box::new((client, eventloop, room)));
                     }
-                    Some(WireMessage::Rejected { user_id: to, reason }) if to == user_id => {
+                    WireMessage::Rejected { user_id: to, reason } if to == user_id && from_expected => {
                         let _ = client.try_disconnect();
                         return Attempt::Rejected(reason);
                     }
-                    Some(WireMessage::Pending { user_id: to }) if to == user_id && !waiting_for_approval => {
+                    WireMessage::Pending { user_id: to } if to == user_id && from_expected && !waiting_for_approval => {
                         waiting_for_approval = true;
                         deadline = Instant::now() + APPROVAL_TIMEOUT;
                         sink.join_pending();
@@ -587,9 +640,7 @@ async fn run_guest_loop(
     let guest_topic = room_topic_guest(cipher.topic_id(), &my_user_id);
     let broadcast_topic = room_topic_broadcast(cipher.topic_id());
     let host_topic = room_topic_host(cipher.topic_id());
-    let heartbeat = cipher
-        .seal_msg(&WireMessage::Heartbeat { user_id: my_user_id.clone() })
-        .unwrap_or_default();
+    let heartbeat = WireMessage::Heartbeat { user_id: my_user_id.clone() };
     let mut ticker = tokio::time::interval(manager.liveness.heartbeat_interval);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut last_heard = Instant::now();
@@ -611,7 +662,9 @@ async fn run_guest_loop(
                     log::info!("Listen Together: host silent");
                     break GuestEnd::Left(LeaveReason::Lost);
                 }
-                let _ = client.try_publish(&host_topic, QoS::AtMostOnce, false, heartbeat.clone());
+                if let Some(payload) = cipher.seal_msg(&heartbeat) {
+                    let _ = client.try_publish(&host_topic, QoS::AtMostOnce, false, payload);
+                }
                 continue;
             }
             Some(msg) = outbox_rx.recv() => {
@@ -627,11 +680,13 @@ async fn run_guest_loop(
                 if publish.topic != guest_topic && publish.topic != broadcast_topic {
                     continue;
                 }
-                let Some(msg) = cipher.open_msg(&publish.payload) else {
+                let Some(opened) = cipher.open_msg(&publish.payload) else {
                     continue;
                 };
-                last_heard = Instant::now();
-                match apply_host_message(&manager, &sink, &my_user_id, generation, msg) {
+                if manager.host_hash().as_deref() == Some(opened.sender.as_str()) {
+                    last_heard = Instant::now();
+                }
+                match apply_host_message(&manager, &sink, &my_user_id, generation, opened) {
                     None => {}
                     Some(None) => return,
                     Some(Some(end)) => break end,
@@ -736,10 +791,10 @@ mod tests {
             join_window: Duration::from_millis(300),
         };
         let manager = Arc::new(SyncRoomManager::new());
-        let cipher = Arc::new(RoomCipher::new("YTMD-NOPE"));
+        let cipher = Arc::new(crate::sync_crypto::test_cipher("YTMD-NOPE"));
 
         let started = Instant::now();
-        let res = join_room_via(&manager, noop_sink(), cipher, "G".into(), brokers, timeouts).await;
+        let res = join_room_via(&manager, noop_sink(), cipher, "G".into(), Vec::new(), brokers, timeouts).await;
         assert_eq!(res.err(), Some(unreachable_err()));
         assert!(started.elapsed() < Duration::from_secs(6), "took {:?}", started.elapsed());
         assert!(manager.get_room_state().is_none());
@@ -760,12 +815,15 @@ mod tests {
 
     #[test]
     fn test_topics_carry_the_derived_id_not_the_code() {
-        let cipher = RoomCipher::new("YTMD-ABCDEFGHJK");
+        let code = crate::sync_crypto::generate_room_code();
+        let cipher = crate::sync_crypto::test_cipher(&code);
         let id = cipher.topic_id();
-        assert_eq!(room_topic_host(id), format!("ytmd/v2/{id}/host"));
-        assert_eq!(room_topic_broadcast(id), format!("ytmd/v2/{id}/broadcast"));
-        assert_eq!(room_topic_guest(id, "user-1234"), format!("ytmd/v2/{id}/guest/user-1234"));
-        assert!(!room_topic_host(id).contains("ABCDEFGHJK"));
+        assert_eq!(room_topic_host(id), format!("ytmd/v3/{id}/host"));
+        assert_eq!(room_topic_broadcast(id), format!("ytmd/v3/{id}/broadcast"));
+        assert_eq!(room_topic_guest(id, "user-1234"), format!("ytmd/v3/{id}/guest/user-1234"));
+        assert!(!room_topic_host(id).contains(&code[5..]));
+        // A user id can't smuggle MQTT wildcards or extra levels into a topic.
+        assert_eq!(room_topic_guest(id, "a/#/+b"), format!("ytmd/v3/{id}/guest/ab"));
     }
 
     #[test]
@@ -787,24 +845,21 @@ mod tests {
     }
 
     #[test]
-    fn test_join_carries_client_id_and_protocol() {
-        let join = WireMessage::Join {
-            user_id: "user-abc".to_string(),
-            nickname: "Guest".to_string(),
-            client_id: "c0ffee".to_string(),
-            protocol: PROTOCOL_VERSION,
-        };
+    fn test_join_carries_protocol_and_old_joins_still_parse() {
+        let join = WireMessage::Join { user_id: "user-abc".to_string(), nickname: "Guest".to_string(), protocol: PROTOCOL_VERSION };
         let bytes = serde_json::to_vec(&join).expect("serialize join");
         match serde_json::from_slice(&bytes).expect("deserialize join") {
-            WireMessage::Join { user_id, nickname, client_id, protocol } => {
-                assert_eq!((user_id.as_str(), nickname.as_str(), client_id.as_str()), ("user-abc", "Guest", "c0ffee"));
+            WireMessage::Join { user_id, nickname, protocol } => {
+                assert_eq!((user_id.as_str(), nickname.as_str()), ("user-abc", "Guest"));
                 assert_eq!(protocol, PROTOCOL_VERSION);
             }
             _ => panic!("Expected Join variant"),
         }
-        // A pre-2 guest's Join still parses (then gets rejected as outdated).
-        let old: WireMessage = serde_json::from_str(r#"{"type":"Join","user_id":"u","nickname":"n"}"#).unwrap();
-        assert!(matches!(old, WireMessage::Join { protocol: 0, ref client_id, .. } if client_id.is_empty()));
+        // A protocol-2 Join (with its client_id) still parses, so the legacy
+        // responder can answer it with `Outdated`.
+        let old: WireMessage =
+            serde_json::from_str(r#"{"type":"Join","user_id":"u","nickname":"n","client_id":"x","protocol":2}"#).unwrap();
+        assert!(matches!(old, WireMessage::Join { protocol: 2, .. }));
     }
 
     /// Internet-only managers (no LAN shortcut can hide a broken MQTT path)
@@ -812,7 +867,7 @@ mod tests {
     /// guest may also come in over LAN on the same machine. Both paths share
     /// the host logic under test.
     fn internet_manager(install: &str) -> Arc<SyncRoomManager> {
-        Arc::new(SyncRoomManager::new().with_client_id(install.to_string()))
+        Arc::new(SyncRoomManager::new().with_client_id(install))
     }
 
     async fn host(install: &str, sink: Arc<dyn SyncEventSink>) -> Option<(Arc<SyncRoomManager>, RoomState)> {
