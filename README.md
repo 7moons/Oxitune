@@ -1,222 +1,154 @@
 # YTMD
 
-A high-performance, lightweight, and extensible desktop client for YouTube Music built with **Tauri v2**, **Rust**, and **TypeScript**.
+A desktop client for YouTube Music built with **Tauri v2**, **Rust** and **TypeScript**, for Linux and Windows.
 
-YTMD provides native operating system integration, minimal memory overhead (<100MB RAM), studio-grade audio processing (DSP Equalizer, Crossfade, Silence Skipping), synchronized lyrics, mobile web remote, offline local library playback, and community room sync.
-
----
-
-## Key Features
-
-### Audio DSP Studio & Equalizer
-- **10-Band Graphic Equalizer**: Precise frequency shaping (32Hz – 16kHz) with studio presets (Bass Boost, Vocal, Electronic, Rock, Acoustic, Flat).
-- **Preamp Gain & Normalization**: Custom pre-amplification (-24 dB to +24 dB) and dynamic loudness normalization.
-- **Seamless Crossfade**: Smooth audio transitions between consecutive tracks (0s to 12s configurable).
-- **Skip Silence**: Automatic smart detection and skipping of silent pauses at the beginning and end of tracks.
-- **Speed & Pitch Control**: Custom playback speed (0.5x – 2.0x) with optional pitch preservation.
-- **Your Own Presets**: Save any equalizer curve (with its preamp) under a name, pick it later, overwrite or delete it.
-
-### Native Desktop Integration
-- **Linux MPRIS (D-Bus)**: Comprehensive media key support, lock screen player controls, KDE/GNOME audio applet integration.
-- **Discord Rich Presence (RPC)**: Live status showing current track, artist, album art, remaining duration, and play/pause state.
-- **System Tray Menu**: Fast background playback controls (Play/Pause, Next/Prev, Mini Player toggle, Settings, Quit).
-- **Native Notifications**: Real-time track change notifications with song title and artist.
-- **Global Shortcuts**: Media keys by default; set your own for play/pause, next, previous, like, dislike and mute in Settings > System. They work even when the window is hidden.
-- **Power Management**: Automatic system sleep inhibition during playback and optional pause on screen lock.
-- **Auto-Updates**: Checks for new signed releases shortly after launch and lets you install them with one click from Settings > About & Updates.
-
-### Synchronized Lyrics (LRCLIB)
-- Injected directly into YouTube Music's native Lyrics tab.
-- Precise timestamp synchronization with active line scaling and high-contrast typography.
-- Interactive seek-on-click on any lyric verse to jump directly in the song.
-
-### Local Music Library & Offline Player
-- Fast directory scanning for local music collections (MP3, FLAC, WAV, AAC, OGG, OPUS, M4A).
-- Built-in playback bar with seekbar, volume controls, and track search.
-- Animated active equalizer indicators on currently playing local tracks.
-
-### Listen Together (P2P Room Sync)
-- Synchronize your YTMD playback and queue with friends in real time.
-- Shareable room codes (`YTMD-` + 26 characters, 130 random bits; paste them or use the invite link) with automatic host discovery on local or VPN/Tailscale networks, and over the internet through public MQTT brokers (all tried at once).
-- Roles: the host makes people moderators, DJs (control playback) or listeners (listen only) and picks the role newcomers get.
-- The host and moderators can remove people; the removed install's key is banned from that session. Anyone who has the code can still try again with a fresh install identity, so turn on join approval for sessions whose code you shared widely.
-- Optional join approval: newcomers wait until the host lets them in.
-- Shared queue: in a session, YouTube Music's "Up next" tab becomes "Queue" and shows the room's shared queue; "Add to queue" and "Play next" from any song's ⋮ menu add to it, DJs reorder it by dragging, and the host plays from it as each song ends or on any skip. Everyone can react with emoji and vote to skip (a majority skips).
-- The host can hand the session to someone else; if the host leaves or vanishes, the next person in line takes over under the same code and everyone reconnects on their own.
-- End-to-end encrypted with a key derived from the room code (HKDF-SHA256, AES-256-GCM) and every message signed by its sender's install key (Ed25519), with replay protection: brokers and the local network see only an opaque topic id, message sizes, timing and IP addresses. Only the host's key can speak for the room, and a member id can't be used by anyone else's key.
-- Limits worth knowing: the code is the room's secret, so anyone who gets it can read along and ask to join; a removed member who kept the code can keep reading until the session ends (start a new session to cut them off); a first-time guest trusts the first host that answers with the code (after that the host key is pinned).
-- "Check connection" tells whether the current network can reach the sync servers.
-- Everyone in a session needs YTMD 0.3 or newer (sync protocol 3). Older clients are told to update; old 10-character codes are refused.
-
-### Mobile Web Remote Control
-- Instant QR-code local network remote control.
-- Control playback, volume, track navigation, and search directly from any smartphone or browser on your local Wi-Fi without installing companion apps.
-
-### Built-in Audio Downloader
-- Download tracks in multiple formats (MP3, FLAC, AAC, OPUS, WAV) with embedded metadata and cover artwork.
-
-### Look & Custom Styling
-- **Ambient Lighting**: a soft, blurred wash of the current song's cover behind YouTube Music, with the cover's color as the accent (intensity adjustable, or off for YouTube Music's own look).
-- Full support for user-defined custom CSS injection.
-
-### Configuration
-- Persistent, human-readable configuration stored in `~/.ytmd/config.json`.
-- **Settings Backup**: export everything (equalizer presets and shortcuts included) to one file and import it on another computer.
-- **Logs**: written to `~/.ytmd/logs/` (rotated, 5 files kept); Settings > System opens the folder.
+YTMD wraps music.youtube.com with what a desktop player should have: media keys and system media controls, Discord status, synced lyrics, an equalizer, a phone remote, a local library, Listen Together sessions with friends, and plugins.
 
 ---
 
-## Architecture Overview
+## Features
+
+### Audio
+- **10-band equalizer** (32 Hz – 16 kHz) with presets and your own saved presets, preamp (−24 to +24 dB), loudness normalization.
+- **Crossfade** (0–12 s), **skip silence**, **speed** (0.5×–2×) with optional pitch preservation.
+
+### Desktop integration
+- **Media keys and system media controls**: MPRIS on Linux (KDE/GNOME applets, lock screen), SMTC on Windows (media overlay, lock screen), plus previous/play/next buttons in the Windows taskbar preview.
+- **Discord Rich Presence** with the current song, and an optional "Listen along" button for your Listen Together session.
+- **Tray menu**, notifications, **global shortcuts** (configurable), **sleep inhibition** while playing, pause on screen lock.
+- Remembers the main window's and mini player's size and position, resumes the last song on launch, optional **start with the system** (off by default).
+- A single instance: launching again brings the window back.
+- An **offline screen** with automatic retries instead of a blank window when YouTube Music can't be reached.
+- **Crash reports**: a crash leaves a report in the logs folder and the next launch offers to open it.
+- Polish and English, following the system/YouTube Music language.
+
+### Lyrics
+- Synced lyrics in YouTube Music's own Lyrics tab and in the mini player, from several providers (local `.lrc`/tags, LRCLIB, YouTube Music, Genius; Musixmatch and NetEase optional), with per-song timing offsets and a "wrong lyrics?" picker.
+
+### Listen Together
+- Play the same music at the same time as friends, on the same network or over the internet (public MQTT brokers, all tried at once).
+- Roles (host, moderator, DJ, listener), join approval, removing people, vote to skip, emoji reactions, a shared queue in place of YouTube Music's "Up next", host handoff when the host leaves.
+- **Security** (protocol 3): the session code is `YTMD-` plus 26 characters (130 random bits); the key and the public topic id are derived from it with HKDF-SHA256; every message is encrypted (AES-256-GCM) and **signed by its sender's install key** (Ed25519), with replay protection. Only the host's key can speak for the session and nobody can act under another member's id. Brokers and the local network see an opaque topic id, message sizes and timing, and IP addresses — not the code, the songs or the people.
+- **Limits worth knowing**: the code is the session's secret: anyone who has it can read along and ask to join (turn on join approval for codes shared widely; the Discord button turns it on for you). A removed member who kept the code can keep reading until the session ends — start a new session to cut them off. A first-time guest trusts the first host that answers with the code; after that the host's key is pinned.
+- Everyone needs YTMD 0.3 or newer; older versions are told to update.
+
+### Phone remote
+- Control playback, volume, the queue and search from a phone's browser on the same Wi-Fi, by scanning a QR code in **Settings → Phone remote**.
+- **Off by default.** When on, it listens only on this PC's LAN address (or on all networks, if you choose), pairs through a token in the QR code that becomes a strict cookie, checks `Host` and `Origin` (no DNS rebinding or cross-site use), limits failed attempts and message rates, and offers nothing but playback control. "Revoke paired phones" unpairs every phone.
+
+### Local library and mini player
+- Scans your music folder (MP3, FLAC, M4A, OGG, Opus, WAV; tags via lofty) off the main thread, re-reading only changed files, and plays it in its own window.
+- An always-on-top mini player with cover art and lyrics.
+
+### Look
+- **Ambient lighting**: a soft wash of the current cover behind YouTube Music, its color as the accent. Custom CSS (a settings backup's custom CSS is applied only after you confirm it).
+
+### Plugins
+- A versioned plugin API ([`docs/PLUGIN_API.md`](docs/PLUGIN_API.md)): a manifest with a closed set of permissions, shown before you install and again before any update that asks for more; per-plugin settings, storage and network access limited to the hosts it lists; errors isolated per plugin, repeatedly failing plugins switched off.
+- Install from **registries you add** (YTMD ships none): every registry's index must be signed with the key you entered, every archive must match its signed checksum, installs are atomic. Updates are checked automatically (configurable). Developer mode loads a plugin from a folder, with a warning.
+- YTMD's own features are built-in plugins on the same API. A ready-to-publish registry with an example theme, an ad blocker and SponsorBlock lives in [`_plugins-export/`](_plugins-export).
+
+### Settings, data and logs
+- Everything is in `~/.ytmd/` (owner-only): `config.json`, the last session, the Listen Together identity, the remote's pairing token, installed plugins, caches and `logs/` (rotated, 5 × 2 MB). Settings → System opens the logs folder.
+- Settings backup: export everything to one file, import it elsewhere. An import never changes your folders or turns on the phone remote.
+
+---
+
+## Security at a glance
+
+- The YouTube Music page runs in its own capability: it can reach two narrow commands (a bridge for player state/control, lyrics, Listen Together as a member, the remote's view) and nothing else — no files, no settings, no updater, no shell, no app events. Every command validates its input. Details: `src-tauri/capabilities/`, `src-tauri/src/bridge.rs`, `src-tauri/src/page_ipc.rs`; the ACL is tested with Tauri's mock runtime.
+- Each companion window gets only its own commands; all have a Content Security Policy without `unsafe-eval`.
+- The main window only navigates to YouTube Music and Google sign-in; links that open new windows go to your browser.
+- Updates are signed (minisign); release builds come from GitHub Actions with pinned actions and dependency checks (`cargo deny`, `bun audit`).
+
+See [`AUDIT.md`](AUDIT.md) for the full review, measurements and open decisions.
+
+---
+
+## Performance
+
+Measured on Linux (WebKitGTK), release build, with YouTube Music **not** loaded (the measuring environment couldn't reach it), so these are the app's own costs, not a full session:
+
+| | 0.2.0 | now |
+|---|---|---|
+| Memory at idle, all processes (PSS) | 618 MB | 357 MB |
+| Main window on screen after launch | ~586 ms | ~530 ms |
+| Linux `.deb` | 13.5 MB | 7.4 MB |
+| Binary | 39.1 MB | 15.9 MB |
+
+YouTube Music itself adds its own page memory on top, and Windows (WebView2) hasn't been measured yet; earlier claims of "under 100 MB" were never measured and are withdrawn. Companion windows are created when first opened (each is a separate web process, ~70 MB) and Settings and the library are closed completely when you close them.
+
+---
+
+## Architecture
 
 ```
 ytmd/
-├── src-tauri/                  # Tauri v2 Backend (Rust)
-│   ├── src/
-│   │   ├── main.rs             # Application binary entry
-│   │   ├── lib.rs              # App orchestration and Tauri plugin setup
-│   │   ├── commands.rs         # IPC command handlers
-│   │   ├── config.rs           # Persistent config manager (~/.ytmd/config.json)
-│   │   ├── mpris.rs            # Linux MPRIS integration (D-Bus)
-│   │   ├── discord_rpc.rs      # Native Discord IPC socket client
-│   │   ├── tray.rs             # System tray menu and lifecycle
-│   │   ├── shortcuts.rs        # Configurable global shortcuts
-│   │   ├── local_files.rs      # Local directory scanner & metadata extractor
-│   │   ├── downloader.rs       # Audio stream downloader
-│   │   ├── sync_room.rs        # Listen Together: rooms, roles, LAN transport, handoff
-│   │   ├── sync_room/features.rs # Join approval, votes, reactions, shared queue
-│   │   ├── p2p_sync.rs         # Listen Together over public MQTT brokers
-│   │   ├── sync_crypto.rs      # End-to-end encryption keyed by the room code
-│   │   ├── remote_server.rs    # Local web remote HTTP & WebSocket server
-│   │   └── power_manager.rs    # System sleep inhibitor and lock watcher
-│   ├── icons/                  # Application icons
-│   └── tauri.conf.json         # Tauri v2 configuration
-├── src/                        # Frontend & Webview Core (TypeScript)
-│   ├── preload/                # Webview bridge injected into music.youtube.com
-│   │   ├── index.ts            # Entrypoint and burger menu injector
-│   │   ├── bridge.ts           # Player DOM interaction bridge
-│   │   └── observer.ts         # MutationObserver & playback state sync
-│   ├── plugins/                # Modular plugin architecture
-│   │   ├── audio-dsp/          # Web Audio API 10-band equalizer & filters
-│   │   ├── lyrics/             # Synchronized lyrics viewer (LRCLIB)
-│   │   ├── adblock/            # Fast ad skipping & popup dismissal
-│   │   ├── sponsorblock/       # Non-music segment skipping
-│   │   ├── themes/             # Ambient/Base look & custom CSS
-│   │   ├── sync-room/          # Listen Together on the page, shared-queue panel
-│   │   ├── ambient/            # Ambient canvas lighting effect
-│   │   ├── remote/             # Mobile web remote UI & QR modal
-│   │   └── volume/             # Mouse wheel volume adjustment
-│   ├── ui/                     # Standalone Companion Windows
-│   │   ├── settings.ts         # Preferences & DSP Equalizer interface
-│   │   ├── local.ts            # Local Music Library interface
-│   │   ├── miniplayer.ts       # Compact floating Mini Player
-│   │   ├── sync.ts             # Listen Together Room Sync interface
-│   │   └── styles.css          # Unified anti-slop design system
-│   └── tests/                  # Frontend test suites (Bun test)
-├── index.html                  # Companion launcher
-├── settings.html               # Settings modal window
-├── local.html                  # Local music library window
-├── miniplayer.html             # Mini player window
-├── sync.html                   # Listen Together window
-├── package.json
-└── vite.config.ts
+├── src-tauri/src/
+│   ├── lib.rs              app setup, main window, plugins and windows wiring
+│   ├── page_ipc.rs         what the YouTube Music page may see and call
+│   ├── bridge.rs           the page's command table (validated)
+│   ├── commands.rs         companion-window commands
+│   ├── windows.rs          companion windows, created on demand
+│   ├── nav_policy.rs       where the main window may go
+│   ├── connectivity.rs     offline screen
+│   ├── plugins/            plugin manifests, registries, installs, storage, network
+│   ├── sync_room.rs, sync_room/features.rs, p2p_sync.rs, sync_crypto.rs   Listen Together
+│   ├── remote_server.rs    phone remote (axum, WebSocket)
+│   ├── lyrics/             lyrics providers, cache, offsets
+│   ├── mpris.rs, thumbbar.rs, discord_rpc.rs, tray.rs, shortcuts.rs
+│   ├── config.rs, session.rs, secure_fs.rs, crash.rs, i18n.rs
+│   └── local_files.rs, power_manager.rs, screen_lock.rs, updater.rs, join_link.rs
+├── src/
+│   ├── preload/            injected into music.youtube.com (bundled as an IIFE)
+│   ├── plugins/            built-in plugins, each with a manifest
+│   ├── ui/                 companion windows (settings, library, mini player, Listen Together, offline)
+│   └── remote/             the phone app
+├── docs/PLUGIN_API.md
+└── _plugins-export/        a plugin registry repository, ready to push
 ```
 
 ---
 
-## Getting Started
+## Building
 
-### Prerequisites
+Prerequisites: Rust (stable), Bun, and on Linux `webkit2gtk-4.1`, `libappindicator-gtk3`, `librsvg2`, `libasound2`:
 
-- **Rust & Cargo** (1.78+)
-- **Bun** (recommended) or **Node.js** (v20+)
-- **System dependencies (Linux)**: `webkit2gtk-4.1`, `libappindicator-gtk3`, `librsvg2`, `libasound2-dev`
-
-#### Arch Linux / Manjaro:
 ```bash
+# Arch / Manjaro
 sudo pacman -S webkit2gtk-4.1 libappindicator-gtk3 base-devel alsa-lib
-```
-
-#### Ubuntu / Debian:
-```bash
+# Ubuntu / Debian
 sudo apt install libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev libasound2-dev build-essential
-```
-
-#### Fedora:
-```bash
+# Fedora
 sudo dnf install webkit2gtk4.1-devel libappindicator-gtk3-devel librsvg2-devel alsa-lib-devel
 ```
 
----
-
-### Building and Running
-
-1. **Clone the repository**:
-   ```bash
-   git clone https://github.com/dachluczaj/ytmd.git
-   cd ytmd
-   ```
-
-2. **Install dependencies**:
-   ```bash
-   bun install
-   ```
-
-3. **Start in development mode**:
-   ```bash
-   bun run tauri dev
-   ```
-
-4. **Build production binary**:
-   ```bash
-   bun run tauri build
-   ```
-   The compiled binary and `.deb` / `.rpm` / `.AppImage` packages will be placed in `src-tauri/target/release/bundle/`.
-
----
+```bash
+bun install
+bun run tauri dev      # development
+bun run tauri build    # installers in src-tauri/target/release/bundle/
+```
 
 ## Testing
 
-Run unit test suites across frontend and backend:
-
 ```bash
-# TypeScript & Plugin tests
-bun test
-
-# Rust backend tests
-cargo test --manifest-path src-tauri/Cargo.toml
+bun run typecheck && bun test
+cd src-tauri && cargo test && cargo clippy --all-targets -- -D warnings && cargo deny check
 ```
 
----
+## Releasing
 
-## Releasing a New Version
+1. `bun scripts/versions.ts set 0.3.0` (keeps `package.json`, `Cargo.toml` and `tauri.conf.json` in step; CI checks them against the tag).
+2. Commit, tag `v0.3.0`, push the tag. `.github/workflows/release.yml` builds Linux and Windows installers, signs the updater artifacts and opens a **draft** release; publish it by hand.
 
-Releases are built and published by `.github/workflows/release.yml`, which also generates the signed `latest.json` manifest the in-app updater polls (`src-tauri/tauri.conf.json` -> `plugins.updater.endpoints`).
-
-1. Bump the version in **all three** places so they stay in sync: `package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`.
-2. Commit, then tag and push:
-   ```bash
-   git tag v1.0.1
-   git push origin v1.0.1
-   ```
-3. The workflow builds Linux (`.deb`/`.rpm`/`.AppImage`) and Windows (`.msi`/`.exe`) installers, signs the updater artifacts, and opens a **draft** GitHub Release with everything attached. Review it and publish it manually — the updater only sees non-draft releases.
-
-The workflow needs two repository secrets (Settings > Secrets and variables > Actions):
-
-| Secret | What it is |
-| --- | --- |
-| `TAURI_SIGNING_PRIVATE_KEY` | The updater signing private key (generate once with `bunx tauri signer generate -w /path/to/key.pem`, keep the file out of git) |
-| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | The password you set when generating that key |
-
-The matching public key is already committed in `src-tauri/tauri.conf.json` (`plugins.updater.pubkey`) — it's what lets running copies of YTMD verify that an update actually came from you. If the private key is ever regenerated, that pubkey must be updated to match or every existing install will reject future updates. The current key pair has ID `A721E1BF70C34591` (the first line of the `.pub` file, base64-decoded, ends with it) — check a key against that before assuming it's the right one.
+Secrets: `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. The matching public key (ID `A721E1BF70C34591`) is in `src-tauri/tauri.conf.json`; regenerating the key pair would make every installed copy reject future updates. Windows installers are not code-signed yet (SmartScreen will warn), see `AUDIT.md`.
 
 ---
 
 ## Disclaimer
 
-This is an unofficial, open-source community project. It is not affiliated with, endorsed by, or sponsored by Google LLC or YouTube. All trademarks and registered trademarks belong to their respective owners.
-
----
+An unofficial community project, not affiliated with, endorsed by, or sponsored by Google LLC or YouTube. All trademarks belong to their owners.
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
+[MIT](LICENSE)
