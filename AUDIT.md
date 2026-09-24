@@ -200,7 +200,7 @@ Przyczyny i poprawki:
 - 4 okna towarzyszące tworzone przy starcie jako ukryte — każde to osobny proces WebKit
   (~71 MB PSS). Teraz `windows.rs` tworzy je przy pierwszym otwarciu; Ustawienia i Biblioteka
   są niszczone przy zamknięciu (po zapisaniu oczekującej zmiany), mini player i Listen Together
-  się chowają (szybki powrót, rzadko otwierane rzadko).
+  się chowają (szybki powrót).
 - `[profile.release]`: `lto`, `codegen-units = 1`, `opt-level = "s"`, `strip`. `panic`
   zostaje `unwind` (panika w zadaniu w tle nie może zabić odtwarzacza; panic hook ją loguje).
 - `scan_local_music` był synchroniczną komendą (główny wątek) — teraz `async` +
