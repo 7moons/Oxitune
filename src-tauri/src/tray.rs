@@ -75,24 +75,8 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             "prev" => {
                 let _ = app_handle.emit("tray-command", "previous");
             }
-            "miniplayer" => {
-                if let Some(mini_win) = app_handle.get_webview_window("miniplayer") {
-                    if let Ok(visible) = mini_win.is_visible() {
-                        if visible {
-                            let _ = mini_win.hide();
-                        } else {
-                            let _ = mini_win.show();
-                            let _ = mini_win.set_focus();
-                        }
-                    }
-                }
-            }
-            "settings" => {
-                if let Some(settings_win) = app_handle.get_webview_window("settings") {
-                    let _ = settings_win.show();
-                    let _ = settings_win.set_focus();
-                }
-            }
+            "miniplayer" => crate::windows::toggle(app_handle, "miniplayer"),
+            "settings" => crate::windows::show(app_handle, "settings"),
             "show_hide" => toggle_main_window(app_handle),
             "quit" => {
                 app_handle.exit(0);

@@ -95,11 +95,8 @@ pub fn handle_urls<'a>(app: &AppHandle, urls: impl IntoIterator<Item = &'a str>)
         *state.invites.pending_join.lock() = Some(code.clone());
     }
     let _ = app.emit("sync-join-link", &code);
-    if let Some(w) = app.get_webview_window("sync") {
-        let _ = w.show();
-        let _ = w.unminimize();
-        let _ = w.set_focus();
-    }
+    // A window created now reads the code with `take_pending_join_code`.
+    crate::windows::show(app, "sync");
 }
 
 #[cfg(test)]

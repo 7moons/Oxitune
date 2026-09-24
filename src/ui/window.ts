@@ -14,6 +14,25 @@ import { ensureKitStyles } from '../preload/ui/kit';
 import { applyI18n } from './i18n';
 import { initRanges } from './range';
 
+const beforeCloseHooks: (() => Promise<void> | void)[] = [];
+
+/** Runs before the window closes (Settings and the library are destroyed on
+ * close, see src-tauri/src/windows.rs): e.g. save what's still pending. */
+export function onBeforeClose(hook: () => Promise<void> | void): void {
+  beforeCloseHooks.push(hook);
+}
+
+async function closeWindow(): Promise<void> {
+  for (const hook of beforeCloseHooks) {
+    try {
+      await hook();
+    } catch (e) {
+      console.error('[YTMD] before-close hook failed:', e);
+    }
+  }
+  await window.__TAURI__?.core.invoke('close_window').catch((e: unknown) => console.error('[YTMD] close_window failed:', e));
+}
+
 export function initWindowChrome(): void {
   applyI18n(document);
   initRanges(document);
@@ -25,5 +44,7 @@ export function initWindowChrome(): void {
   };
   document.getElementById('win-min-btn')?.addEventListener('click', () => invoke('minimize_window'));
   document.getElementById('win-max-btn')?.addEventListener('click', () => invoke('toggle_maximize_window'));
-  document.getElementById('win-close-btn')?.addEventListener('click', () => invoke('close_window'));
+  document.getElementById('win-close-btn')?.addEventListener('click', () => void closeWindow());
+  // The window manager's close (Alt+F4, taskbar) goes through Rust first.
+  void window.__TAURI__?.event.listen('ytmd-close-requested', () => void closeWindow());
 }

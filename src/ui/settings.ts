@@ -6,7 +6,7 @@ import { COMPANION_LOCALES, I18nKey, tr } from './i18n';
 import { syncRange } from './range';
 import { acceleratorFromEvent, formatAccelerator, isMediaKey, SHORTCUT_ACTIONS, ShortcutAction } from './shortcuts';
 import { CustomEqPreset, deletePreset, isCustomPresetId, MAX_PRESET_NAME_CHARS, savePreset } from './eqPresets';
-import { initWindowChrome } from './window';
+import { initWindowChrome, onBeforeClose } from './window';
 import { normalizeProviders, ProviderSetting, renderProviderList } from './lyricsProviders';
 
 interface AppConfig {
@@ -699,6 +699,16 @@ document.addEventListener('DOMContentLoaded', () => {
   initAmbientBackdrop();
   initSectionNav();
   void loadRemotePairing();
+  // Opened on a section (`settings.html#sec-remote`, see windows.rs).
+  const initialSection = decodeURIComponent(location.hash.slice(1));
+  if (/^sec-[a-z-]+$/.test(initialSection)) requestAnimationFrame(() => showSection(initialSection));
+  // Closing destroys this window: save what the debounce still holds.
+  onBeforeClose(async () => {
+    if (saveTimer === null) return;
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    await saveSettings();
+  });
   void window.__TAURI__?.event.listen<string>('settings-open-section', (e) => {
     if (typeof e.payload === 'string') showSection(e.payload);
   });

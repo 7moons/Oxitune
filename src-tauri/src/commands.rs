@@ -36,15 +36,6 @@ pub fn ytmd_subscribe(
     Ok(())
 }
 
-/// Shows the Settings window on one section (`sec-…` id in settings.html).
-pub fn show_settings_section(app_handle: &AppHandle, section: &'static str) {
-    if let Some(win) = app_handle.get_webview_window("settings") {
-        let _ = win.show();
-        let _ = win.set_focus();
-        let _ = app_handle.emit_to("settings", "settings-open-section", section);
-    }
-}
-
 #[tauri::command]
 pub fn get_config(state: State<'_, Arc<AppState>>) -> AppConfig {
     state.config_manager.load()
@@ -249,33 +240,13 @@ pub fn update_track_info(
     Ok(())
 }
 
-#[tauri::command]
 pub fn toggle_mini_player(app_handle: AppHandle) -> Result<(), String> {
-    if let Some(mini_win) = app_handle.get_webview_window("miniplayer") {
-        if let Ok(visible) = mini_win.is_visible() {
-            if visible {
-                let _ = mini_win.hide();
-            } else {
-                let _ = mini_win.show();
-                let _ = mini_win.set_focus();
-            }
-        }
-    }
+    crate::windows::toggle(&app_handle, "miniplayer");
     Ok(())
 }
 
-#[tauri::command]
 pub fn toggle_settings_window(app_handle: AppHandle) -> Result<(), String> {
-    if let Some(settings_win) = app_handle.get_webview_window("settings") {
-        if let Ok(visible) = settings_win.is_visible() {
-            if visible {
-                let _ = settings_win.hide();
-            } else {
-                let _ = settings_win.show();
-                let _ = settings_win.set_focus();
-            }
-        }
-    }
+    crate::windows::toggle(&app_handle, "settings");
     Ok(())
 }
 
@@ -312,12 +283,14 @@ struct LocalScanProgress {
     found: usize,
 }
 
+/// Scans the library off the main thread (sync commands run on it, and a
+/// big library takes seconds), reading tags only for new or changed files.
 #[tauri::command]
-pub fn scan_local_music(
+pub async fn scan_local_music(
     app_handle: AppHandle,
     state: State<'_, Arc<AppState>>,
     directory: Option<String>,
-) -> Vec<crate::local_files::LocalTrack> {
+) -> Result<Vec<crate::local_files::LocalTrack>, String> {
     let config = state.config_manager.load();
     let library_root = std::path::PathBuf::from(&config.local_music_dir);
 
@@ -334,52 +307,39 @@ pub fn scan_local_music(
             if crate::local_files::is_within_root(&library_root, &requested_path) {
                 requested_path
             } else {
-                log::warn!(
-                    "[YTMD] scan_local_music rejected a directory outside the configured library root: {}",
-                    requested
-                );
+                log::warn!("[YTMD] scan_local_music rejected a directory outside the configured library root");
                 library_root
             }
         }
         None => library_root,
     };
+    let cache_path = state
+        .config_manager
+        .config_path()
+        .parent()
+        .map(|d| d.join("library_cache.json"))
+        .ok_or("no data folder")?;
 
-    // Large (10k+ file) libraries used to scan silently with zero feedback
-    // until the entire tree was walked and every file's tags read. Emit
-    // incremental progress so the local-library window can show the user
-    // something is actually happening instead of an indefinite spinner.
-    crate::local_files::scan_directory_with_progress(&target_dir, |scanned, found| {
-        let _ = app_handle.emit("local-scan-progress", LocalScanProgress { scanned, found });
+    // Progress events let the window show something during a long first scan.
+    tauri::async_runtime::spawn_blocking(move || {
+        let cache = crate::local_files::LibraryCache::load(&cache_path);
+        let (tracks, next) = crate::local_files::scan_directory_cached(&target_dir, &cache, |scanned, found| {
+            let _ = app_handle.emit("local-scan-progress", LocalScanProgress { scanned, found });
+        });
+        next.save(&cache_path);
+        tracks
     })
+    .await
+    .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
 pub fn toggle_local_library_window(app_handle: AppHandle) -> Result<(), String> {
-    if let Some(local_win) = app_handle.get_webview_window("local") {
-        if let Ok(visible) = local_win.is_visible() {
-            if visible {
-                let _ = local_win.hide();
-            } else {
-                let _ = local_win.show();
-                let _ = local_win.set_focus();
-            }
-        }
-    }
+    crate::windows::toggle(&app_handle, "local");
     Ok(())
 }
 
-#[tauri::command]
 pub fn toggle_sync_window(app_handle: AppHandle) -> Result<(), String> {
-    if let Some(sync_win) = app_handle.get_webview_window("sync") {
-        if let Ok(visible) = sync_win.is_visible() {
-            if visible {
-                let _ = sync_win.hide();
-            } else {
-                let _ = sync_win.show();
-                let _ = sync_win.set_focus();
-            }
-        }
-    }
+    crate::windows::toggle(&app_handle, "sync");
     Ok(())
 }
 
@@ -707,9 +667,11 @@ pub fn toggle_maximize_window(window: tauri::Window) -> Result<(), String> {
     Ok(())
 }
 
+/// A companion window's close button (after the page flushed anything
+/// pending): hides it, or destroys it for Settings and the library.
 #[tauri::command]
-pub fn close_window(window: tauri::Window) -> Result<(), String> {
-    let _ = window.hide();
+pub fn close_window(window: tauri::WebviewWindow) -> Result<(), String> {
+    crate::windows::close(&window);
     Ok(())
 }
 

@@ -1,7 +1,64 @@
 use lofty::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::Path;
+use std::time::UNIX_EPOCH;
 use walkdir::WalkDir;
+
+/// What a previous scan learned about each file, so a rescan reads tags
+/// only for files that are new or changed (size or modification time).
+/// Kept in `~/.ytmd/library_cache.json`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct LibraryCache {
+    #[serde(default)]
+    entries: HashMap<String, CachedTrack>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CachedTrack {
+    size: u64,
+    mtime_ns: u128,
+    track: LocalTrack,
+}
+
+/// Cache files bigger than this are ignored (a library of ~100k tracks).
+const MAX_CACHE_BYTES: u64 = 64 * 1024 * 1024;
+
+impl LibraryCache {
+    pub fn load(path: &Path) -> Self {
+        let too_big = std::fs::metadata(path).map(|m| m.len() > MAX_CACHE_BYTES).unwrap_or(true);
+        if too_big {
+            return Self::default();
+        }
+        std::fs::read(path)
+            .ok()
+            .and_then(|raw| serde_json::from_slice(&raw).ok())
+            .unwrap_or_default()
+    }
+
+    pub fn save(&self, path: &Path) {
+        if let Ok(json) = serde_json::to_vec(self) {
+            if let Err(e) = crate::secure_fs::write_private(path, &json) {
+                log::warn!("[YTMD] couldn't save the library cache: {e}");
+            }
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
+fn mtime_ns(meta: &std::fs::Metadata) -> u128 {
+    meta.modified()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map_or(0, |d| d.as_nanos())
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LocalTrack {
@@ -65,13 +122,25 @@ pub fn scan_directory(dir_path: &Path) -> Vec<LocalTrack> {
 /// progress instead.
 pub fn scan_directory_with_progress(
     dir_path: &Path,
-    mut on_progress: impl FnMut(usize, usize),
+    on_progress: impl FnMut(usize, usize),
 ) -> Vec<LocalTrack> {
+    scan_directory_cached(dir_path, &LibraryCache::default(), on_progress).0
+}
+
+/// The scan, reusing `cache` for files whose size and modification time
+/// haven't changed. Returns the tracks and the cache for the next scan
+/// (files that are gone drop out of it).
+pub fn scan_directory_cached(
+    dir_path: &Path,
+    cache: &LibraryCache,
+    mut on_progress: impl FnMut(usize, usize),
+) -> (Vec<LocalTrack>, LibraryCache) {
     let mut tracks = Vec::new();
+    let mut next_cache = LibraryCache::default();
     let mut scanned: usize = 0;
 
     if !dir_path.exists() || !dir_path.is_dir() {
-        return tracks;
+        return (tracks, next_cache);
     }
 
     // Canonicalized once so every walked entry below can be checked against
@@ -84,7 +153,7 @@ pub fn scan_directory_with_progress(
     // music.youtube.com origin.
     let root_canon = match dir_path.canonicalize() {
         Ok(p) => p,
-        Err(_) => return tracks,
+        Err(_) => return (tracks, next_cache),
     };
 
     for entry in WalkDir::new(dir_path)
@@ -115,7 +184,14 @@ pub fn scan_directory_with_progress(
                 .and_then(|e| e.to_str())
                 .unwrap_or("unknown")
                 .to_lowercase();
-            let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+            let meta = entry.metadata().ok();
+            let size = meta.as_ref().map_or(0, |m| m.len());
+            let modified = meta.as_ref().map_or(0, mtime_ns);
+            if let Some(hit) = cache.entries.get(&file_path_str).filter(|c| c.size == size && c.mtime_ns == modified) {
+                tracks.push(hit.track.clone());
+                next_cache.entries.insert(file_path_str, hit.clone());
+                continue;
+            }
 
             // Extract ID3 tags if available, otherwise fallback to filename
             let mut title = path
@@ -156,16 +232,18 @@ pub fn scan_directory_with_progress(
                 }
             }
 
-            tracks.push(LocalTrack {
+            let track = LocalTrack {
                 id: format!("{:x}", md5_hash(&file_path_str)),
                 title,
                 artist,
                 album,
                 duration_secs,
-                file_path: file_path_str,
+                file_path: file_path_str.clone(),
                 file_format: ext,
                 file_size_bytes: size,
-            });
+            };
+            next_cache.entries.insert(file_path_str, CachedTrack { size, mtime_ns: modified, track: track.clone() });
+            tracks.push(track);
         }
     }
 
@@ -179,7 +257,7 @@ pub fn scan_directory_with_progress(
             .then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
     });
 
-    tracks
+    (tracks, next_cache)
 }
 
 fn md5_hash(s: &str) -> u64 {
@@ -193,6 +271,57 @@ fn md5_hash(s: &str) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_rescan_reuses_unchanged_files_and_rereads_changed_ones() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("Artist - One.wav");
+        let b = dir.path().join("Artist - Two.wav");
+        std::fs::write(&a, build_wav_with_info_tag("One", "Tagged", 1)).unwrap();
+        std::fs::write(&b, build_wav_with_info_tag("Two", "Tagged", 1)).unwrap();
+        let (first, cache) = scan_directory_cached(dir.path(), &LibraryCache::default(), |_, _| {});
+        assert_eq!(first.len(), 2);
+        assert_eq!(cache.len(), 2);
+
+        std::fs::write(&b, build_wav_with_info_tag("Two v2", "Tagged", 2)).unwrap();
+        let (second, next) = scan_directory_cached(dir.path(), &cache, |_, _| {});
+        assert!(second.iter().any(|t| t.title == "Two v2"), "a changed file is read again");
+        assert_eq!(next.len(), 2);
+
+        std::fs::remove_file(&b).unwrap();
+        let (third, after_delete) = scan_directory_cached(dir.path(), &next, |_, _| {});
+        assert_eq!(third.len(), 1);
+        assert_eq!(after_delete.len(), 1, "deleted files leave the cache");
+    }
+
+    #[test]
+    fn test_unchanged_file_comes_from_the_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("x.wav");
+        std::fs::write(&a, build_wav_with_info_tag("Real", "Tagged", 1)).unwrap();
+        let (_, mut cache) = scan_directory_cached(dir.path(), &LibraryCache::default(), |_, _| {});
+        cache.entries.get_mut(a.to_str().unwrap()).unwrap().track.title = "from cache".into();
+        let (tracks, _) = scan_directory_cached(dir.path(), &cache, |_, _| {});
+        assert_eq!(tracks[0].title, "from cache");
+    }
+
+    /// `cargo test --release bench_library_scan -- --ignored --nocapture`
+    #[test]
+    #[ignore = "benchmark"]
+    fn bench_library_scan() {
+        let dir = tempfile::tempdir().unwrap();
+        for i in 0..3000 {
+            std::fs::write(dir.path().join(format!("Artist {} - Song {i}.wav", i % 50)), build_wav_with_info_tag(&format!("Song {i}"), "Bench", 1)).unwrap();
+        }
+        let t = std::time::Instant::now();
+        let (tracks, cache) = scan_directory_cached(dir.path(), &LibraryCache::default(), |_, _| {});
+        let cold = t.elapsed();
+        let t = std::time::Instant::now();
+        let (again, _) = scan_directory_cached(dir.path(), &cache, |_, _| {});
+        let warm = t.elapsed();
+        assert_eq!(tracks.len(), again.len());
+        println!("library scan of {} files: cold {:?}, cached {:?}", tracks.len(), cold, warm);
+    }
     use std::fs::File;
     use tempfile::tempdir;
 

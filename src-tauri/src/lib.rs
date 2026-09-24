@@ -21,6 +21,7 @@ pub mod sync_crypto;
 pub mod sync_room;
 pub mod tray;
 pub mod updater;
+pub mod windows;
 
 use config::ConfigManager;
 use discord_rpc::{DiscordRpcHandle, TrackPayload};
@@ -73,6 +74,7 @@ fn install_crypto_provider_for_tests() {
 }
 
 pub fn run() {
+    let started = std::time::Instant::now();
     ensure_crypto_provider();
 
     let config_manager = ConfigManager::new();
@@ -284,7 +286,16 @@ pub fn run() {
                 main_builder = main_builder.icon(icon.clone())?;
             }
 
+            let first_load = std::sync::atomic::AtomicBool::new(true);
+            main_builder = main_builder.on_page_load(move |_webview, payload| {
+                if payload.event() == tauri::webview::PageLoadEvent::Finished
+                    && first_load.swap(false, std::sync::atomic::Ordering::SeqCst)
+                {
+                    log::info!("[YTMD] first page loaded {} ms after start", started.elapsed().as_millis());
+                }
+            });
             let main_win = main_builder.build()?;
+            log::info!("[YTMD] main window created {} ms after start", started.elapsed().as_millis());
 
             // Initialize MPRIS (needs the main window's HWND on Windows)
             let mpris_manager = MprisManager::new(handle.clone(), &main_win);
@@ -324,9 +335,16 @@ pub fn run() {
                         api.prevent_close();
                         let _ = window.hide();
                     }
-                } else if window.label() == "miniplayer" || window.label() == "settings" || window.label() == "local" || window.label() == "sync" {
+                } else if let Some(spec) = windows::spec(window.label()) {
                     api.prevent_close();
-                    let _ = window.hide();
+                    if spec.destroy_on_close {
+                        // The page saves anything pending, then calls
+                        // close_window (src/ui/window.ts).
+                        use tauri::Emitter;
+                        let _ = window.emit_to(window.label(), "ytmd-close-requested", ());
+                    } else {
+                        let _ = window.hide();
+                    }
                 }
             }
         })

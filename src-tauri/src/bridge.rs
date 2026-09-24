@@ -177,7 +177,7 @@ bridge_commands! {
     // The pairing QR carries the remote's token, so it is shown in the
     // Settings window, never in the page.
     "open_remote_pairing" => |h, state, args| {
-        commands::show_settings_section(h, "sec-remote");
+        crate::windows::show_settings_section(h, "sec-remote");
         Ok(Value::Null)
     }
     "toggle_settings_window" => |h, state, args| {

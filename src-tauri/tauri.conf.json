@@ -11,61 +11,7 @@
   },
   "app": {
     "withGlobalTauri": true,
-    "windows": [
-      {
-        "label": "miniplayer",
-        "title": "YTMD Mini Player",
-        "url": "miniplayer.html",
-        "width": 320,
-        "height": 420,
-        "minWidth": 260,
-        "minHeight": 320,
-        "resizable": true,
-        "alwaysOnTop": true,
-        "decorations": false,
-        "visible": false,
-        "transparent": false
-      },
-      {
-        "label": "settings",
-        "title": "YTMD Preferences",
-        "url": "settings.html",
-        "width": 780,
-        "height": 640,
-        "minWidth": 540,
-        "minHeight": 440,
-        "resizable": true,
-        "alwaysOnTop": false,
-        "decorations": false,
-        "visible": false
-      },
-      {
-        "label": "local",
-        "title": "YTMD Local Music Library",
-        "url": "local.html",
-        "width": 900,
-        "height": 650,
-        "minWidth": 600,
-        "minHeight": 450,
-        "resizable": true,
-        "alwaysOnTop": false,
-        "decorations": false,
-        "visible": false
-      },
-      {
-        "label": "sync",
-        "title": "YTMD Listen Together (Room Sync)",
-        "url": "sync.html",
-        "width": 640,
-        "height": 520,
-        "minWidth": 480,
-        "minHeight": 380,
-        "resizable": true,
-        "alwaysOnTop": false,
-        "decorations": false,
-        "visible": false
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": {
         "default-src": "'self'",
