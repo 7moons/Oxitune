@@ -19,6 +19,7 @@ import { PowerPlugin } from '../plugins/power';
 import { RemotePlugin, showQrModal } from '../plugins/remote';
 import { PluginContext, TrackInfo } from '../plugins/types';
 import { configureNavMenu, mountNavMenu } from './ui/navMenu';
+import { mountWindowControls } from './ui/windowControls';
 import { ICONS, showToast } from './ui/kit';
 import { t } from './ui/i18n';
 import { invokeBackend } from './bridgeClient';
@@ -95,8 +96,12 @@ async function initYTMD() {
   // Mount the nav-bar menu immediately, then keep it mounted: YTM
   // re-renders its nav bar on some navigations, which drops our slot.
   setupNavMenu();
-  mountNavMenu();
-  const navMenuPoll = setInterval(mountNavMenu, 1000);
+  const mountNavBar = () => {
+    mountNavMenu();
+    mountWindowControls();
+  };
+  mountNavBar();
+  const navMenuPoll = setInterval(mountNavBar, 1000);
   // No other teardown path exists for this injected script today (its
   // lifetime is normally the page's), but `pagehide` fires on the one case
   // that does end it early without a full reload — bfcache eviction /

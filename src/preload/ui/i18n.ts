@@ -77,7 +77,11 @@ const en = {
   lyricsLater: 'Show lyrics later',
   lyricsReset: 'Reset',
   actionFailed: 'Something went wrong. Try again.',
-  volumeLevel: (percent: number) => `Volume: ${percent}%`
+  volumeLevel: (percent: number) => `Volume: ${percent}%`,
+  windowMinimize: 'Minimize',
+  windowMaximize: 'Maximize',
+  windowRestore: 'Restore down',
+  windowClose: 'Close'
 };
 
 type Strings = typeof en;
@@ -161,7 +165,11 @@ const pl: Strings = {
   lyricsLater: 'Pokazuj tekst później',
   lyricsReset: 'Resetuj',
   actionFailed: 'Coś poszło nie tak. Spróbuj ponownie.',
-  volumeLevel: (percent: number) => `Głośność: ${percent}%`
+  volumeLevel: (percent: number) => `Głośność: ${percent}%`,
+  windowMinimize: 'Minimalizuj',
+  windowMaximize: 'Maksymalizuj',
+  windowRestore: 'Przywróć w dół',
+  windowClose: 'Zamknij'
 };
 
 const LOCALES: Record<string, Strings> = { en, pl };

@@ -250,6 +250,9 @@ pub fn run() {
             // margin and got visibly clipped on their left edge.
             .min_inner_size(700.0, 500.0)
             .resizable(true)
+            // YTM's nav bar is the title bar: the injected page adds the window
+            // buttons and drags the window from it (src/preload/ui/windowControls.ts).
+            .decorations(false)
             .initialization_script(include_str!("../inject/preload.js"));
 
             if let Ok(icon) = tauri::image::Image::from_bytes(include_bytes!("../icons/icon.png")) {
