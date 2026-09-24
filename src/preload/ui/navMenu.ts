@@ -17,7 +17,6 @@ export interface NavMenuItem {
 }
 
 export interface SyncStatus {
-  roomCode: string;
   listeners: number;
   isHost: boolean;
 }
@@ -112,7 +111,7 @@ function renderSyncChip() {
   }
   const label = t().syncListeners(syncStatus.listeners);
   chip.replaceChildren(createEl('span', { className: 'ytmd-chip-dot' }), icon(ICONS.group, 18), createEl('span', { text: label }));
-  chip.dataset.ytmdTooltip = `${t().syncInRoom} · ${syncStatus.roomCode}`;
+  chip.dataset.ytmdTooltip = t().syncInRoom;
   chip.setAttribute('aria-label', `${t().syncInRoom}, ${label}`);
 }
 

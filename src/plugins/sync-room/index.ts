@@ -44,7 +44,9 @@ export interface QueueItemPayload {
 }
 
 export interface RoomStatePayload {
-  room_code: string;
+  /** Stable, non-secret id of the room (the page never gets the room code,
+   * which is the room's key; see page_ipc.rs). */
+  room_id: string;
   is_host: boolean;
   current_user_id: string;
   members: RoomMemberPayload[];
@@ -733,7 +735,7 @@ export function routeRoomPlayVideo(videoId: string): boolean {
 function applyRoomUi(room: RoomStatePayload | null, announce: boolean, leaveReason: LeaveReason = 'left') {
   const prev = lastRoom;
   lastRoom = room;
-  setSyncStatus(room ? { roomCode: room.room_code, listeners: room.members.length, isHost: room.is_host } : null);
+  setSyncStatus(room ? { listeners: room.members.length, isHost: room.is_host } : null);
   refreshQueuePanel();
   if (!announce) return;
 
@@ -742,7 +744,7 @@ function applyRoomUi(room: RoomStatePayload | null, announce: boolean, leaveReas
     showToast(leaveReason === 'kicked' ? t().syncKicked : leaveReason === 'lost' ? t().syncLost : t().syncRoomClosed);
     return;
   }
-  if (!prev || prev.room_code !== room.room_code) {
+  if (!prev || prev.room_id !== room.room_id) {
     if (!room.is_host) showToast(t().syncConnected);
     return;
   }
