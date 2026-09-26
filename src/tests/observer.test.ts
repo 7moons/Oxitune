@@ -5,7 +5,9 @@ import {
   FALLBACK_TICK_AFTER_MS,
   classifyTrackUpdate,
   titlesAgree,
-  settledMetadata
+  settledMetadata,
+  songFromPlayer,
+  sameTitle
 } from '../preload/observer';
 import type { TrackInfo } from '../plugins/types';
 
@@ -87,6 +89,52 @@ describe('titlesAgree', () => {
 // Regression: MediaSession kept the previous song ("Grow A Pear") while the
 // player had switched to "Bring Me To Life"; the pair was reported anyway
 // and the lyrics for the old title were cached under the new song's id.
+// The song's identity comes from one object the player swaps as a whole
+// (what pear-desktop's song-info does), never pieced together.
+describe('songFromPlayer', () => {
+  const details = {
+    videoId: 'jRGrNDV2mKc',
+    title: ' Freak On a Leash (Official HD Video) ',
+    author: 'Korn',
+    lengthSeconds: '267',
+    thumbnail: { thumbnails: [{ url: 'https://i.ytimg.com/small.jpg' }, { url: 'https://i.ytimg.com/big.jpg' }] }
+  };
+
+  test('describes the loaded song from its details', () => {
+    expect(songFromPlayer(details, 'jRGrNDV2mKc')).toEqual({
+      videoId: 'jRGrNDV2mKc',
+      title: 'Freak On a Leash (Official HD Video)',
+      artist: 'Korn',
+      durationSecs: 267,
+      coverUrl: 'https://i.ytimg.com/big.jpg'
+    });
+  });
+
+  test('details of another song than the loaded one are a switch in progress', () => {
+    expect(songFromPlayer(details, 'HaFdmN2ha2I')).toBe('switching');
+    expect(songFromPlayer({ ...details, title: '' }, 'jRGrNDV2mKc')).toBe('switching');
+  });
+
+  test('no details: the older sources decide', () => {
+    expect(songFromPlayer(undefined, 'jRGrNDV2mKc')).toBeNull();
+    expect(songFromPlayer({}, undefined)).toBeNull();
+  });
+
+  test('a missing length is 0, not NaN', () => {
+    const song = songFromPlayer({ ...details, lengthSeconds: undefined }, undefined);
+    expect(song !== null && song !== 'switching' && song.durationSecs).toBe(0);
+  });
+});
+
+describe('sameTitle', () => {
+  test('needs both titles, equal aside from case and spacing', () => {
+    expect(sameTitle('Loose', ' loose ')).toBe(true);
+    expect(sameTitle('Loose', '')).toBe(false);
+    expect(sameTitle(undefined, 'Loose')).toBe(false);
+    expect(sameTitle('Loose', 'Supa Freak Love')).toBe(false);
+  });
+});
+
 describe('settledMetadata', () => {
   test('describes the song from the player, never from the stale MediaSession', () => {
     expect(settledMetadata('-eGM0IJc70Y', { title: ' Bring Me To Life ', author: 'Evanescence' })).toEqual({

@@ -19,7 +19,39 @@ type MoviePlayerElement = HTMLElement & {
   getDuration?: () => number;
   getCurrentTime?: () => number;
   getVideoData?: () => { video_id?: string; title?: string; author?: string } | undefined;
+  getPlayerResponse?: () => { videoDetails?: PlayerVideoDetails } | undefined;
 };
+
+/** `getPlayerResponse().videoDetails`: the loaded song's id, title, author
+ * and length in one object the player swaps as a whole. */
+export interface PlayerVideoDetails {
+  videoId?: string;
+  title?: string;
+  author?: string;
+  lengthSeconds?: string;
+  thumbnail?: { thumbnails?: { url?: string }[] };
+}
+
+/** The song as the player describes it, `'switching'` while the player's
+ * pieces still disagree, or null when it offers no details at all. The id,
+ * title and author come from one object, so the previous song's title can
+ * never go out with the next song's id (it did, through MediaSession, and
+ * the lyrics then looked up and cached the previous song's words). */
+export function songFromPlayer(
+  details: PlayerVideoDetails | undefined,
+  loadedId: string | undefined
+): { videoId: string; title: string; artist: string; durationSecs: number; coverUrl: string } | 'switching' | null {
+  if (!details?.videoId) return null;
+  if ((loadedId && details.videoId !== loadedId) || !details.title?.trim()) return 'switching';
+  const length = Number(details.lengthSeconds);
+  return {
+    videoId: details.videoId,
+    title: details.title.trim(),
+    artist: details.author?.trim() ?? '',
+    durationSecs: Number.isFinite(length) && length > 0 ? Math.floor(length) : 0,
+    coverUrl: details.thumbnail?.thumbnails?.at(-1)?.url || `https://i.ytimg.com/vi/${details.videoId}/hqdefault.jpg`
+  };
+}
 
 /** Position in the loaded song. YTM's player API, not `video.currentTime`:
  * YTM appends the next song to the same media stream, so the video's
@@ -64,6 +96,11 @@ export function settledMetadata(
 }
 
 const normalizeTitle =(s: string) => s.trim().replace(/\s+/g, ' ').toLowerCase();
+
+/** Both titles known and the same (case and spacing aside). */
+export function sameTitle(a: string | undefined, b: string | undefined): boolean {
+  return !!a?.trim() && !!b?.trim() && normalizeTitle(a) === normalizeTitle(b);
+}
 
 /** Whether the player's title and MediaSession's title describe the same
  * song. Unknown on either side counts as agreeing. */
@@ -314,12 +351,33 @@ export class PlayerObserver {
     // The player's own song id; the URL's `v` only as a fallback (it is
     // missing while browsing other pages and switches at another moment).
     const videoData = moviePlayer?.getVideoData?.();
-    const videoId = videoData?.video_id || new URLSearchParams(window.location.search).get('v') || undefined;
+    let videoId = videoData?.video_id || new URLSearchParams(window.location.search).get('v') || undefined;
+    // Which song it is comes from the player's details; MediaSession only
+    // adds its nicer album and square cover, and only when it names the
+    // same song.
+    let fromPlayer = songFromPlayer(moviePlayer?.getPlayerResponse?.()?.videoDetails, videoData?.video_id);
+    if (fromPlayer === 'switching') {
+      const now = Date.now();
+      const key = videoData?.video_id ?? '';
+      if (this.titleMismatch?.videoId !== key) this.titleMismatch = { videoId: key, sinceMs: now };
+      if (now - this.titleMismatch.sinceMs < TITLE_WAIT_MAX_MS) return null;
+      fromPlayer = null; // the player never settled: the older sources below
+    }
     // Right after a switch the player can know the new id but not yet its
     // title; "unknown" is not "agrees", or MediaSession's previous title
     // goes out with the new id.
     const titleUnknown = !!videoData?.video_id && !videoData.title?.trim();
-    if (videoId && (titleUnknown || !titlesAgree(videoData?.title, msMeta?.title))) {
+    if (fromPlayer) {
+      this.titleMismatch = null;
+      videoId = fromPlayer.videoId;
+      if (!sameTitle(fromPlayer.title, msMeta?.title)) {
+        // MediaSession is another song's (or empty): nothing of it is used.
+        title = fromPlayer.title;
+        artist = fromPlayer.artist;
+        album = '';
+        coverUrl = fromPlayer.coverUrl;
+      }
+    } else if (videoId && (titleUnknown || !titlesAgree(videoData?.title, msMeta?.title))) {
       const now = Date.now();
       if (this.titleMismatch?.videoId !== videoId) this.titleMismatch = { videoId, sinceMs: now };
       const waited = now - this.titleMismatch.sinceMs;
@@ -343,12 +401,14 @@ export class PlayerObserver {
       this.titleMismatch = null;
     }
 
-    let durationSecs = 0;
+    // The song's own length first: the API's duration and the video's
+    // can both be the media stream's rather than the song's.
+    let durationSecs = fromPlayer ? fromPlayer.durationSecs : 0;
     let currentTimeSecs = 0;
     let apiTime = false;
 
     // Source A: moviePlayer API (instantaneous)
-    if (moviePlayer && typeof moviePlayer.getDuration === 'function') {
+    if (!durationSecs && moviePlayer && typeof moviePlayer.getDuration === 'function') {
       const d = moviePlayer.getDuration();
       if (typeof d === 'number' && Number.isFinite(d) && d > 0) {
         durationSecs = Math.floor(d);
