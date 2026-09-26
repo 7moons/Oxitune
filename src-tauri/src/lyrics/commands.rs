@@ -92,7 +92,11 @@ pub struct CandidateSummary {
 /// cached under the new id, and kept for 30 days. Results with no title
 /// (local files, YTM's own text) can't be checked and are kept.
 fn cached_fits(lyrics: &Lyrics, q: &Query) -> bool {
-    use super::matching::{clean_track_name, token_similarity};
+    use super::matching::{artist_matches, clean_track_name, token_similarity};
+    // By another artist: cached before results had to match the artist.
+    if !artist_matches(&lyrics.artist, &q.artist, &q.artist_aliases) {
+        return false;
+    }
     let (cached, wanted) = (lyrics.title.trim(), clean_track_name(&q.title));
     if cached.is_empty() || wanted.trim().is_empty() {
         return true;
@@ -490,6 +494,11 @@ mod tests {
         assert!(cached_fits(&l, &q("Carpenter Brut - Maniac (Official Video)")));
         assert!(cached_fits(&l, &q("maniac")));
         assert!(!cached_fits(&l, &q("Bring Me To Life")));
+        // Cached before results had to match the artist: a similar title
+        // by someone else is looked up again.
+        let by = |artist: &str| Query { title: "Maniac".into(), artist: artist.into(), ..Default::default() };
+        assert!(cached_fits(&l, &by("Carpenter Brut")));
+        assert!(!cached_fits(&l, &by("bambi i francis")));
         let mut untitled = l.clone();
         untitled.title.clear();
         assert!(cached_fits(&untitled, &q("Bring Me To Life")));

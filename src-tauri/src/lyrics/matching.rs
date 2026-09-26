@@ -124,10 +124,13 @@ pub fn clean_track_name(title: &str) -> String {
 /// YouTube: "KornVEVO" is still Korn); the best of them counts.
 pub fn score_match(cand: &Candidate<'_>, title: &str, artist: &str, aliases: &[String], duration: Option<f64>) -> f64 {
     let title_sim = token_similarity(cand.title, title);
-    let artist_sim = aliases
-        .iter()
-        .map(|a| token_similarity(cand.artist, a))
-        .fold(token_similarity(cand.artist, artist), f64::max);
+    let artist_sim = artist_similarity(cand.artist, artist, aliases);
+
+    // Someone else's song with a similar title ("Big Girl" by Sips & The
+    // Yogscast for "BIG BIG GIRL" by bambi i francis) is never the song.
+    if !artist_matches(cand.artist, artist, aliases) {
+        return 0.0;
+    }
 
     // Reject candidates that have no title resemblance whatsoever
     if title_sim < 0.25 && !cand.title.to_lowercase().contains(&title.to_lowercase()) {
@@ -162,6 +165,51 @@ pub struct Candidate<'a> {
 }
 
 pub const MIN_MATCH_SCORE: f64 = 35.0;
+
+/// Below this the result is by another artist, whatever its title.
+pub const MIN_ARTIST_SIMILARITY: f64 = 0.5;
+
+/// What YTMD reports when YouTube Music names no artist.
+const UNKNOWN_ARTIST: &str = "Unknown Artist";
+
+/// The artists in a credit: "bambi i francis", "A & B", "A feat. B".
+fn artist_names(credit: &str) -> Vec<String> {
+    const SEPARATORS: [&str; 14] = [
+        ",", "&", ";", "/", " x ", " × ", " feat. ", " feat ", " ft. ", " ft ", " featuring ", " and ", " i ", " oraz ",
+    ];
+    let mut names = vec![credit.to_lowercase()];
+    for sep in SEPARATORS {
+        names = names.iter().flat_map(|n| n.split(sep).map(str::to_string).collect::<Vec<_>>()).collect();
+    }
+    names.into_iter().map(|n| n.trim().to_string()).filter(|n| !n.is_empty()).collect()
+}
+
+/// How alike two credits are: the whole of each, or any artist of one
+/// against any of the other, and the song's other names (`aliases`).
+pub fn artist_similarity(found: &str, artist: &str, aliases: &[String]) -> f64 {
+    let found_names = artist_names(found);
+    std::iter::once(artist)
+        .chain(aliases.iter().map(String::as_str))
+        .flat_map(|wanted| {
+            let whole = token_similarity(found, wanted);
+            let parts = artist_names(wanted)
+                .iter()
+                .flat_map(|w| found_names.iter().map(move |f| token_similarity(f, w)))
+                .fold(0.0, f64::max);
+            [whole, parts]
+        })
+        .fold(0.0, f64::max)
+}
+
+/// Whether a result is by the song's artist. Unknown on either side can't
+/// be judged and passes.
+pub fn artist_matches(found: &str, artist: &str, aliases: &[String]) -> bool {
+    let artist = artist.trim();
+    if found.trim().is_empty() || artist.is_empty() || artist == UNKNOWN_ARTIST {
+        return true;
+    }
+    artist_similarity(found, artist, aliases) >= MIN_ARTIST_SIMILARITY
+}
 
 /// Synced lyrics timed for a recording this much longer or shorter than the
 /// song belong to another version (an edit, a live cut, a video with an
@@ -209,6 +257,34 @@ mod tests {
         assert!(!synced_length_fits(Some(200.0), Some(237.0)), "an edit of the song");
         assert!(synced_length_fits(None, Some(237.0)));
         assert!(synced_length_fits(Some(236.0), None));
+    }
+
+    // Regressions from the log: a similar title by someone else won.
+    #[test]
+    fn test_another_artists_song_is_never_a_match() {
+        let cand = |title, artist| Candidate { title, artist, duration: Some(139.0), has_synced: true };
+        let none: &[String] = &[];
+        assert_eq!(score_match(&cand("Big Girl", "Sips & The Yogscast"), "BIG BIG GIRL", "bambi i francis", none, Some(139.0)), 0.0);
+        assert_eq!(score_match(&cand("One Dance", "One Dance"), "DANCE DANCE", "bambi i Flory", none, Some(182.0)), 0.0);
+        assert_eq!(score_match(&cand("Big Girl", "Sips"), "BIG BIG GIRL", "bambi i francis", &["bambi".into()], None), 0.0);
+    }
+
+    #[test]
+    fn test_one_of_several_credited_artists_is_enough() {
+        assert!(artist_matches("bambi", "bambi i francis", &[]));
+        assert!(artist_matches("Francis", "bambi i francis", &[]));
+        assert!(artist_matches("Carpenter Brut & Kavinsky", "Carpenter Brut", &[]));
+        assert!(artist_matches("Drake", "Drake feat. Wizkid", &[]));
+        assert!(artist_matches("Korn", "KornVEVO", &[]), "a channel name containing the artist");
+        assert!(artist_matches("Korn", "Korn Official", &["Korn".into()]));
+        assert!(!artist_matches("Sips & The Yogscast", "bambi i francis", &[]));
+    }
+
+    #[test]
+    fn test_an_unknown_artist_cannot_be_judged() {
+        assert!(artist_matches("Anyone", "Unknown Artist", &[]));
+        assert!(artist_matches("Anyone", "", &[]));
+        assert!(artist_matches("", "bambi", &[]));
     }
 
     #[test]
