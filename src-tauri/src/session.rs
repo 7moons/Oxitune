@@ -114,6 +114,10 @@ pub struct SessionStore {
     path: PathBuf,
     last_write: Mutex<Option<(Instant, String)>>,
     pending: Mutex<Option<SessionSnapshot>>,
+    /// One write at a time (the page's updates and a window close can
+    /// overlap), each writing the newest snapshot, so an older one can
+    /// never land after a newer one.
+    writing: Mutex<()>,
     /// Taken once by the page on its first load, so a reload doesn't seek again.
     resume: Mutex<Option<ResumeTarget>>,
 }
@@ -124,6 +128,7 @@ impl SessionStore {
             path,
             last_write: Mutex::new(None),
             pending: Mutex::new(None),
+            writing: Mutex::new(()),
             resume: Mutex::new(None),
         }
     }
@@ -141,21 +146,24 @@ impl SessionStore {
         };
         let now = Instant::now();
         let write = should_write(self.last_write.lock().as_ref(), &snapshot, now);
-        *self.pending.lock() = Some(snapshot.clone());
+        *self.pending.lock() = Some(snapshot);
         if write {
-            self.write(&snapshot, now);
+            self.write(now);
         }
     }
 
     /// Writes whatever is newer than the last write (window close, quit).
     pub fn flush(&self) {
-        if let Some(snapshot) = self.pending.lock().clone() {
-            self.write(&snapshot, Instant::now());
-        }
+        self.write(Instant::now());
     }
 
-    fn write(&self, snapshot: &SessionSnapshot, now: Instant) {
-        let Ok(json) = serde_json::to_string(snapshot) else {
+    /// Writes the newest snapshot recorded.
+    fn write(&self, now: Instant) {
+        let _one_at_a_time = self.writing.lock();
+        let Some(snapshot) = self.pending.lock().clone() else {
+            return;
+        };
+        let Ok(json) = serde_json::to_string(&snapshot) else {
             return;
         };
         if let Some(dir) = self.path.parent() {
