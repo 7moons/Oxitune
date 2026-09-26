@@ -41,6 +41,9 @@ pub struct FetchArgs {
     /// Plain lyrics from YTM's own Lyrics tab, when the page has them.
     #[serde(default)]
     pub ytm_plain: Option<String>,
+    /// The song's tags on YouTube, as other names for the artist.
+    #[serde(default)]
+    pub artist_aliases: Vec<String>,
 }
 
 impl From<FetchArgs> for Query {
@@ -49,6 +52,8 @@ impl From<FetchArgs> for Query {
         // providers, the cache or the other windows.
         const MAX_FIELD_CHARS: usize = 512;
         const MAX_YTM_PLAIN_BYTES: usize = 64 * 1024;
+        const MAX_ALIASES: usize = 20;
+        const MAX_ALIAS_CHARS: usize = 100;
         let cap = |s: String| -> String { s.chars().take(MAX_FIELD_CHARS).collect() };
         Query {
             video_id: a.video_id.filter(|v| crate::sync_room::is_video_id(v.trim())),
@@ -57,6 +62,13 @@ impl From<FetchArgs> for Query {
             album: a.album_name.filter(|a| !a.trim().is_empty()).map(cap),
             duration: a.duration.filter(|d| d.is_finite() && *d > 0.0 && *d < 86_400.0),
             ytm_plain: a.ytm_plain.filter(|p| p.len() <= MAX_YTM_PLAIN_BYTES),
+            artist_aliases: a
+                .artist_aliases
+                .into_iter()
+                .map(|s| s.trim().chars().take(MAX_ALIAS_CHARS).collect::<String>())
+                .filter(|s| !s.is_empty())
+                .take(MAX_ALIASES)
+                .collect(),
         }
     }
 }
@@ -119,6 +131,65 @@ fn set_current(ls: &LyricsState, q: &Query, lyrics: Option<Lyrics>, sink: &dyn L
     payload
 }
 
+/// The cached answer for `q`, unless it's about another song.
+fn usable_cache(ls: &LyricsState, q: &Query) -> Option<Cached> {
+    match q.video_id.as_deref().and_then(|v| ls.cache.get(v, now_secs())) {
+        Some(Cached::Found { lyrics, picked: false }) if !cached_fits(&lyrics, q) => {
+            log::warn!(
+                "[Oscilla Lyrics] cached lyrics for {:?} are \"{}\" by {}, not \"{}\": looking again",
+                q.video_id,
+                lyrics.title,
+                lyrics.artist,
+                q.title
+            );
+            None
+        }
+        other => other,
+    }
+}
+
+/// Asks the providers, logs what was chosen and why, and caches it.
+async fn look_up_and_cache(ls: &LyricsState, providers: &[Arc<dyn LyricsProvider>], q: &Query) -> Option<Lyrics> {
+    let (found, complete) = find_best(providers, q, PROVIDER_TIMEOUT).await;
+    match &found {
+        Some(l) => log::info!(
+            "[Oscilla Lyrics] {:?} \"{}\" by {} ({}): {} \"{}\" by {}, {}",
+            q.video_id,
+            q.title,
+            q.artist,
+            q.duration.map_or("?".into(), |d| format!("{d:.0} s")),
+            l.provider.as_str(),
+            l.title,
+            l.artist,
+            if l.is_synced() { "synced" } else { "plain" }
+        ),
+        None => log::info!(
+            "[Oscilla Lyrics] {:?} \"{}\" by {}: nothing found{}",
+            q.video_id,
+            q.title,
+            q.artist,
+            if complete { "" } else { " (a provider failed, not remembered)" }
+        ),
+    }
+    if let Some(v) = q.video_id.as_deref() {
+        // A miss is only remembered when every provider answered;
+        // a timeout or a network error must not hide lyrics for a day.
+        if found.is_some() || complete {
+            ls.cache.put(v, found.as_ref(), false, now_secs());
+        }
+    }
+    found
+}
+
+/// The next song's lyrics, looked up ahead into the cache so they show the
+/// moment it starts. Never touches what's showing now.
+pub async fn prefetch_with(ls: &LyricsState, providers: &[Arc<dyn LyricsProvider>], q: Query) {
+    if q.video_id.is_none() || usable_cache(ls, &q).is_some() {
+        return;
+    }
+    look_up_and_cache(ls, providers, &q).await;
+}
+
 /// Lyrics for `q`: from the cache, or from `providers` (priority order).
 /// A lookup overtaken by a newer one (the song changed meanwhile) returns
 /// its result to the caller but never replaces the current lyrics.
@@ -143,34 +214,10 @@ pub async fn fetch_with(
     }
 
     let ytm = || if ytm_enabled { ytm_lyrics(&q) } else { None };
-    let cached = q.video_id.as_deref().and_then(|v| ls.cache.get(v, now_secs()));
-    let cached = match cached {
-        Some(Cached::Found { lyrics, picked: false }) if !cached_fits(&lyrics, &q) => {
-            log::warn!(
-                "[Oscilla Lyrics] cached lyrics for {:?} are \"{}\" by {}, not \"{}\": looking again",
-                q.video_id,
-                lyrics.title,
-                lyrics.artist,
-                q.title
-            );
-            None
-        }
-        other => other,
-    };
-    let lyrics = match cached {
+    let lyrics = match usable_cache(ls, &q) {
         Some(Cached::Found { lyrics, .. }) => Some(lyrics),
         Some(Cached::NotFound) => ytm(),
-        None => {
-            let (found, complete) = find_best(providers, &q, PROVIDER_TIMEOUT).await;
-            if let Some(v) = q.video_id.as_deref() {
-                // A miss is only remembered when every provider answered;
-                // a timeout or a network error must not hide lyrics for a day.
-                if found.is_some() || complete {
-                    ls.cache.put(v, found.as_ref(), false, now_secs());
-                }
-            }
-            found
-        }
+        None => look_up_and_cache(ls, providers, &q).await,
     };
 
     if ls.generation.load(Ordering::SeqCst) != generation {
@@ -266,6 +313,11 @@ pub fn configured_providers(state: &AppState) -> (Vec<Arc<dyn LyricsProvider>>, 
 pub async fn fetch(app: &AppHandle, state: &AppState, args: FetchArgs) -> CurrentLyrics {
     let (providers, ytm_enabled) = configured_providers(state);
     fetch_with(&state.lyrics, &providers, ytm_enabled, args.into(), app).await
+}
+
+pub async fn prefetch(state: &AppState, args: FetchArgs) {
+    let (providers, _) = configured_providers(state);
+    prefetch_with(&state.lyrics, &providers, args.into()).await
 }
 
 pub async fn candidates(state: &AppState) -> Result<Vec<CandidateSummary>, String> {
@@ -398,6 +450,37 @@ mod tests {
         fetch_with(&ls, std::slice::from_ref(&p), true, query("vid1"), &sink).await;
         assert_eq!(calls.load(Ordering::SeqCst), 1);
         assert_eq!(ls.current_lyrics.lock().as_ref().map(|l| l.title.clone()).as_deref(), Some("Maniac"));
+    }
+
+    #[tokio::test]
+    async fn test_prefetch_fills_the_cache_without_touching_the_current_song() {
+        let (_d, ls) = state();
+        let sink = Recorder::default();
+        let (p, calls) = provider(Ok(vec![lyrics(ProviderId::Lrclib, true, false)]), 0);
+        fetch_with(&ls, std::slice::from_ref(&p), true, query("now"), &sink).await;
+        let events = sink.0.lock().len();
+
+        prefetch_with(&ls, std::slice::from_ref(&p), query("next")).await;
+        assert_eq!(sink.0.lock().len(), events, "nothing broadcast");
+        assert_eq!(ls.current.lock().video_id.as_deref(), Some("now"));
+        assert!(matches!(ls.cache.get("next", now_secs()), Some(Cached::Found { .. })));
+
+        // Already cached: no second lookup, and the song then comes from the cache.
+        prefetch_with(&ls, std::slice::from_ref(&p), query("next")).await;
+        fetch_with(&ls, std::slice::from_ref(&p), true, query("next"), &sink).await;
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn test_fetch_args_cap_the_aliases() {
+        let args: FetchArgs = serde_json::from_value(serde_json::json!({
+            "artist": "A", "title": "T",
+            "artistAliases": (0..50).map(|i| format!("{i}{}", "x".repeat(300))).chain(["  ".to_string()]).collect::<Vec<_>>()
+        }))
+        .unwrap();
+        let q: Query = args.into();
+        assert_eq!(q.artist_aliases.len(), 20);
+        assert!(q.artist_aliases.iter().all(|a| a.chars().count() <= 100));
     }
 
     #[test]

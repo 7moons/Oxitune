@@ -3,7 +3,7 @@
 //! lyrics, including many songs LRCLIB lacks.
 
 use super::lrc::parse_lrc;
-use super::matching::{clean_track_name, encode, score_match, Candidate, MIN_MATCH_SCORE};
+use super::matching::{clean_track_name, encode, score_match, synced_length_fits, Candidate, MIN_MATCH_SCORE};
 use super::{Lyrics, LyricsProvider, ProviderId, Query};
 use futures_util::future::BoxFuture;
 use serde_json::Value;
@@ -52,10 +52,13 @@ impl Netease {
         );
         let songs = parse_search(&self.get(&url).await?);
         let mut out = Vec::new();
-        for song in rank_songs(songs, &title, &q.artist, q.duration).into_iter().take(MAX_CANDIDATES) {
+        for song in rank_songs(songs, &title, &q.artist, &q.artist_aliases, q.duration).into_iter().take(MAX_CANDIDATES) {
             let url = format!("https://music.163.com/api/song/lyric?id={}&lv=1&kv=1&tv=-1", song.id);
             if let Ok(res) = self.get(&url).await {
-                if let Some(l) = lyrics_from_response(&res, &song) {
+                if let Some(mut l) = lyrics_from_response(&res, &song) {
+                    if !synced_length_fits(song.duration, q.duration) {
+                        l.demote_to_plain(); // timed for another version
+                    }
                     out.push(l);
                 }
             }
@@ -93,7 +96,7 @@ pub fn parse_search(res: &Value) -> Vec<Song> {
         .collect()
 }
 
-pub fn rank_songs(songs: Vec<Song>, title: &str, artist: &str, duration: Option<f64>) -> Vec<Song> {
+pub fn rank_songs(songs: Vec<Song>, title: &str, artist: &str, aliases: &[String], duration: Option<f64>) -> Vec<Song> {
     let mut scored: Vec<(f64, Song)> = songs
         .into_iter()
         .map(|s| {
@@ -103,7 +106,7 @@ pub fn rank_songs(songs: Vec<Song>, title: &str, artist: &str, duration: Option<
                 duration: s.duration,
                 has_synced: false,
             };
-            (score_match(&cand, title, artist, duration), s)
+            (score_match(&cand, title, artist, aliases, duration), s)
         })
         .filter(|(score, _)| *score > MIN_MATCH_SCORE)
         .collect();
@@ -166,7 +169,7 @@ mod tests {
         assert_eq!(songs.len(), 2);
         assert_eq!(songs[1].artist, "Carpenter Brut, Feat");
         assert_eq!(songs[1].duration, Some(301.0));
-        let ranked = rank_songs(songs, "Maniac", "Carpenter Brut", Some(300.0));
+        let ranked = rank_songs(songs, "Maniac", "Carpenter Brut", &[], Some(300.0));
         assert_eq!(ranked.iter().map(|s| s.id).collect::<Vec<_>>(), [2]);
     }
 

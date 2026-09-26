@@ -9,7 +9,13 @@ export type MoviePlayer = HTMLElement & {
   seekTo?: (seconds: number, allowSeekAhead?: boolean) => void;
   /** -1 unstarted, 0 ended, 1 playing, 2 paused, 3 buffering, 5 cued. */
   getPlayerState?: () => number;
-  getPlayerResponse?: () => { playabilityStatus?: { status?: string; reason?: string } } | undefined;
+  getPlayerResponse?: () =>
+    | {
+        playabilityStatus?: { status?: string; reason?: string };
+        videoDetails?: { videoId?: string };
+        microformat?: { microformatDataRenderer?: { tags?: unknown } };
+      }
+    | undefined;
 };
 
 export class PlayerBridge {

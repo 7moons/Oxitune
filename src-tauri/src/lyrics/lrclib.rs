@@ -1,7 +1,7 @@
 //! LRCLIB (lrclib.net): open database with synced and plain lyrics.
 
 use super::lrc::parse_lrc;
-use super::matching::{clean_track_name, encode, score_match, Candidate, MIN_MATCH_SCORE};
+use super::matching::{clean_track_name, encode, score_match, synced_length_fits, Candidate, MIN_MATCH_SCORE};
 use super::{Lyrics, LyricsProvider, ProviderId, Query};
 use futures_util::future::BoxFuture;
 use serde_json::Value;
@@ -25,7 +25,7 @@ fn has_synced(item: &Value) -> bool {
 }
 
 /// Search results that match the song, best first.
-pub fn rank_items(items: &[Value], title: &str, artist: &str, duration: Option<f64>) -> Vec<Value> {
+pub fn rank_items(items: &[Value], title: &str, artist: &str, aliases: &[String], duration: Option<f64>) -> Vec<Value> {
     let mut scored: Vec<(f64, &Value)> = items
         .iter()
         .map(|item| {
@@ -35,7 +35,7 @@ pub fn rank_items(items: &[Value], title: &str, artist: &str, duration: Option<f
                 duration: item.get("duration").and_then(Value::as_f64),
                 has_synced: has_synced(item),
             };
-            (score_match(&cand, title, artist, duration), item)
+            (score_match(&cand, title, artist, aliases, duration), item)
         })
         .filter(|(score, _)| *score > MIN_MATCH_SCORE)
         .collect();
@@ -59,6 +59,23 @@ pub fn from_item(item: &Value) -> Option<Lyrics> {
     lyrics.has_text().then_some(lyrics)
 }
 
+/// A record as lyrics for a `song`-long song: timed for a recording of
+/// another length, only its words are used.
+pub fn fitted(item: &Value, song: Option<f64>) -> Option<Lyrics> {
+    let mut lyrics = from_item(item)?;
+    let found = item.get("duration").and_then(Value::as_f64);
+    if lyrics.is_synced() && !synced_length_fits(found, song) {
+        log::info!(
+            "[Oscilla Lyrics] lrclib \"{}\" is {:.0} s, song is {:.0} s: using it as plain text",
+            lyrics.title,
+            found.unwrap_or_default(),
+            song.unwrap_or_default()
+        );
+        lyrics.demote_to_plain();
+    }
+    Some(lyrics)
+}
+
 async fn get_json(http: &reqwest::Client, url: &str) -> Option<Value> {
     let res = http.get(url).send().await.ok()?;
     if !res.status().is_success() {
@@ -73,6 +90,7 @@ pub async fn lookup(
     http: &reqwest::Client,
     artist: &str,
     title: &str,
+    aliases: &[String],
     album: Option<&str>,
     duration: Option<f64>,
 ) -> Vec<Value> {
@@ -107,7 +125,7 @@ pub async fn lookup(
     ];
     for url in searches {
         if let Some(Value::Array(items)) = get_json(http, &url).await {
-            let ranked = rank_items(&items, &clean_title, clean_artist, duration);
+            let ranked = rank_items(&items, &clean_title, clean_artist, aliases, duration);
             if !ranked.is_empty() {
                 return ranked;
             }
@@ -123,8 +141,8 @@ impl LyricsProvider for Lrclib {
 
     fn search<'a>(&'a self, q: &'a Query) -> BoxFuture<'a, Result<Vec<Lyrics>, String>> {
         Box::pin(async move {
-            let items = lookup(&self.http, &q.artist, &q.title, q.album.as_deref(), q.duration).await;
-            Ok(items.iter().filter_map(from_item).collect())
+            let items = lookup(&self.http, &q.artist, &q.title, &q.artist_aliases, q.album.as_deref(), q.duration).await;
+            Ok(items.iter().filter_map(|item| fitted(item, q.duration)).collect())
         })
     }
 }
@@ -135,12 +153,22 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn test_synced_lyrics_of_another_length_become_plain() {
+        let item = json!({ "id": 7, "trackName": "Monster", "artistName": "Skillet", "duration": 150.0,
+            "syncedLyrics": "[00:10.00]The secret side of me", "plainLyrics": "The secret side of me" });
+        let far = fitted(&item, Some(187.0)).unwrap();
+        assert!(far.synced.is_empty() && far.plain.is_some(), "37 s shorter: words only");
+        assert!(fitted(&item, Some(155.0)).unwrap().is_synced(), "5 s off: kept synced");
+        assert!(fitted(&item, None).unwrap().is_synced(), "unknown length: kept");
+    }
+
+    #[test]
     fn test_rank_items_rejects_unrelated_songs_even_with_matching_duration() {
         let items = vec![
             json!({ "id": 1, "trackName": "Different Song", "artistName": "Glass Animals", "duration": 210.0, "syncedLyrics": "[00:10.00]Wrong" }),
             json!({ "id": 2, "trackName": "Take A Slice", "artistName": "Glass Animals", "duration": 212.0, "syncedLyrics": "[00:10.00]Right" }),
         ];
-        let ranked = rank_items(&items, "Take A Slice", "Glass Animals", Some(210.0));
+        let ranked = rank_items(&items, "Take A Slice", "Glass Animals", &[], Some(210.0));
         assert_eq!(ranked.len(), 1);
         assert_eq!(ranked[0]["trackName"], "Take A Slice");
     }

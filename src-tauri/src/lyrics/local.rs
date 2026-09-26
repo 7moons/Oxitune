@@ -93,7 +93,7 @@ pub fn matching_tracks<'a>(tracks: &'a [LocalTrack], q: &Query) -> Vec<&'a Local
                 duration: (t.duration_secs > 0).then_some(t.duration_secs as f64),
                 has_synced: false,
             };
-            (score_match(&cand, &title, &q.artist, q.duration), t)
+            (score_match(&cand, &title, &q.artist, &q.artist_aliases, q.duration), t)
         })
         .filter(|(s, _)| *s > MIN_MATCH_SCORE)
         .collect();

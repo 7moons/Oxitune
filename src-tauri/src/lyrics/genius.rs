@@ -42,7 +42,7 @@ impl Genius {
             .json()
             .await
             .map_err(|e| e.to_string())?;
-        let Some(hit) = best_hit(&res, &title, &q.artist) else {
+        let Some(hit) = best_hit(&res, &title, &q.artist, &q.artist_aliases) else {
             return Ok(Vec::new());
         };
         let html = self
@@ -78,7 +78,7 @@ pub struct Hit {
 }
 
 /// The best-matching song from `/api/search/song`.
-pub fn best_hit(res: &Value, title: &str, artist: &str) -> Option<Hit> {
+pub fn best_hit(res: &Value, title: &str, artist: &str, aliases: &[String]) -> Option<Hit> {
     res.pointer("/response/sections/0/hits")
         .and_then(Value::as_array)
         .into_iter()
@@ -92,7 +92,7 @@ pub fn best_hit(res: &Value, title: &str, artist: &str) -> Option<Hit> {
                 url: r.get("url").and_then(Value::as_str).filter(|u| u.starts_with("https://genius.com/"))?.to_string(),
             };
             let cand = Candidate { title: &hit.title, artist: &hit.artist, duration: None, has_synced: false };
-            let score = score_match(&cand, title, artist, None);
+            let score = score_match(&cand, title, artist, aliases, None);
             (score > MIN_MATCH_SCORE).then_some((score, hit))
         })
         .max_by(|a, b| a.0.total_cmp(&b.0))
@@ -221,8 +221,8 @@ mod tests {
             { "result": { "id": 2, "title": "Maniac", "primary_artist": { "name": "Carpenter Brut" }, "url": "https://genius.com/Carpenter-brut-maniac-lyrics" } },
             { "result": { "id": 3, "title": "Maniac", "primary_artist": { "name": "Carpenter Brut" }, "url": "https://evil.example/x" } }
         ]}]}});
-        let hit = best_hit(&res, "Maniac", "Carpenter Brut").unwrap();
+        let hit = best_hit(&res, "Maniac", "Carpenter Brut", &[]).unwrap();
         assert_eq!(hit.id, "2");
-        assert!(best_hit(&json!({}), "Maniac", "X").is_none());
+        assert!(best_hit(&json!({}), "Maniac", "X", &[]).is_none());
     }
 }

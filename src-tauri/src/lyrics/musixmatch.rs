@@ -3,7 +3,7 @@
 //! may be against Musixmatch's terms. Gives synced lyrics and, for many
 //! songs, word-by-word timing ("richsync").
 
-use super::matching::{clean_track_name, encode, score_match, Candidate, MIN_MATCH_SCORE};
+use super::matching::{clean_track_name, encode, score_match, synced_length_fits, Candidate, MIN_MATCH_SCORE};
 use super::{Line, Lyrics, LyricsProvider, ProviderId, Query, Word};
 use futures_util::future::BoxFuture;
 use parking_lot::Mutex;
@@ -89,8 +89,13 @@ impl Musixmatch {
             duration: found.duration,
             has_synced: found.lyrics.is_synced(),
         };
-        if score_match(&cand, &title, &q.artist, q.duration) <= MIN_MATCH_SCORE {
+        if score_match(&cand, &title, &q.artist, &q.artist_aliases, q.duration) <= MIN_MATCH_SCORE {
             return Ok(Vec::new());
+        }
+        if !synced_length_fits(found.duration, q.duration) {
+            // Timed for another version: its words only, no richsync either.
+            found.lyrics.demote_to_plain();
+            return Ok(found.lyrics.has_text().then_some(found.lyrics).into_iter().collect());
         }
 
         if found.has_richsync {

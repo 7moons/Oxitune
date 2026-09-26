@@ -4,6 +4,8 @@ import { createEl } from '../../utils/dom';
 import { ensureKitStyles, openDialog, showToast } from '../../preload/ui/kit';
 import { t } from '../../preload/ui/i18n';
 import { PlayerBridge } from '../../preload/bridge';
+import { isSyncGuest } from '../../preload/syncRole';
+import { nextInQueue, songTags } from './songInfo';
 import {
   CurrentLyrics,
   EMPTY_LYRICS,
@@ -22,6 +24,25 @@ let currentActiveIdx = -1;
 let currentWordIdx = -1;
 let currentSongKey = '';
 let lastPosition = 0;
+/** When `lastPosition` was reported (`performance.now()`): between the
+ * player's ticks (~4 a second) the position is carried forward every frame,
+ * so lines and words light up on time instead of in 250 ms steps. */
+let lastTickAt = 0;
+/** The furthest position shown for this song, so a tick that lands a hair
+ * behind the carried-forward one doesn't step a line back. */
+let shownPosition = 0;
+/** Whether the Lyrics tab is on screen (checked with the tab poll, not per
+ * frame: it needs layout). */
+let lyricsVisible = false;
+/** The song whose next song's lyrics were already looked up ahead. */
+let prefetchedAfter = '';
+/** Looking the next song up this far into the current one: late enough that
+ * skipped songs don't trigger lookups, early enough to be ready in time. */
+const PREFETCH_AFTER_SECS = 15;
+/** Never carried forward further than this past the last tick. */
+const MAX_CARRY_SECS = 1;
+/** A step back smaller than this is measurement noise, not a seek. */
+const NOISE_BACK_SECS = 0.3;
 /** YTM's own lyrics text as it was when the song started (possibly the
  * previous song's); only text that differs from it is sent as `ytmPlain`. */
 let staleYtmText = '';
@@ -69,7 +90,21 @@ export const LyricsPlugin: YTMDPlugin = {
       unlockLyricsTabHeader();
       ensureLyricsMounted(ctx);
       offerYtmText(ctx);
+      lyricsVisible = isLyricsTabVisible();
     };
+
+    // Every frame while lyrics are on screen and playing; the classes only
+    // change when the line or word does.
+    let frame = 0;
+    const onFrame = () => {
+      frame = requestAnimationFrame(onFrame);
+      if (!lyricsVisible || lyrics.synced.length === 0) return;
+      const video = ctx.getVideoElement();
+      if (!video || video.paused) return;
+      const carried = Math.min(MAX_CARRY_SECS, (performance.now() - lastTickAt) / 1000) * (video.playbackRate || 1);
+      showPosition(lastPosition + carried, true);
+    };
+    frame = requestAnimationFrame(onFrame);
 
     const onTabClick = () => {
       setTimeout(() => {
@@ -99,6 +134,7 @@ export const LyricsPlugin: YTMDPlugin = {
       : null;
 
     cleanup = () => {
+      cancelAnimationFrame(frame);
       clearInterval(pollInterval);
       document.removeEventListener('click', onTabClick, true);
       unlisten?.then((fn) => fn());
@@ -117,6 +153,7 @@ export const LyricsPlugin: YTMDPlugin = {
     loading = true;
     currentActiveIdx = -1;
     currentWordIdx = -1;
+    shownPosition = 0;
     staleYtmText = readYtmText();
     ytmTextSent = false;
 
@@ -125,9 +162,11 @@ export const LyricsPlugin: YTMDPlugin = {
     await requestLyrics(ctx, track, songKey, null);
   },
 
-  onTick(currentTimeSecs: number) {
+  onTick(currentTimeSecs: number, ctx: PluginContext) {
     lastPosition = currentTimeSecs;
-    highlight(currentTimeSecs, true);
+    lastTickAt = performance.now();
+    showPosition(currentTimeSecs, true);
+    if (currentTimeSecs >= PREFETCH_AFTER_SECS) prefetchNext(ctx);
   },
 
   onDestroy() {
@@ -251,7 +290,8 @@ async function requestLyrics(ctx: PluginContext, track: TrackInfo, songKey: stri
           title: track.title,
           albumName: track.album || null,
           duration: track.durationSecs || null,
-          ytmPlain
+          ytmPlain,
+          artistAliases: songTags(PlayerBridge.getMoviePlayer()?.getPlayerResponse?.(), track.videoId)
         },
         // Providers each get 6 s; leave room for the slowest one.
         { timeoutMs: 15000 }
@@ -291,6 +331,40 @@ function applyLyrics(ctx: PluginContext, next: CurrentLyrics) {
   currentWordIdx = -1;
   renderCurrentLyrics(ctx);
   highlight(lastPosition, false);
+}
+
+/** Highlights `position`, never stepping back for a tick that lands a hair
+ * behind the carried-forward position; a real seek back goes through. */
+function showPosition(position: number, scroll: boolean) {
+  if (position < shownPosition && shownPosition - position < NOISE_BACK_SECS) return;
+  shownPosition = position;
+  highlight(position, scroll);
+}
+
+function isLyricsTabVisible(): boolean {
+  if (typeof document === 'undefined' || document.hidden) return false;
+  const tab = document.querySelector<HTMLElement>(
+    'ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"], #tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"]'
+  );
+  return !!tab && !!document.getElementById('ytmd-native-lyrics-wrapper') && isElementVisible(tab);
+}
+
+/** Looks the next song in YTM's queue up ahead, once per song, so its
+ * lyrics are cached when it starts. A Listen Together guest doesn't: the
+ * host decides what's next. */
+function prefetchNext(ctx: PluginContext) {
+  if (prefetchedAfter === currentSongKey || isSyncGuest()) return;
+  prefetchedAfter = currentSongKey;
+  const next = nextInQueue(document.querySelectorAll('ytmusic-player-queue-item'));
+  if (!next || next.videoId === currentTrack?.videoId) return;
+  ctx
+    .invoke('prefetch_lyrics', {
+      videoId: next.videoId,
+      title: next.title,
+      artist: next.artist,
+      duration: next.durationSecs
+    })
+    .catch(() => undefined);
 }
 
 /** Moves the active-line and sung-word classes to `position`. */

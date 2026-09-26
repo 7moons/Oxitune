@@ -120,9 +120,14 @@ pub fn clean_track_name(title: &str) -> String {
 /// How well one search result matches the song: 0 means unrelated. Title
 /// counts most, then artist, then how close the length is; synced lyrics
 /// get a bonus. Results under `MIN_MATCH_SCORE` are never used.
-pub fn score_match(cand: &Candidate<'_>, title: &str, artist: &str, duration: Option<f64>) -> f64 {
+/// `aliases` are other names the song's artist goes by (the song's tags on
+/// YouTube: "KornVEVO" is still Korn); the best of them counts.
+pub fn score_match(cand: &Candidate<'_>, title: &str, artist: &str, aliases: &[String], duration: Option<f64>) -> f64 {
     let title_sim = token_similarity(cand.title, title);
-    let artist_sim = token_similarity(cand.artist, artist);
+    let artist_sim = aliases
+        .iter()
+        .map(|a| token_similarity(cand.artist, a))
+        .fold(token_similarity(cand.artist, artist), f64::max);
 
     // Reject candidates that have no title resemblance whatsoever
     if title_sim < 0.25 && !cand.title.to_lowercase().contains(&title.to_lowercase()) {
@@ -158,6 +163,20 @@ pub struct Candidate<'a> {
 
 pub const MIN_MATCH_SCORE: f64 = 35.0;
 
+/// Synced lyrics timed for a recording this much longer or shorter than the
+/// song belong to another version (an edit, a live cut, a video with an
+/// intro): their lines would light up at the wrong moments.
+pub const MAX_SYNCED_LENGTH_DIFF_SECS: f64 = 15.0;
+
+/// Whether synced lyrics timed for a `found`-long recording can follow a
+/// `song`-long one. Unknown lengths can't be judged and pass.
+pub fn synced_length_fits(found: Option<f64>, song: Option<f64>) -> bool {
+    match (found, song) {
+        (Some(f), Some(s)) if f > 0.0 && s > 0.0 => (f - s).abs() <= MAX_SYNCED_LENGTH_DIFF_SECS,
+        _ => true,
+    }
+}
+
 pub fn encode(s: &str) -> String {
     url::form_urlencoded::byte_serialize(s.as_bytes()).collect()
 }
@@ -184,10 +203,27 @@ mod tests {
     }
 
     #[test]
+    fn test_synced_length_fits_within_15_s_or_unknown() {
+        assert!(synced_length_fits(Some(236.0), Some(237.0)));
+        assert!(synced_length_fits(Some(222.0), Some(237.0)));
+        assert!(!synced_length_fits(Some(200.0), Some(237.0)), "an edit of the song");
+        assert!(synced_length_fits(None, Some(237.0)));
+        assert!(synced_length_fits(Some(236.0), None));
+    }
+
+    #[test]
+    fn test_an_alias_can_match_the_artist() {
+        let cand = Candidate { title: "Freak On a Leash", artist: "Korn", duration: None, has_synced: true };
+        let plain = score_match(&cand, "Freak On a Leash", "KornVEVO", &[], None);
+        let aliased = score_match(&cand, "Freak On a Leash", "KornVEVO", &["Korn".into()], None);
+        assert!(aliased > plain, "{aliased} > {plain}");
+    }
+
+    #[test]
     fn test_score_rejects_unrelated_songs_even_with_matching_duration() {
         let cand = |title| Candidate { title, artist: "Glass Animals", duration: Some(210.0), has_synced: true };
-        let wrong = score_match(&cand("Different Song"), "Take A Slice", "Glass Animals", Some(210.0));
-        let right = score_match(&cand("Take A Slice"), "Take A Slice", "Glass Animals", Some(212.0));
+        let wrong = score_match(&cand("Different Song"), "Take A Slice", "Glass Animals", &[], Some(210.0));
+        let right = score_match(&cand("Take A Slice"), "Take A Slice", "Glass Animals", &[], Some(212.0));
         assert!(wrong < MIN_MATCH_SCORE, "{wrong}");
         assert!(right > MIN_MATCH_SCORE);
     }

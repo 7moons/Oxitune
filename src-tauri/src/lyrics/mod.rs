@@ -156,6 +156,38 @@ impl Lyrics {
     pub fn has_text(&self) -> bool {
         self.is_synced() || self.plain.as_deref().is_some_and(|p| !p.trim().is_empty())
     }
+
+    /// Keeps the words, drops the timing: for synced lyrics of another
+    /// version of the song, which are right as text but wrong as timing.
+    pub fn demote_to_plain(&mut self) {
+        if self.synced.is_empty() {
+            return;
+        }
+        if self.plain.as_deref().is_none_or(|p| p.trim().is_empty()) {
+            self.plain = Some(self.synced.iter().map(|l| l.text.as_str()).collect::<Vec<_>>().join("\n"));
+        }
+        self.synced.clear();
+    }
+}
+
+/// Synced lyrics whose last line comes after the song has ended were timed
+/// for a longer version; they keep their words but lose their timing.
+/// Margin for a closing line sung over the fade-out.
+const LAST_LINE_MARGIN_SECS: f64 = 5.0;
+
+pub fn vet(mut lyrics: Lyrics, q: &Query) -> Lyrics {
+    let last = lyrics.synced.last().map(|l| l.t);
+    if let (Some(last), Some(duration)) = (last, q.duration) {
+        if last > duration + LAST_LINE_MARGIN_SECS {
+            log::info!(
+                "[Oscilla Lyrics] {} \"{}\": last line at {last:.0} s, song is {duration:.0} s: using it as plain text",
+                lyrics.provider.as_str(),
+                lyrics.title
+            );
+            lyrics.demote_to_plain();
+        }
+    }
+    lyrics
 }
 
 /// What is known about the song being looked up.
@@ -169,6 +201,8 @@ pub struct Query {
     /// Plain lyrics YouTube Music itself shows in its Lyrics tab, read by
     /// the page (Rust never scrapes YTM).
     pub ytm_plain: Option<String>,
+    /// Other names for the artist (the song's tags on YouTube), for matching.
+    pub artist_aliases: Vec<String>,
 }
 
 impl Query {
@@ -217,7 +251,7 @@ pub fn decide(results: &[Option<Vec<Lyrics>>]) -> Decision {
 /// A provider's results, or `None` when it failed or timed out.
 async fn run_one(p: &dyn LyricsProvider, q: &Query, timeout: Duration) -> Option<Vec<Lyrics>> {
     match tokio::time::timeout(timeout, p.search(q)).await {
-        Ok(Ok(found)) => Some(found),
+        Ok(Ok(found)) => Some(found.into_iter().map(|l| vet(l, q)).collect()),
         Ok(Err(e)) => {
             log::debug!("[Oscilla Lyrics] {} failed: {e}", p.id().as_str());
             None
@@ -444,6 +478,34 @@ pub(crate) mod test_util {
 mod tests {
     use super::test_util::lyrics;
     use super::*;
+
+    fn timed(times: &[f64]) -> Lyrics {
+        let mut l = lyrics(ProviderId::Lrclib, false, false);
+        l.synced = times.iter().map(|&t| Line { t, text: format!("at {t}"), words: None }).collect();
+        l
+    }
+
+    #[test]
+    fn test_demote_keeps_the_words_and_drops_the_timing() {
+        let mut l = timed(&[1.0, 2.0]);
+        l.demote_to_plain();
+        assert!(l.synced.is_empty());
+        assert_eq!(l.plain.as_deref(), Some("at 1\nat 2"));
+
+        let mut with_plain = lyrics(ProviderId::Lrclib, true, true);
+        with_plain.demote_to_plain();
+        assert_eq!(with_plain.plain.as_deref(), Some("la"), "its own plain text wins");
+    }
+
+    // Synced lyrics that run past the song's end were timed for a longer
+    // version: shown as text, never highlighted at the wrong moments.
+    #[test]
+    fn test_vet_demotes_lyrics_that_outlast_the_song() {
+        let q = |d: Option<f64>| Query { duration: d, ..Default::default() };
+        assert!(vet(timed(&[10.0, 250.0]), &q(Some(237.0))).synced.is_empty());
+        assert_eq!(vet(timed(&[10.0, 240.0]), &q(Some(237.0))).synced.len(), 2, "within the fade-out margin");
+        assert_eq!(vet(timed(&[10.0, 250.0]), &q(None)).synced.len(), 2, "unknown length: kept");
+    }
 
     struct Fake {
         id: ProviderId,

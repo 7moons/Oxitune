@@ -275,6 +275,14 @@ bridge_commands! {
         let p: lyrics::commands::FetchArgs = parse_args("fetch_lyrics", args)?;
         to_data(lyrics::commands::fetch(h, state, p).await)
     }
+    // The next song in YTM's queue, looked up ahead into the cache; answers
+    // at once, the lookup runs on its own.
+    "prefetch_lyrics" => |h, state, args| {
+        let p: lyrics::commands::FetchArgs = parse_args("prefetch_lyrics", args)?;
+        let state = state.clone();
+        tauri::async_runtime::spawn(async move { lyrics::commands::prefetch(&state, p).await });
+        Ok(Value::Null)
+    }
     "get_current_lyrics" => |h, state, args| {
         to_data(state.lyrics.current.lock().clone())
     }
@@ -521,6 +529,7 @@ mod tests {
             "broadcast_sync_state",
             "send_sync_control",
             "fetch_lyrics",
+            "prefetch_lyrics",
             "get_current_lyrics",
             "set_lyrics_offset",
             "list_lyrics_candidates",
