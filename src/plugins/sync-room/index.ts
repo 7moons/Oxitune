@@ -65,7 +65,7 @@ export type SyncControl =
   | { kind: 'next' }
   | { kind: 'previous' }
   | { kind: 'set_playing'; playing: boolean }
-  | { kind: 'play_video'; video_id: string };
+  | { kind: 'play_video'; video_id: string; keep_position?: boolean };
 
 /** Why the host's page is asked to act (mirrors `ControlSource`). */
 type ControlSource = { kind: 'member' } | { kind: 'vote' } | { kind: 'queue'; title: string };
@@ -162,6 +162,9 @@ const SEEK_LOOP_WINDOW_MS = 10_000;
 /** YouTube Music's player time not moving while the video plays on for
  * this long means its state is broken (it showed 0:00 while a song played). */
 const PLAYER_STALL_SECS = 3;
+/** Host: how long a Song/Video switch may take to load before the seek to
+ * the old position is given up. */
+const PENDING_SEEK_MS = 15_000;
 /** Guest: a seek never lands closer than this to the end of the song. At
  * the very end the video ends and YTM autoplays the guest's own next song,
  * not the host's. */
@@ -344,6 +347,11 @@ export class RoomSyncController {
   private nearEndAtMs = Number.NEGATIVE_INFINITY;
   /** Guest: when the user last clicked or pressed a key on the page. */
   private userInputAtMs = Number.NEGATIVE_INFINITY;
+  /** Guest: when the user last clicked YouTube Music's Song/Video switch. */
+  private avToggleAtMs = Number.NEGATIVE_INFINITY;
+  /** Host: a guest switched the song's version; seek the new version to
+   * where the old one was once it has loaded. */
+  private pendingSeek: { videoId: string; position: number; playing: boolean; atMs: number } | null = null;
   /** Guest, for the log: recent seeks, when a seek loop was last reported,
    * and whether waiting for the host's next song was already reported. */
   private recentSeeks: number[] = [];
@@ -376,6 +384,8 @@ export class RoomSyncController {
     this.seekLoopWarnedAtMs = Number.NEGATIVE_INFINITY;
     this.waitingLogged = false;
     this.stall = null;
+    this.avToggleAtMs = Number.NEGATIVE_INFINITY;
+    this.pendingSeek = null;
     this.finished = null;
     this.endRateCorrection();
   }
@@ -569,6 +579,28 @@ export class RoomSyncController {
     this.userInputAtMs = now;
   }
 
+  /** Guest: the user clicked YouTube Music's Song/Video switch. */
+  public noteAvToggle(now = Date.now()) {
+    this.avToggleAtMs = now;
+  }
+
+  /** Host: once the version a guest switched to has loaded, carries on
+   * from where the song was (plus the time the switch took, if playing). */
+  public applyPendingSeek(video: HTMLVideoElement | null, now = Date.now()) {
+    const pending = this.pendingSeek;
+    if (!pending || !video) return;
+    if (!this.isHost || now - pending.atMs > PENDING_SEEK_MS) {
+      this.pendingSeek = null;
+      return;
+    }
+    const { videoId, duration } = loadedPlayback(video);
+    if (videoId !== pending.videoId || !Number.isFinite(duration) || duration <= 0) return;
+    this.pendingSeek = null;
+    const target = clampBeforeEnd(pending.position + (pending.playing ? (now - pending.atMs) / 1000 : 0), duration);
+    pageLog('info', 'sync', `host: ${videoId} is the other version of the song, carrying on at ${target.toFixed(1)} s`);
+    PlayerBridge.seekTo(target);
+  }
+
   /** Guest: our page switched songs. Unless that was our own sync
    * navigation or YTM switching by itself (autoplay, or skipping a song it
    * can't play), the user picked it, and it becomes the room's song:
@@ -589,6 +621,11 @@ export class RoomSyncController {
     if (now - this.userInputAtMs > USER_PICK_WINDOW_MS) return ignore('YouTube Music switched by itself');
     if (this.requestedVideo?.videoId === videoId) return null;
     this.requestedVideo = { videoId, atMs: now };
+    // Song/Video is the same song under another id: keep the room's place.
+    if (now - this.avToggleAtMs < USER_PICK_WINDOW_MS) {
+      pageLog('info', 'sync', `guest: switched ${this.hostVideoId} to its other version ${videoId}, asking the host to keep its place`);
+      return { kind: 'play_video', video_id: videoId, keep_position: true };
+    }
     pageLog('info', 'sync', `guest: picked ${videoId} (host on ${this.hostVideoId}), asking the host to play it`);
     return { kind: 'play_video', video_id: videoId };
   }
@@ -638,11 +675,25 @@ export class RoomSyncController {
         this.notify(said ?? (action.playing ? t().syncGuestResumed(from) : t().syncGuestPaused(from)));
         break;
       }
-      case 'play_video':
+      case 'play_video': {
         if (!VIDEO_ID_RE.test(action.video_id) || action.video_id === currentVideoId()) return;
+        if (action.keep_position) {
+          // Same song, other version: no "picked a song" toast, and the
+          // new version picks up where this one is.
+          const video = PlayerBridge.getVideo();
+          this.pendingSeek = {
+            videoId: action.video_id,
+            position: loadedPlayback(video).currentTime,
+            playing: !!video && !video.paused,
+            atMs: Date.now()
+          };
+          navigateToVideo(action.video_id);
+          break;
+        }
         navigateToVideo(action.video_id);
         this.notify(said ?? t().syncGuestPicked(from));
         break;
+      }
     }
   }
 
@@ -703,6 +754,9 @@ export class RoomSyncController {
     force = false
   ) {
     if (!this.inRoom || !this.isHost || !track || !video || isAdPlaying()) return;
+    // A Song/Video switch still loading: its 0:00 would pull the guest who
+    // switched (already at the right place) back to the start.
+    if (this.pendingSeek && Date.now() - this.pendingSeek.atMs < PENDING_SEEK_MS) return;
     // Between songs: the position is the old song's end, and the "paused"
     // that comes with it would pause guests at the end, where they autoplay.
     if (video.ended) return;
@@ -953,7 +1007,9 @@ export const SyncRoomPlugin: YTMDPlugin = {
     window.addEventListener('click', onClick, true);
     // Tells the user's own song picks apart from YTM switching by itself.
     const onUserInput = (e: Event) => {
-      if (e.isTrusted) controller.noteUserInput();
+      if (!e.isTrusted) return;
+      controller.noteUserInput();
+      if (e.target instanceof Element && e.target.closest('ytmusic-av-toggle')) controller.noteAvToggle();
     };
     window.addEventListener('pointerdown', onUserInput, true);
     window.addEventListener('keydown', onUserInput, true);
@@ -1008,6 +1064,7 @@ export const SyncRoomPlugin: YTMDPlugin = {
         pageLog('warn', 'player', `${track.videoId ?? '?'} won't play here; ${playerSnapshot()}`);
       }
     }
+    controller.applyPendingSeek(ctx.getVideoElement());
     controller.broadcastLocalState(track, ctx.getVideoElement(), ctx.invoke, true);
     const request = controller.handleLocalTrackChange(track.videoId);
     if (request) controller.requestControl(request, ctx.invoke);
@@ -1022,6 +1079,7 @@ export const SyncRoomPlugin: YTMDPlugin = {
     controllerRef?.broadcastLocalState(ctx.track, video, ctx.invoke);
     controllerRef?.noteLocalTick(video);
     controllerRef?.checkPlayer(video);
+    controllerRef?.applyPendingSeek(video);
     controllerRef?.advanceQueue(lastRoom?.queue?.length ?? 0, video, ctx.invoke);
   },
 

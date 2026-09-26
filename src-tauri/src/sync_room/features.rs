@@ -321,7 +321,7 @@ impl SyncRoomManager {
         if let Some(item) = played {
             sink.control_requested(&SyncControlRequest {
                 from: item.added_by,
-                action: SyncControl::PlayVideo { video_id: item.video_id },
+                action: SyncControl::play_video(item.video_id),
                 source: ControlSource::Queue { title: item.title },
             });
         }

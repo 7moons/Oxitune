@@ -456,15 +456,28 @@ pub enum SyncControl {
     Next,
     Previous,
     SetPlaying { playing: bool },
-    PlayVideo { video_id: String },
+    PlayVideo {
+        video_id: String,
+        /// The same song in its other version (YouTube Music's Song/Video
+        /// switch, a different id): the host carries on from where it is
+        /// instead of starting over. Left out when false, and missing from
+        /// older guests, so older hosts see the message they always did.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        keep_position: bool,
+    },
 }
 
 impl SyncControl {
+    /// A plain "play this song from the start".
+    pub fn play_video(video_id: impl Into<String>) -> Self {
+        SyncControl::PlayVideo { video_id: video_id.into(), keep_position: false }
+    }
+
     /// The host's page navigates to `video_id`, so only YouTube's 11-char id
     /// form gets through.
     pub(crate) fn is_valid(&self) -> bool {
         match self {
-            SyncControl::PlayVideo { video_id } => is_video_id(video_id),
+            SyncControl::PlayVideo { video_id, .. } => is_video_id(video_id),
             _ => true,
         }
     }
@@ -2354,6 +2367,22 @@ mod tests {
         );
     }
 
+    /// `keep_position` is new: a plain pick must look exactly as before to
+    /// an older host, and an older guest's pick must still parse.
+    #[test]
+    fn test_play_video_keep_position_is_optional_on_the_wire() {
+        let plain = serde_json::to_value(SyncControl::play_video("dQw4w9WgXcQ")).unwrap();
+        assert_eq!(plain, serde_json::json!({ "kind": "play_video", "video_id": "dQw4w9WgXcQ" }));
+
+        let old: SyncControl = serde_json::from_value(plain).unwrap();
+        assert_eq!(old, SyncControl::play_video("dQw4w9WgXcQ"));
+
+        let switch = SyncControl::PlayVideo { video_id: "dQw4w9WgXcQ".into(), keep_position: true };
+        let json = serde_json::to_value(&switch).unwrap();
+        assert_eq!(json["keep_position"], serde_json::json!(true));
+        assert_eq!(serde_json::from_value::<SyncControl>(json).unwrap(), switch);
+    }
+
     #[test]
     fn test_wire_state_roundtrip_keeps_shared_fields_and_drops_local_ones() {
         let mut room = room_with(&[("host", true)]);
@@ -2544,7 +2573,7 @@ mod tests {
         let manager = hosting(&[("host", true), ("g1", false)]);
         let (sink, dyn_sink) = recording();
         manager.handle_guest_control("stranger", SyncControl::Next, &dyn_sink);
-        manager.handle_guest_control("g1", SyncControl::PlayVideo { video_id: "../../etc".into() }, &dyn_sink);
+        manager.handle_guest_control("g1", SyncControl::play_video("../../etc"), &dyn_sink);
         assert!(sink.controls.lock().is_empty());
         manager.handle_guest_control("g1", SyncControl::Previous, &dyn_sink);
         assert_eq!(sink.controls.lock()[0].source, ControlSource::Member);
@@ -2683,7 +2712,7 @@ mod tests {
 
         manager.queue_play("dj2", &queue[2].id, &dyn_sink).unwrap();
         let played = sink.controls.lock()[0].clone();
-        assert_eq!(played.action, SyncControl::PlayVideo { video_id: "ccccccccccc".into() });
+        assert_eq!(played.action, SyncControl::play_video("ccccccccccc"));
         assert_eq!(played.source, ControlSource::Queue { title: "Third".into() });
         assert_eq!(played.from, "dj");
 
@@ -3132,8 +3161,8 @@ mod tests {
         lan_join(&guest, guest_dyn.clone(), &host, "Ola").await.unwrap();
 
         send_control(&guest, SyncControl::Next).unwrap();
-        send_control(&guest, SyncControl::PlayVideo { video_id: "dQw4w9WgXcQ".into() }).unwrap();
-        assert!(send_control(&guest, SyncControl::PlayVideo { video_id: "javascript:x".into() }).is_err());
+        send_control(&guest, SyncControl::play_video("dQw4w9WgXcQ")).unwrap();
+        assert!(send_control(&guest, SyncControl::play_video("javascript:x")).is_err());
         send_reaction(&guest, &guest_dyn, "😂").unwrap();
         assert!(send_reaction(&guest, &guest_dyn, "free text").is_err());
         queue_add(&guest, &guest_dyn, "aaaaaaaaaaa", "Song", "Artist", false).unwrap();

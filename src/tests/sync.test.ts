@@ -317,6 +317,65 @@ describe('RoomSyncController (guest)', () => {
     }
   });
 
+  // Regression: YouTube Music's Song/Video switch loads the song under a
+  // different id; a DJ's switch went to the host as a new pick and the
+  // whole room restarted the song from 0:00.
+  test('the Song/Video switch keeps the room’s place', () => {
+    const c = guest();
+    c.handleRemotePlayback(payload({ timestamp_ms: 1_000, current_time_secs: 120 }), fakeVideo({ currentTime: 120 }), 1_000);
+    c.noteUserInput(1_500);
+    c.noteAvToggle(1_500);
+    expect(c.handleLocalTrackChange('bbbbbbbbbbb', 2_000)).toEqual({
+      kind: 'play_video',
+      video_id: 'bbbbbbbbbbb',
+      keep_position: true
+    });
+
+    let loaded = 'dQw4w9WgXcQ';
+    const seeks: number[] = [];
+    g.document = {
+      getElementById: (id: string) =>
+        id === 'movie_player'
+          ? {
+              classList: { contains: () => false },
+              getVideoData: () => ({ video_id: loaded }),
+              getCurrentTime: () => (loaded === 'dQw4w9WgXcQ' ? 120 : 0),
+              getDuration: () => 200,
+              seekTo: (s: number) => seeks.push(s)
+            }
+          : null,
+      querySelector: (sel: string) => (sel === 'video' ? fakeVideo({ paused: true }) : null)
+    };
+    const host = new RoomSyncController(() => {});
+    host.setRoomState(true, true);
+    host.applyRemoteControl({ from: 'DJ', action: { kind: 'play_video', video_id: 'bbbbbbbbbbb', keep_position: true } });
+    expect(location.href).toContain('bbbbbbbbbbb');
+
+    // While the new version loads, the host doesn't announce its 0:00.
+    const sent: unknown[] = [];
+    const invoke = async (_cmd: string, args?: Record<string, unknown>) => {
+      sent.push(args);
+      return null;
+    };
+    loaded = 'bbbbbbbbbbb';
+    const track = { title: 'T', artist: 'A', durationSecs: 200, currentTimeSecs: 0, isPlaying: true, videoId: 'bbbbbbbbbbb' };
+    host.broadcastLocalState(track, fakeVideo({ currentTime: 0 }), invoke, true);
+    expect(sent).toHaveLength(0);
+
+    host.applyPendingSeek(fakeVideo({ currentTime: 0 }));
+    expect(seeks).toEqual([120]); // paused: no time added
+    host.broadcastLocalState(track, fakeVideo({ currentTime: 120 }), invoke, true);
+    expect(sent).toHaveLength(1);
+  });
+
+  test('a plain pick after clicking elsewhere still starts the song over', () => {
+    const c = guest();
+    c.handleRemotePlayback(payload({ timestamp_ms: 1_000 }), fakeVideo(), 1_000);
+    c.noteAvToggle(100); // long ago
+    c.noteUserInput(9_500);
+    expect(c.handleLocalTrackChange('bbbbbbbbbbb', 10_000)).toEqual({ kind: 'play_video', video_id: 'bbbbbbbbbbb' });
+  });
+
   test('YTM skipping a song by itself is not a request; the guest goes back to the host’s song', () => {
     const c = guest();
     c.handleRemotePlayback(payload({ timestamp_ms: 1_000 }), fakeVideo(), 1_000);
