@@ -55,20 +55,15 @@ impl From<FetchArgs> for Query {
         const MAX_ALIASES: usize = 20;
         const MAX_ALIAS_CHARS: usize = 100;
         let cap = |s: String| -> String { s.chars().take(MAX_FIELD_CHARS).collect() };
+        let title = cap(a.title);
         Query {
             video_id: a.video_id.filter(|v| crate::sync_room::is_video_id(v.trim())),
-            title: cap(a.title),
+            artist_aliases: artist_aliases(a.artist_aliases, &title, MAX_ALIASES, MAX_ALIAS_CHARS),
+            title,
             artist: cap(a.artist),
             album: a.album_name.filter(|a| !a.trim().is_empty()).map(cap),
             duration: a.duration.filter(|d| d.is_finite() && *d > 0.0 && *d < 86_400.0),
             ytm_plain: a.ytm_plain.filter(|p| p.len() <= MAX_YTM_PLAIN_BYTES),
-            artist_aliases: a
-                .artist_aliases
-                .into_iter()
-                .map(|s| s.trim().chars().take(MAX_ALIAS_CHARS).collect::<String>())
-                .filter(|s| !s.is_empty())
-                .take(MAX_ALIASES)
-                .collect(),
         }
     }
 }
@@ -103,6 +98,20 @@ fn cached_fits(lyrics: &Lyrics, q: &Query) -> bool {
     }
     let (c, w) = (cached.to_lowercase(), wanted.to_lowercase());
     token_similarity(cached, &wanted) >= 0.25 || c.contains(&w) || w.contains(&c)
+}
+
+/// The song's tags as other names for its artist, without the ones about
+/// the song itself: its title is among its tags, and as an "artist" it let
+/// "Berlins Most Wanted" by Berlins Most Wanted pass for "Most Wanted" by
+/// Albert RCB, Young Leosia i PlanBe.
+fn artist_aliases(tags: Vec<String>, title: &str, max: usize, max_chars: usize) -> Vec<String> {
+    use super::matching::{clean_track_name, token_similarity};
+    let title = clean_track_name(title);
+    tags.into_iter()
+        .map(|s| s.trim().chars().take(max_chars).collect::<String>())
+        .filter(|s| !s.is_empty() && token_similarity(s, &title) < 0.5)
+        .take(max)
+        .collect()
 }
 
 /// Same id and the same title: a corrected title for the same id (it can
@@ -473,6 +482,19 @@ mod tests {
         prefetch_with(&ls, std::slice::from_ref(&p), query("next")).await;
         fetch_with(&ls, std::slice::from_ref(&p), true, query("next"), &sink).await;
         assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    // Regression: the title "Most Wanted" was among the song's tags, and as
+    // an artist alias it matched "Berlins Most Wanted" (German lyrics).
+    #[test]
+    fn test_tags_about_the_song_itself_are_not_artist_names() {
+        let tags = ["Albert RCB", "Young Leosia", "PlanBe", "Most Wanted", "most wanted (official audio)"];
+        let aliases = artist_aliases(tags.iter().map(|t| t.to_string()).collect(), "Most Wanted", 20, 100);
+        assert_eq!(aliases, ["Albert RCB", "Young Leosia", "PlanBe"]);
+
+        use super::super::matching::{score_match, Candidate};
+        let berlin = Candidate { title: "Berlins Most Wanted", artist: "Berlins Most Wanted", duration: None, has_synced: false };
+        assert_eq!(score_match(&berlin, "Most Wanted", "Albert RCB, Young Leosia i PlanBe", &aliases, None), 0.0);
     }
 
     #[test]
