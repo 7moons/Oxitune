@@ -1429,6 +1429,38 @@ button {
   justify-content: flex-end;
   gap: 8px;
 }
+
+/* Settings > Saved lyrics > Browse: the kit dialog, wider, with a
+   scrolling list of songs. */
+#ytmd-lyrics-cache .ytmd-dialog {
+  width: min(640px, calc(100vw - 48px));
+}
+.lyrics-cache-filter {
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 8px;
+}
+.lyrics-cache-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: min(60vh, 520px);
+  margin-top: 12px;
+  overflow-y: auto;
+}
+.lyrics-cache-row {
+  /* In a height-capped flex list rows would shrink into each other; the
+     list scrolls instead. */
+  flex: 0 0 auto;
+  height: auto;
+  min-height: 0;
+  padding: 8px 16px;
+  border-radius: 12px;
+  background: var(--surface-raised);
+}
+.lyrics-cache-preview {
+  font-style: italic;
+}
 .mono {
   font-family: var(--font-mono);
 }

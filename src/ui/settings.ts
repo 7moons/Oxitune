@@ -9,6 +9,7 @@ import { CustomEqPreset, deletePreset, isCustomPresetId, MAX_PRESET_NAME_CHARS, 
 import { initWindowChrome, onBeforeClose } from './window';
 import { initPluginsSection } from './plugins';
 import { normalizeProviders, ProviderSetting, renderProviderList } from './lyricsProviders';
+import { openLyricsCacheBrowser } from './lyricsCache';
 
 interface AppConfig {
   close_to_tray: boolean;
@@ -790,6 +791,7 @@ document.addEventListener('DOMContentLoaded', () => {
       showToast(errorMessage(e));
     }
   });
+  $('lyrics-cache-browse-btn')?.addEventListener('click', () => void openLyricsCacheBrowser());
   $('lyrics-cache-clear-btn')?.addEventListener('click', async () => {
     try {
       const count = (await window.__TAURI__?.core.invoke('clear_lyrics_cache')) as number;

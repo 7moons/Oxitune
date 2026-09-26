@@ -440,6 +440,8 @@ pub fn run() {
             commands::get_current_track,
             lyrics::commands::get_current_lyrics,
             lyrics::commands::clear_lyrics_cache,
+            lyrics::commands::list_lyrics_cache,
+            lyrics::commands::remove_lyrics_cache_entry,
             commands::scan_local_music,
             commands::create_sync_room,
             commands::join_sync_room,

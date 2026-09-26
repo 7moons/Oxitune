@@ -188,7 +188,7 @@ async fn look_up_and_cache(ls: &LyricsState, providers: &[Arc<dyn LyricsProvider
         // A miss is only remembered when every provider answered;
         // a timeout or a network error must not hide lyrics for a day.
         if found.is_some() || complete {
-            ls.cache.put(v, found.as_ref(), false, now_secs());
+            ls.cache.put_song(v, Some(song_ref(q)), found.as_ref(), false, now_secs());
         }
     }
     found
@@ -262,6 +262,22 @@ pub async fn refresh(app: &AppHandle, state: &AppState) -> Result<CurrentLyrics,
     refresh_with(&state.lyrics, &providers, ytm_enabled, app).await
 }
 
+fn song_ref(q: &Query) -> super::cache::SongRef {
+    super::cache::SongRef { title: q.title.clone(), artist: q.artist.clone() }
+}
+
+/// Settings > Saved lyrics: every cached answer, newest first.
+#[tauri::command]
+pub fn list_lyrics_cache(state: State<'_, Arc<AppState>>) -> Vec<super::cache::EntryInfo> {
+    state.lyrics.cache.list(now_secs())
+}
+
+/// Settings > Saved lyrics: forgets one song's cached answer.
+#[tauri::command]
+pub fn remove_lyrics_cache_entry(state: State<'_, Arc<AppState>>, video_id: String) {
+    state.lyrics.cache.remove(&video_id);
+}
+
 /// Settings: forgets every cached answer; returns how many there were.
 #[tauri::command]
 pub fn clear_lyrics_cache(state: State<'_, Arc<AppState>>) -> usize {
@@ -323,7 +339,7 @@ pub fn pick(ls: &LyricsState, provider: &str, id: &str, sink: &dyn LyricsSink) -
         .ok_or("That lyrics version is no longer listed")?;
     let q = ls.current_query.lock().clone().ok_or("No song is playing")?;
     if let Some(v) = q.video_id.as_deref() {
-        ls.cache.put(v, Some(&chosen), true, now_secs());
+        ls.cache.put_song(v, Some(song_ref(&q)), Some(&chosen), true, now_secs());
     }
     Ok(set_current(ls, &q, Some(chosen), sink))
 }

@@ -459,6 +459,12 @@
           "markdownDescription": "Enables the leave_sync_room command without any pre-configured scope."
         },
         {
+          "description": "Enables the list_lyrics_cache command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-list-lyrics-cache",
+          "markdownDescription": "Enables the list_lyrics_cache command without any pre-configured scope."
+        },
+        {
           "description": "Enables the minimize_window command without any pre-configured scope.",
           "type": "string",
           "const": "allow-minimize-window",
@@ -571,6 +577,12 @@
           "type": "string",
           "const": "allow-regenerate-remote-token",
           "markdownDescription": "Enables the regenerate_remote_token command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the remove_lyrics_cache_entry command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-remove-lyrics-cache-entry",
+          "markdownDescription": "Enables the remove_lyrics_cache_entry command without any pre-configured scope."
         },
         {
           "description": "Enables the reset_shortcuts command without any pre-configured scope.",
@@ -819,6 +831,12 @@
           "markdownDescription": "Denies the leave_sync_room command without any pre-configured scope."
         },
         {
+          "description": "Denies the list_lyrics_cache command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-list-lyrics-cache",
+          "markdownDescription": "Denies the list_lyrics_cache command without any pre-configured scope."
+        },
+        {
           "description": "Denies the minimize_window command without any pre-configured scope.",
           "type": "string",
           "const": "deny-minimize-window",
@@ -931,6 +949,12 @@
           "type": "string",
           "const": "deny-regenerate-remote-token",
           "markdownDescription": "Denies the regenerate_remote_token command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the remove_lyrics_cache_entry command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-remove-lyrics-cache-entry",
+          "markdownDescription": "Denies the remove_lyrics_cache_entry command without any pre-configured scope."
         },
         {
           "description": "Denies the reset_shortcuts command without any pre-configured scope.",

@@ -31,7 +31,47 @@ struct Entry {
     /// `RULES_VERSION` when it was saved; missing (0) before there was one.
     #[serde(default)]
     rules: u32,
+    /// The song it was looked up for (the lyrics' own title can differ,
+    /// and a "not found" has none), for Settings > Saved lyrics.
+    #[serde(default)]
+    song: Option<SongRef>,
 }
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SongRef {
+    pub title: String,
+    pub artist: String,
+}
+
+/// One cached answer as Settings > Saved lyrics lists it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct EntryInfo {
+    pub video_id: String,
+    /// The song it was looked up for; unknown for entries saved before
+    /// that was recorded.
+    pub song: Option<SongRef>,
+    pub saved_at: u64,
+    pub picked: bool,
+    /// False once it would be looked up again (expired, or found under
+    /// older matching rules).
+    pub fresh: bool,
+    /// What was found; `None` for a remembered "not found".
+    pub found: Option<FoundInfo>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct FoundInfo {
+    pub provider: String,
+    pub title: String,
+    pub artist: String,
+    pub synced: bool,
+    pub lines: usize,
+    /// The first line with words, to tell versions apart.
+    pub preview: String,
+}
+
+/// Longest list Settings is sent (newest first).
+pub const MAX_LISTED: usize = 2000;
 
 /// A cached answer: `Found`, or a remembered "no provider had it".
 #[derive(Debug, Clone, PartialEq)]
@@ -68,6 +108,21 @@ fn fresh(entry: &Entry, now: u64) -> bool {
     }
     let age = if entry.lyrics.is_some() { MAX_AGE } else { NOT_FOUND_AGE };
     now.saturating_sub(entry.saved_at) < age.as_secs()
+}
+
+/// The first line with words (not a "♪"), at most 120 chars.
+fn preview(l: &Lyrics) -> String {
+    let lines: Vec<&str> = if l.is_synced() {
+        l.synced.iter().map(|x| x.text.as_str()).collect()
+    } else {
+        l.plain.as_deref().map(|p| p.lines().collect()).unwrap_or_default()
+    };
+    lines
+        .into_iter()
+        .map(str::trim)
+        .find(|x| x.chars().any(char::is_alphanumeric))
+        .map(|x| x.chars().take(120).collect())
+        .unwrap_or_default()
 }
 
 /// Files to delete (oldest first) so the rest fits in `cap` bytes.
@@ -112,12 +167,18 @@ impl LyricsCache {
     }
 
     pub fn put(&self, video_id: &str, lyrics: Option<&Lyrics>, picked: bool, now: u64) {
+        self.put_song(video_id, None, lyrics, picked, now);
+    }
+
+    /// Like `put`, also recording which song it was looked up for.
+    pub fn put_song(&self, video_id: &str, song: Option<SongRef>, lyrics: Option<&Lyrics>, picked: bool, now: u64) {
         let Some(path) = self.path(video_id) else { return };
         let entry = Entry {
             saved_at: now,
             picked,
             lyrics: lyrics.cloned(),
             rules: RULES_VERSION,
+            song,
         };
         let Ok(json) = serde_json::to_vec(&entry) else { return };
         if std::fs::create_dir_all(&self.dir).is_err() {
@@ -135,6 +196,45 @@ impl LyricsCache {
         if let Some(path) = self.path(video_id) {
             let _ = std::fs::remove_file(path);
         }
+    }
+
+    /// Every cached answer, newest first (at most `MAX_LISTED`).
+    pub fn list(&self, now: u64) -> Vec<EntryInfo> {
+        let Ok(dir) = std::fs::read_dir(&self.dir) else { return Vec::new() };
+        let mut out: Vec<EntryInfo> = dir
+            .flatten()
+            .filter_map(|e| {
+                let path = e.path();
+                if path.extension().is_none_or(|x| x != "json") {
+                    return None;
+                }
+                let video_id = path.file_stem()?.to_str()?.to_string();
+                file_name(&video_id)?; // only entries a video id could have written
+                let entry: Entry = serde_json::from_str(&std::fs::read_to_string(&path).ok()?).ok()?;
+                Some(EntryInfo {
+                    fresh: fresh(&entry, now),
+                    found: entry.lyrics.as_ref().map(|l| FoundInfo {
+                        provider: l.provider.as_str().to_string(),
+                        title: l.title.clone(),
+                        artist: l.artist.clone(),
+                        synced: l.is_synced(),
+                        lines: if l.is_synced() {
+                            l.synced.len()
+                        } else {
+                            l.plain.as_deref().map_or(0, |p| p.lines().filter(|x| !x.trim().is_empty()).count())
+                        },
+                        preview: preview(l),
+                    }),
+                    video_id,
+                    song: entry.song,
+                    saved_at: entry.saved_at,
+                    picked: entry.picked,
+                })
+            })
+            .collect();
+        out.sort_by(|a, b| b.saved_at.cmp(&a.saved_at));
+        out.truncate(MAX_LISTED);
+        out
     }
 
     /// Forgets every cached answer; returns how many there were.
@@ -226,6 +326,30 @@ mod tests {
 
         cache.put("old", Some(&lyrics(ProviderId::Lrclib, true, false)), false, 2);
         assert!(cache.get("old", 3).is_some(), "saved again under the current rules");
+    }
+
+    #[test]
+    fn test_list_describes_each_entry_newest_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = LyricsCache::new(dir.path().to_path_buf());
+        let song = |t: &str| Some(SongRef { title: t.into(), artist: "bambi".into() });
+        let mut synced = lyrics(ProviderId::Lrclib, true, false);
+        synced.synced.insert(0, super::super::Line { t: 0.0, text: "♪".into(), words: None });
+        cache.put_song("aaaaaaaaaaa", song("GORSET"), Some(&synced), false, 100);
+        cache.put_song("bbbbbbbbbbb", song("BIG BIG GIRL"), None, false, 300);
+        cache.put_song("ccccccccccc", song("LET IT B"), Some(&lyrics(ProviderId::Genius, false, true)), true, 200);
+        std::fs::write(dir.path().join("not-an-entry.txt"), "x").unwrap();
+
+        let list = cache.list(400);
+        assert_eq!(list.iter().map(|e| e.video_id.as_str()).collect::<Vec<_>>(), ["bbbbbbbbbbb", "ccccccccccc", "aaaaaaaaaaa"]);
+        assert!(list[0].found.is_none(), "a remembered not-found");
+        assert_eq!(list[0].song.as_ref().unwrap().title, "BIG BIG GIRL");
+        assert!(list[1].picked);
+        let found = list[2].found.as_ref().unwrap();
+        assert_eq!((found.provider.as_str(), found.synced, found.lines), ("lrclib", true, 2));
+        assert_eq!(found.preview, "la", "skips the ♪ line");
+        assert!(list[2].fresh);
+        assert!(!cache.list(100 + 31 * 24 * 3600)[2].fresh, "expired: will be looked up again");
     }
 
     #[test]
