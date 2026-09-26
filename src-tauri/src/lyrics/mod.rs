@@ -418,7 +418,10 @@ pub fn decode_entities(s: &str) -> String {
     while let Some(i) = rest.find('&') {
         out.push_str(&rest[..i]);
         rest = &rest[i..];
-        let Some(end) = rest[..rest.len().min(12)].find(';') else {
+        // Looked for by byte: slicing the first 12 bytes as a `str` panicked
+        // when they ended inside a letter like "ć" ("&quot;\nWróć"). `;` is
+        // ASCII, so where it's found is always a char boundary.
+        let Some(end) = rest.bytes().take(12).position(|b| b == b';') else {
             out.push('&');
             rest = &rest[1..];
             continue;
@@ -647,5 +650,17 @@ mod tests {
     #[test]
     fn test_decode_entities() {
         assert_eq!(decode_entities("Rock &amp; Roll &#x27;n&#39; &quot;x&quot; &lt;3 &unknown; & done"), "Rock & Roll 'n' \"x\" <3 &unknown; & done");
+    }
+
+    // Regression: Genius lyrics of a Polish song crashed the lookup (a
+    // panic), the first 12 bytes after `&` ending inside "ć".
+    #[test]
+    fn test_decode_entities_with_polish_letters_after_an_ampersand() {
+        assert_eq!(decode_entities("&quot;\nWróć"), "\"\nWróć");
+        assert_eq!(decode_entities("A & żółć ćma"), "A & żółć ćma");
+        assert_eq!(decode_entities("&ąęśćźżółń;"), "&ąęśćźżółń;");
+        for s in ["&ć", "&źźźźźźźźźź", "x&\u{1F3B5}\u{1F3B5}\u{1F3B5};"] {
+            decode_entities(s); // never panics, whatever follows the `&`
+        }
     }
 }
