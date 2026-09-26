@@ -1,4 +1,5 @@
 import { TrackInfo } from '../plugins/types';
+import { pageLog } from './diagLog';
 
 export function parseTimeStrToSecs(timeStr: string): number {
   const parts = timeStr.trim().split(':').map((p) => parseInt(p, 10));
@@ -17,7 +18,7 @@ type MoviePlayerElement = HTMLElement & {
   isAdPlaying?: () => boolean;
   getDuration?: () => number;
   getCurrentTime?: () => number;
-  getVideoData?: () => { video_id?: string; title?: string } | undefined;
+  getVideoData?: () => { video_id?: string; title?: string; author?: string } | undefined;
 };
 
 /** Position in the loaded song. YTM's player API, not `video.currentTime`:
@@ -29,9 +30,12 @@ function songTime(video: HTMLVideoElement): number {
 }
 
 /** How long a new song id may disagree with the MediaSession title before
- * the pair is reported anyway. Both switch on a song change, but not in the
- * same frame; reporting the half-switched pair put the old title next to the
- * new song's link (and the old song's duration) on Discord. */
+ * the song is reported with the player's own title and author instead. Both
+ * switch on a song change, but not in the same frame; reporting the
+ * half-switched pair put the old title next to the new song's link on
+ * Discord, and made the lyrics look up (and cache, under the new song's id)
+ * the previous song's lyrics. MediaSession can stay stale for good, e.g.
+ * after a Listen Together guest's switch. */
 export const METADATA_SETTLE_MS = 1500;
 
 /** The URL's playlist, but only while the URL is this song's watch page;
@@ -42,7 +46,21 @@ export function playlistFromUrl(search: string, videoId: string | undefined): st
   return params.get('list') || undefined;
 }
 
-const normalizeTitle = (s: string) => s.trim().replace(/\s+/g, ' ').toLowerCase();
+/** A song described by the player alone, for when MediaSession still holds
+ * the previous song's details. YouTube's own thumbnail stands in for the
+ * cover (the page's artwork is the previous song's too). */
+export function settledMetadata(
+  videoId: string,
+  videoData: { title?: string; author?: string } | undefined
+): { title: string; artist: string; coverUrl: string } {
+  return {
+    title: videoData?.title?.trim() || '',
+    artist: videoData?.author?.trim() || '',
+    coverUrl: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`
+  };
+}
+
+const normalizeTitle =(s: string) => s.trim().replace(/\s+/g, ' ').toLowerCase();
 
 /** Whether the player's title and MediaSession's title describe the same
  * song. Unknown on either side counts as agreeing. */
@@ -92,7 +110,7 @@ export class PlayerObserver {
   private attachedVideo: HTMLVideoElement | null = null;
   private observedTarget: Element | null = null;
   private lastTickMs = 0;
-  private titleMismatch: { videoId: string; sinceMs: number } | null = null;
+  private titleMismatch: { videoId: string; sinceMs: number; logged?: boolean } | null = null;
 
   // Named instance methods (not per-call anonymous closures) so
   // detachVideoListeners can remove the exact same listener reference that
@@ -298,6 +316,16 @@ export class PlayerObserver {
       const now = Date.now();
       if (this.titleMismatch?.videoId !== videoId) this.titleMismatch = { videoId, sinceMs: now };
       if (now - this.titleMismatch.sinceMs < METADATA_SETTLE_MS) return null;
+      // Still the previous song's title, artist, album and cover: describe
+      // the song from the player itself, which owns the id.
+      const stale = settledMetadata(videoId, videoData);
+      if (!this.titleMismatch.logged) {
+        this.titleMismatch.logged = true;
+        pageLog('info', 'player', `song ${videoId}: MediaSession still says "${msMeta?.title ?? ''}", using the player's "${stale.title}"`);
+      }
+      ({ title, artist } = stale);
+      album = '';
+      coverUrl = stale.coverUrl;
     } else {
       this.titleMismatch = null;
     }

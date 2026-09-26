@@ -74,6 +74,21 @@ pub struct CandidateSummary {
     pub selected: bool,
 }
 
+/// Whether lyrics cached under this song's id are about this song. The
+/// page once sent a song's id with the previous song's title (the two
+/// switch at different moments); the lyrics found for that title were
+/// cached under the new id, and kept for 30 days. Results with no title
+/// (local files, YTM's own text) can't be checked and are kept.
+fn cached_fits(lyrics: &Lyrics, q: &Query) -> bool {
+    use super::matching::{clean_track_name, token_similarity};
+    let (cached, wanted) = (lyrics.title.trim(), clean_track_name(&q.title));
+    if cached.is_empty() || wanted.trim().is_empty() {
+        return true;
+    }
+    let (c, w) = (cached.to_lowercase(), wanted.to_lowercase());
+    token_similarity(cached, &wanted) >= 0.25 || c.contains(&w) || w.contains(&c)
+}
+
 fn same_song(a: &Query, b: &Query) -> bool {
     match (&a.video_id, &b.video_id) {
         (Some(x), Some(y)) => x == y,
@@ -126,7 +141,21 @@ pub async fn fetch_with(
     }
 
     let ytm = || if ytm_enabled { ytm_lyrics(&q) } else { None };
-    let lyrics = match q.video_id.as_deref().and_then(|v| ls.cache.get(v, now_secs())) {
+    let cached = q.video_id.as_deref().and_then(|v| ls.cache.get(v, now_secs()));
+    let cached = match cached {
+        Some(Cached::Found { lyrics, picked: false }) if !cached_fits(&lyrics, &q) => {
+            log::warn!(
+                "[Oscilla Lyrics] cached lyrics for {:?} are \"{}\" by {}, not \"{}\": looking again",
+                q.video_id,
+                lyrics.title,
+                lyrics.artist,
+                q.title
+            );
+            None
+        }
+        other => other,
+    };
+    let lyrics = match cached {
         Some(Cached::Found { lyrics, .. }) => Some(lyrics),
         Some(Cached::NotFound) => ytm(),
         None => {
@@ -321,6 +350,45 @@ mod tests {
         fetch_with(&ls, std::slice::from_ref(&p), true, query("vid2"), &sink).await;
         fetch_with(&ls, std::slice::from_ref(&p), true, query("vid1"), &sink).await;
         assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    // Regression: a song's id went out with the previous song's title, and
+    // that song's lyrics were cached under the new id for 30 days.
+    #[tokio::test]
+    async fn test_cached_lyrics_of_another_song_are_looked_up_again() {
+        let (_d, ls) = state();
+        let sink = Recorder::default();
+        let mut wrong = lyrics(ProviderId::Lrclib, true, false);
+        wrong.title = "Grow A Pear".into();
+        wrong.artist = "Kesha".into();
+        ls.cache.put("vid1", Some(&wrong), false, now_secs());
+
+        let (p, calls) = provider(Ok(vec![lyrics(ProviderId::Lrclib, true, false)]), 0);
+        let got = fetch_with(&ls, std::slice::from_ref(&p), true, query("vid1"), &sink).await;
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "looked up again");
+        assert_eq!(ls.current_lyrics.lock().as_ref().map(|l| l.title.clone()).as_deref(), Some("Maniac"));
+        assert!(got.provider.is_some());
+        match ls.cache.get("vid1", now_secs()) {
+            Some(Cached::Found { lyrics, .. }) => assert_eq!(lyrics.title, "Maniac", "cache fixed"),
+            other => panic!("{other:?}"),
+        }
+
+        // The user's own pick is kept, whatever its title.
+        ls.cache.put("vid2", Some(&wrong), true, now_secs());
+        fetch_with(&ls, std::slice::from_ref(&p), true, query("vid2"), &sink).await;
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn test_cached_fits_tolerates_video_style_titles() {
+        let q = |title: &str| Query { title: title.into(), ..Default::default() };
+        let l = lyrics(ProviderId::Lrclib, true, false); // "Maniac"
+        assert!(cached_fits(&l, &q("Carpenter Brut - Maniac (Official Video)")));
+        assert!(cached_fits(&l, &q("maniac")));
+        assert!(!cached_fits(&l, &q("Bring Me To Life")));
+        let mut untitled = l.clone();
+        untitled.title.clear();
+        assert!(cached_fits(&untitled, &q("Bring Me To Life")));
     }
 
     #[tokio::test]

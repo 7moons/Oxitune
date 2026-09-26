@@ -4,7 +4,8 @@ import {
   shouldFallbackTick,
   FALLBACK_TICK_AFTER_MS,
   classifyTrackUpdate,
-  titlesAgree
+  titlesAgree,
+  settledMetadata
 } from '../preload/observer';
 import type { TrackInfo } from '../plugins/types';
 
@@ -80,5 +81,19 @@ describe('titlesAgree', () => {
   test('an unknown side never blocks', () => {
     expect(titlesAgree(undefined, 'Maniac')).toBe(true);
     expect(titlesAgree('Maniac', '')).toBe(true);
+  });
+});
+
+// Regression: MediaSession kept the previous song ("Grow A Pear") while the
+// player had switched to "Bring Me To Life"; the pair was reported anyway
+// and the lyrics for the old title were cached under the new song's id.
+describe('settledMetadata', () => {
+  test('describes the song from the player, never from the stale MediaSession', () => {
+    expect(settledMetadata('-eGM0IJc70Y', { title: ' Bring Me To Life ', author: 'Evanescence' })).toEqual({
+      title: 'Bring Me To Life',
+      artist: 'Evanescence',
+      coverUrl: 'https://i.ytimg.com/vi/-eGM0IJc70Y/hqdefault.jpg'
+    });
+    expect(settledMetadata('-eGM0IJc70Y', undefined).title).toBe(''); // no title: not reported at all
   });
 });
