@@ -89,9 +89,11 @@ fn cached_fits(lyrics: &Lyrics, q: &Query) -> bool {
     token_similarity(cached, &wanted) >= 0.25 || c.contains(&w) || w.contains(&c)
 }
 
+/// Same id and the same title: a corrected title for the same id (it can
+/// arrive after a stale one) is a new lookup, not the current lyrics.
 fn same_song(a: &Query, b: &Query) -> bool {
     match (&a.video_id, &b.video_id) {
-        (Some(x), Some(y)) => x == y,
+        (Some(x), Some(y)) => x == y && a.title.trim().eq_ignore_ascii_case(b.title.trim()),
         _ => a.song_key() == b.song_key(),
     }
 }
@@ -377,6 +379,25 @@ mod tests {
         ls.cache.put("vid2", Some(&wrong), true, now_secs());
         fetch_with(&ls, std::slice::from_ref(&p), true, query("vid2"), &sink).await;
         assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    // The page reported a song's id with the previous song's title, then
+    // the right title: the second report must replace the wrong lyrics.
+    #[tokio::test]
+    async fn test_corrected_title_for_the_same_id_looks_again() {
+        let (_d, ls) = state();
+        let sink = Recorder::default();
+        let mut wrong = lyrics(ProviderId::Lrclib, true, false);
+        wrong.title = "I Don't Wanna Be Me".into();
+        let (stale_p, _) = provider(Ok(vec![wrong]), 0);
+        let mut stale_q = query("vid1");
+        stale_q.title = "I Don't Wanna Be Me".into();
+        fetch_with(&ls, std::slice::from_ref(&stale_p), true, stale_q, &sink).await;
+
+        let (p, calls) = provider(Ok(vec![lyrics(ProviderId::Lrclib, true, false)]), 0);
+        fetch_with(&ls, std::slice::from_ref(&p), true, query("vid1"), &sink).await;
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(ls.current_lyrics.lock().as_ref().map(|l| l.title.clone()).as_deref(), Some("Maniac"));
     }
 
     #[test]

@@ -35,9 +35,12 @@ let cleanup: (() => void) | null = null;
 export const isCurrentSongKey = (requestedKey: string, latestKey: string): boolean =>
   requestedKey === latestKey;
 
-/** Identifies a song the same way the backend does: video id first. */
+/** Identifies a lookup the same way the backend does: the video id and the
+ * title it goes with. A song's title can arrive late (the previous song's
+ * title was once reported with the new id); a corrected title for the same
+ * id must look the lyrics up again, not keep the wrong ones. */
 export const songKeyOf = (track: Pick<TrackInfo, 'videoId' | 'title' | 'artist'>): string =>
-  track.videoId || `${track.title} - ${track.artist}`;
+  track.videoId ? `${track.videoId}|${track.title.trim().toLowerCase()}` : `${track.title} - ${track.artist}`;
 
 export const LyricsPlugin: YTMDPlugin = {
   id: 'lyrics',

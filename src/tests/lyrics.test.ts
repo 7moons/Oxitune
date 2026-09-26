@@ -75,7 +75,9 @@ describe('Lyrics: stale fetch guard', () => {
   });
 
   test('song key prefers the video id, like the backend', () => {
-    expect(songKeyOf({ videoId: 'abc', title: 'T', artist: 'A' })).toBe('abc');
+    expect(songKeyOf({ videoId: 'abc', title: 'T', artist: 'A' })).toBe('abc|t');
+    // The same id with a corrected title is a new lookup.
+    expect(songKeyOf({ videoId: 'abc', title: 'Other', artist: 'A' })).not.toBe(songKeyOf({ videoId: 'abc', title: 'T', artist: 'A' }));
     expect(songKeyOf({ videoId: undefined, title: 'T', artist: 'A' })).toBe('T - A');
   });
 });

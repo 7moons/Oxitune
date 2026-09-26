@@ -37,6 +37,9 @@ function songTime(video: HTMLVideoElement): number {
  * the previous song's lyrics. MediaSession can stay stale for good, e.g.
  * after a Listen Together guest's switch. */
 export const METADATA_SETTLE_MS = 1500;
+/** How long to wait for the player to name a song it has the id of before
+ * falling back to MediaSession's details. */
+export const TITLE_WAIT_MAX_MS = 8000;
 
 /** The URL's playlist, but only while the URL is this song's watch page;
  * elsewhere (browsing home, search) it says nothing about what's playing. */
@@ -312,20 +315,30 @@ export class PlayerObserver {
     // missing while browsing other pages and switches at another moment).
     const videoData = moviePlayer?.getVideoData?.();
     const videoId = videoData?.video_id || new URLSearchParams(window.location.search).get('v') || undefined;
-    if (videoId && !titlesAgree(videoData?.title, msMeta?.title)) {
+    // Right after a switch the player can know the new id but not yet its
+    // title; "unknown" is not "agrees", or MediaSession's previous title
+    // goes out with the new id.
+    const titleUnknown = !!videoData?.video_id && !videoData.title?.trim();
+    if (videoId && (titleUnknown || !titlesAgree(videoData?.title, msMeta?.title))) {
       const now = Date.now();
       if (this.titleMismatch?.videoId !== videoId) this.titleMismatch = { videoId, sinceMs: now };
-      if (now - this.titleMismatch.sinceMs < METADATA_SETTLE_MS) return null;
-      // Still the previous song's title, artist, album and cover: describe
-      // the song from the player itself, which owns the id.
-      const stale = settledMetadata(videoId, videoData);
-      if (!this.titleMismatch.logged) {
-        this.titleMismatch.logged = true;
-        pageLog('info', 'player', `song ${videoId}: MediaSession still says "${msMeta?.title ?? ''}", using the player's "${stale.title}"`);
+      const waited = now - this.titleMismatch.sinceMs;
+      if (waited < METADATA_SETTLE_MS) return null;
+      if (titleUnknown) {
+        // Nothing better to go on; after long enough, MediaSession it is.
+        if (waited < TITLE_WAIT_MAX_MS) return null;
+      } else {
+        // Still the previous song's title, artist, album and cover: describe
+        // the song from the player itself, which owns the id.
+        const stale = settledMetadata(videoId, videoData);
+        if (!this.titleMismatch.logged) {
+          this.titleMismatch.logged = true;
+          pageLog('info', 'player', `song ${videoId}: MediaSession still says "${msMeta?.title ?? ''}", using the player's "${stale.title}"`);
+        }
+        ({ title, artist } = stale);
+        album = '';
+        coverUrl = stale.coverUrl;
       }
-      ({ title, artist } = stale);
-      album = '';
-      coverUrl = stale.coverUrl;
     } else {
       this.titleMismatch = null;
     }
