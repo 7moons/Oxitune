@@ -55,6 +55,27 @@ export interface HostHooks {
 
 const MAX_TOAST_CHARS = 200;
 
+/** Appends `node` to the document now, or as soon as it has a root. A
+ * `document-start` plugin (the ad blocker) runs before `<html>` exists, and
+ * appending to `document.head || document.documentElement` then threw on
+ * null at every start until the plugin was switched off for it. Returns a
+ * cancel for a node still waiting. */
+export function appendWhenRooted(node: Node, doc: Document = document): () => void {
+  const root = doc.head || doc.documentElement;
+  if (root) {
+    root.appendChild(node);
+    return () => undefined;
+  }
+  const observer = new MutationObserver(() => {
+    const ready = doc.head || doc.documentElement;
+    if (!ready) return;
+    observer.disconnect();
+    ready.appendChild(node);
+  });
+  observer.observe(doc, { childList: true });
+  return () => observer.disconnect();
+}
+
 export class ExternalPlugin implements YTMDPlugin {
   readonly id: string;
   readonly name: string;
@@ -77,7 +98,9 @@ export class ExternalPlugin implements YTMDPlugin {
   private readonly toolsListeners = new Set<(progress: MediaToolsProgress) => void>();
   private readonly toolsWaiters = new Set<(progress: MediaToolsProgress) => void>();
   private readonly unloaders: (() => void)[] = [];
-  private readonly styleNodes: HTMLStyleElement[] = [];
+  /** Removes each style this plugin added, or cancels it while it still
+   * waits for the document's root. */
+  private readonly styleRemovers: Unlisten[] = [];
 
   constructor(payload: Payload, factory: Factory) {
     this.manifest = payload.manifest;
@@ -125,9 +148,13 @@ export class ExternalPlugin implements YTMDPlugin {
     const node = document.createElement('style');
     node.dataset.ytmdPlugin = this.id;
     node.textContent = String(css);
-    (document.head || document.documentElement).appendChild(node);
-    this.styleNodes.push(node);
-    return () => node.remove();
+    const cancel = appendWhenRooted(node);
+    const remove = () => {
+      cancel();
+      node.remove();
+    };
+    this.styleRemovers.push(remove);
+    return remove;
   }
 
   /** The `ytmd` object: what the manifest grants, nothing else. */
@@ -302,7 +329,7 @@ export class ExternalPlugin implements YTMDPlugin {
 
   onDestroy(): void {
     for (const unload of this.unloaders.splice(0)) unload();
-    this.styleNodes.splice(0).forEach((n) => n.remove());
+    this.styleRemovers.splice(0).forEach((remove) => remove());
     this.trackListeners.clear();
     this.playbackListeners.clear();
     this.tickListeners.clear();
