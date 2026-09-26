@@ -231,6 +231,7 @@ describe('RoomSyncController (guest)', () => {
     c.handleRemotePlayback(payload({ timestamp_ms: 1_000 }), fakeVideo(), 1_000);
 
     expect(c.handleLocalTrackChange('dQw4w9WgXcQ', 2_000)).toBeNull(); // the host's own song
+    c.noteUserInput(1_500); // clicked a song
     expect(c.handleLocalTrackChange('bbbbbbbbbbb', 2_000)).toEqual({ kind: 'play_video', video_id: 'bbbbbbbbbbb' });
 
     // Until the host switches, its broadcasts of the old song don't pull us back.
@@ -252,6 +253,45 @@ describe('RoomSyncController (guest)', () => {
     d.handleRemotePlayback(payload({ timestamp_ms: 1_000 }), fakeVideo(), 1_000);
     d.noteLocalTick(fakeVideo({ currentTime: 198.5, duration: 200 }), 5_000);
     expect(d.handleLocalTrackChange('eeeeeeeeeee', 6_000)).toBeNull();
+  });
+
+  // Regression: a song that couldn't play on a DJ's page ("Video
+  // unavailable") made YTM skip it there, and that skip was sent to the
+  // host as the DJ's pick, skipping the song for the whole room.
+  // Regression: the guest seeked with `video.currentTime`, but once YTM
+  // appends the next song to the same media stream the video's timeline
+  // isn't the song's: the seek landed in the previous song, YTM jumped back
+  // to 0:00 of the current one, and the guest heard the old song forever.
+  test('seeks through YTM’s player, in song time, not on the video element', () => {
+    const seeks: number[] = [];
+    g.document = {
+      getElementById: (id: string) =>
+        id === 'movie_player'
+          ? {
+              classList: { contains: () => false },
+              getVideoData: () => ({ video_id: 'dQw4w9WgXcQ' }),
+              getCurrentTime: () => 0,
+              getDuration: () => 76,
+              seekTo: (s: number) => seeks.push(s)
+            }
+          : null,
+      querySelector: () => null
+    };
+    const c = guest();
+    const video = fakeVideo({ currentTime: 85, duration: 115 }); // stream timeline, not the song's
+    c.handleRemotePlayback(payload({ timestamp_ms: 1_000, current_time_secs: 13 }), video, 1_000);
+    expect(seeks).toEqual([13]);
+    expect(video.currentTime).toBe(85);
+  });
+
+  test('YTM skipping a song by itself is not a request; the guest goes back to the host’s song', () => {
+    const c = guest();
+    c.handleRemotePlayback(payload({ timestamp_ms: 1_000 }), fakeVideo(), 1_000);
+    c.noteUserInput(100); // long ago
+    location.search = '?v=bbbbbbbbbbb'; // YTM's own skip
+    expect(c.handleLocalTrackChange('bbbbbbbbbbb', 12_000)).toBeNull();
+    c.handleRemotePlayback(payload({ timestamp_ms: 13_000 }), fakeVideo(), 13_000);
+    expect(location.href).toContain('dQw4w9WgXcQ');
   });
 
   // Regression: at the end of a song a guest that finished first autoplayed

@@ -3,6 +3,7 @@ import manifest from './manifest.json';
 import { createEl } from '../../utils/dom';
 import { ensureKitStyles, openDialog, showToast } from '../../preload/ui/kit';
 import { t } from '../../preload/ui/i18n';
+import { PlayerBridge } from '../../preload/bridge';
 import {
   CurrentLyrics,
   EMPTY_LYRICS,
@@ -626,10 +627,7 @@ function renderCurrentLyrics(ctx: PluginContext): void {
         } else {
           el.textContent = line.text;
         }
-        el.addEventListener('click', () => {
-          const video = ctx.getVideoElement();
-          if (video) video.currentTime = Math.max(0, line.t - lyrics.offset_secs);
-        });
+        el.addEventListener('click', () => PlayerBridge.seekTo(Math.max(0, line.t - lyrics.offset_secs)));
         return el;
       }),
       buildFooter(ctx, true)

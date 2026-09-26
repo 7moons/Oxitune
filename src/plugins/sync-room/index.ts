@@ -148,6 +148,12 @@ const OWN_NAV_MEMORY_MS = 15_000;
  * is YTM's autoplay, not the user. */
 const NEAR_END_SECS = 3;
 const AUTOPLAY_WINDOW_MS = 4000;
+/** Guest: a track change counts as the user's pick only this soon after
+ * they clicked or pressed a key. Without that, YTM moved on by itself: when
+ * a song can't play here ("Video unavailable", region or account limits)
+ * it skips to its own next song, and a DJ's page sent that skip to the
+ * host, which skipped the song for the whole room. */
+const USER_PICK_WINDOW_MS = 8000;
 /** Guest: a seek never lands closer than this to the end of the song. At
  * the very end the video ends and YTM autoplays the guest's own next song,
  * not the host's. */
@@ -258,26 +264,28 @@ function currentVideoId(): string | null {
   return new URLSearchParams(window.location.search).get('v');
 }
 
-/** The subset of YouTube's player API (`#movie_player`) read here. */
-type MoviePlayerElement = HTMLElement & {
-  getVideoData?: () => { video_id?: string } | undefined;
-  getCurrentTime?: () => number;
-};
-
-/** The song the player has actually loaded, and its position in it. Around
- * a track change the URL's `v` and the video element's time don't switch
- * at the same moment, so pairing them sent (and compared) the old song's
- * last seconds under the new song's id, or the new song's 0:00 under the
- * old id: guests jumped to the end of the next song or restarted the old
- * one. The player API reports both from one state. */
-function loadedPlayback(video: HTMLVideoElement | null): { videoId: string | null; currentTime: number } {
-  const player = document.getElementById('movie_player') as MoviePlayerElement | null;
+/** The song the player has actually loaded, its position in it and its
+ * length. Around a track change the URL's `v` and the video element's time
+ * don't switch at the same moment, so pairing them sent (and compared) the
+ * old song's last seconds under the new song's id, or the new song's 0:00
+ * under the old id: guests jumped to the end of the next song or restarted
+ * the old one. And the video element's timeline isn't the song's at all
+ * once YTM has appended the next song to the same media stream (its
+ * `duration` was 115 s for a 76 s song). The player API reports all of it
+ * from one state. */
+function loadedPlayback(video: HTMLVideoElement | null): { videoId: string | null; currentTime: number; duration: number } {
+  const player = PlayerBridge.getMoviePlayer();
   const videoId = player?.getVideoData?.()?.video_id;
   const currentTime = player?.getCurrentTime?.();
   if (videoId && VIDEO_ID_RE.test(videoId) && typeof currentTime === 'number' && Number.isFinite(currentTime)) {
-    return { videoId, currentTime };
+    const duration = player?.getDuration?.();
+    return {
+      videoId,
+      currentTime,
+      duration: typeof duration === 'number' && duration > 0 ? duration : video ? video.duration : NaN
+    };
   }
-  return { videoId: currentVideoId(), currentTime: video ? video.currentTime : 0 };
+  return { videoId: currentVideoId(), currentTime: video ? video.currentTime : 0, duration: video ? video.duration : NaN };
 }
 
 function isAdPlaying(): boolean {
@@ -326,6 +334,8 @@ export class RoomSyncController {
   /** Guest: a song we asked the host to play, not confirmed yet. */
   private requestedVideo: { videoId: string; atMs: number } | null = null;
   private nearEndAtMs = Number.NEGATIVE_INFINITY;
+  /** Guest: when the user last clicked or pressed a key on the page. */
+  private userInputAtMs = Number.NEGATIVE_INFINITY;
   /** Guest: the song we last played to (nearly) the end. */
   private finished: { videoId: string; duration: number; atMs: number } | null = null;
   /** Guest: speed catch-up in progress, and what to restore after it. */
@@ -385,7 +395,7 @@ export class RoomSyncController {
       videoId: loaded.videoId,
       paused: video ? video.paused : true,
       currentTime: loaded.currentTime,
-      duration: video ? video.duration : NaN,
+      duration: loaded.duration,
       correcting: this.rateCorrection !== null
     };
     const action = computeSyncAction(payload, local, transitSecs);
@@ -476,16 +486,22 @@ export class RoomSyncController {
    * follows is recognized as YTM's autoplay. */
   public noteLocalTick(video: HTMLVideoElement | null, now = Date.now()) {
     if (!this.isGuest() || !video) return;
-    if (Number.isFinite(video.duration) && video.duration > 0 && video.duration - video.currentTime < NEAR_END_SECS) {
+    const { videoId, currentTime, duration } = loadedPlayback(video);
+    if (Number.isFinite(duration) && duration > 0 && duration - currentTime < NEAR_END_SECS) {
       this.nearEndAtMs = now;
-      const { videoId } = loadedPlayback(video);
-      if (videoId) this.finished = { videoId, duration: video.duration, atMs: now };
+      if (videoId) this.finished = { videoId, duration, atMs: now };
     }
   }
 
+  /** Guest: the user clicked or pressed a key (trusted events only). */
+  public noteUserInput(now = Date.now()) {
+    this.userInputAtMs = now;
+  }
+
   /** Guest: our page switched songs. Unless that was our own sync
-   * navigation or YTM's autoplay, the user picked it, and it becomes the
-   * room's song: returns the request to send the host. */
+   * navigation or YTM switching by itself (autoplay, or skipping a song it
+   * can't play), the user picked it, and it becomes the room's song:
+   * returns the request to send the host. */
   public handleLocalTrackChange(videoId: string | undefined, now = Date.now()): SyncControl | null {
     // A listener's pick isn't sent: the next host broadcast brings it back.
     if (!this.isGuest() || !this.canControl || !videoId || !VIDEO_ID_RE.test(videoId)) return null;
@@ -494,6 +510,8 @@ export class RoomSyncController {
     const navAt = this.ownNavs.get(videoId);
     if (navAt !== undefined && now - navAt < OWN_NAV_MEMORY_MS) return null;
     if (now - this.nearEndAtMs < AUTOPLAY_WINDOW_MS) return null;
+    // Nobody picked it: the next host broadcast brings the host's song back.
+    if (now - this.userInputAtMs > USER_PICK_WINDOW_MS) return null;
     if (this.requestedVideo?.videoId === videoId) return null;
     this.requestedVideo = { videoId, atMs: now };
     return { kind: 'play_video', video_id: videoId };
@@ -555,7 +573,8 @@ export class RoomSyncController {
   /** Host: as a song ends, plays the next song from the shared queue. */
   public advanceQueue(queueLength: number, video: HTMLVideoElement | null, invoke: PluginContext['invoke']) {
     if (!video || isAdPlaying()) return;
-    const remaining = video.duration - video.currentTime;
+    const { currentTime, duration } = loadedPlayback(video);
+    const remaining = duration - currentTime;
     if (!Number.isFinite(remaining) || (remaining > QUEUE_ADVANCE_SECS && !video.ended)) return;
     this.playNextFromQueue(queueLength, invoke, video, false);
   }
@@ -856,6 +875,12 @@ export const SyncRoomPlugin: YTMDPlugin = {
       controller.requestControl(action, ctx.invoke);
     };
     window.addEventListener('click', onClick, true);
+    // Tells the user's own song picks apart from YTM switching by itself.
+    const onUserInput = (e: Event) => {
+      if (e.isTrusted) controller.noteUserInput();
+    };
+    window.addEventListener('pointerdown', onUserInput, true);
+    window.addEventListener('keydown', onUserInput, true);
     // YTM re-renders the player page on some navigations; put the queue
     // panel back and keep it in step with the selected tab.
     const panelPoll = setInterval(syncQueuePanel, QUEUE_PANEL_POLL_MS);
@@ -882,6 +907,8 @@ export const SyncRoomPlugin: YTMDPlugin = {
     cleanup = () => {
       unlistenPromises.forEach((p) => p.then((unlisten) => unlisten()));
       window.removeEventListener('click', onClick, true);
+      window.removeEventListener('pointerdown', onUserInput, true);
+      window.removeEventListener('keydown', onUserInput, true);
       clearInterval(panelPoll);
       setRoomNextOverride(null);
       controller.setRoomState(false, false);

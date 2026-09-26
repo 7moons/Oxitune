@@ -1,5 +1,6 @@
 import { invokeBackend } from './bridgeClient';
 import { isSyncGuest } from './syncRole';
+import { PlayerBridge } from './bridge';
 
 /**
  * Resume on launch. When the backend reopened the last song (the main
@@ -91,7 +92,7 @@ export function startResume(): void {
     };
     const fallback = setTimeout(done, 1000);
     video.addEventListener('seeked', done);
-    video.currentTime = target.position_secs;
+    PlayerBridge.seekTo(target.position_secs);
     if (target.autoplay) {
       void video.play().catch(() => undefined);
     } else {

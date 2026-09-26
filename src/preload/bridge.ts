@@ -1,6 +1,14 @@
 import { setPlayerVolumePercent } from './playerVolume';
 import { takeRoomNext } from './syncRole';
 
+/** The subset of YouTube's player API (`#movie_player`) YTMD calls. */
+export type MoviePlayer = HTMLElement & {
+  getVideoData?: () => { video_id?: string } | undefined;
+  getCurrentTime?: () => number;
+  getDuration?: () => number;
+  seekTo?: (seconds: number, allowSeekAhead?: boolean) => void;
+};
+
 export class PlayerBridge {
   static getVideo(): HTMLVideoElement | null {
     return document.querySelector('video') || document.querySelector('.html5-main-video');
@@ -66,9 +74,27 @@ export class PlayerBridge {
     }
   }
 
+  /** YTM's player (`#movie_player`); only the calls typed here are used. */
+  static getMoviePlayer(): MoviePlayer | null {
+    return document.getElementById('movie_player') as MoviePlayer | null;
+  }
+
+  /** Seeks the loaded song, through YTM's player like its own progress bar
+   * does. The video element's timeline is not the song's: YTM appends the
+   * next song to the same media stream, so `video.currentTime = 13` could
+   * land in the previous song, and YTM then jumped back to the start of
+   * the current one (a Listen Together guest heard the old song at 0:00). */
   static seekTo(seconds: number): void {
+    if (isNaN(seconds)) return;
+    const player = this.getMoviePlayer();
+    if (typeof player?.seekTo === 'function') {
+      const duration = player.getDuration?.();
+      const max = typeof duration === 'number' && duration > 0 ? duration : seconds;
+      player.seekTo(Math.max(0, Math.min(seconds, max)), true);
+      return;
+    }
     const video = this.getVideo();
-    if (video && !isNaN(seconds)) {
+    if (video) {
       video.currentTime = Math.max(0, Math.min(seconds, video.duration || seconds));
     }
   }

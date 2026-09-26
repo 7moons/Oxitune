@@ -20,6 +20,14 @@ type MoviePlayerElement = HTMLElement & {
   getVideoData?: () => { video_id?: string; title?: string } | undefined;
 };
 
+/** Position in the loaded song. YTM's player API, not `video.currentTime`:
+ * YTM appends the next song to the same media stream, so the video's
+ * timeline can be a whole song ahead of (or behind) the song's own. */
+function songTime(video: HTMLVideoElement): number {
+  const t = (document.getElementById('movie_player') as MoviePlayerElement | null)?.getCurrentTime?.();
+  return typeof t === 'number' && Number.isFinite(t) && t >= 0 ? t : video.currentTime;
+}
+
 /** How long a new song id may disagree with the MediaSession title before
  * the pair is reported anyway. Both switch on a song change, but not in the
  * same frame; reporting the half-switched pair put the old title next to the
@@ -93,7 +101,7 @@ export class PlayerObserver {
   private readonly handleVideoPause = () => this.handlePlaybackChange(false);
   private readonly handleVideoTimeUpdate = () => {
     if (!this.attachedVideo) return;
-    this.emitTick(this.attachedVideo.currentTime);
+    this.emitTick(songTime(this.attachedVideo));
   };
 
   private emitTick(current: number): void {
@@ -174,7 +182,7 @@ export class PlayerObserver {
       this.checkTrackUpdate();
       const video = document.querySelector('video');
       if (video && !video.paused && shouldFallbackTick(Date.now(), this.lastTickMs)) {
-        this.emitTick(video.currentTime);
+        this.emitTick(songTime(video));
       }
     }, 250);
   }
@@ -296,6 +304,7 @@ export class PlayerObserver {
 
     let durationSecs = 0;
     let currentTimeSecs = 0;
+    let apiTime = false;
 
     // Source A: moviePlayer API (instantaneous)
     if (moviePlayer && typeof moviePlayer.getDuration === 'function') {
@@ -308,14 +317,17 @@ export class PlayerObserver {
       const c = moviePlayer.getCurrentTime();
       if (typeof c === 'number' && Number.isFinite(c) && c >= 0) {
         currentTimeSecs = Math.floor(c);
+        apiTime = true;
       }
     }
 
-    // Source B: HTML5 video element
+    // Source B: HTML5 video element, only without the player API: its
+    // timeline isn't the song's once YTM appends the next song to it (see
+    // `songTime`), so a song at 0:00 must not read as the stream's 1:25.
     if (!durationSecs && video && Number.isFinite(video.duration) && video.duration > 0) {
       durationSecs = Math.floor(video.duration);
     }
-    if (!currentTimeSecs && video && Number.isFinite(video.currentTime) && video.currentTime >= 0) {
+    if (!apiTime && video && Number.isFinite(video.currentTime) && video.currentTime >= 0) {
       currentTimeSecs = Math.floor(video.currentTime);
     }
 
