@@ -283,6 +283,11 @@ bridge_commands! {
         tauri::async_runtime::spawn(async move { lyrics::commands::prefetch(&state, p).await });
         Ok(Value::Null)
     }
+    // "Search again" under the lyrics: forgets the playing song's cached
+    // answer and looks it up anew.
+    "refresh_lyrics" => |h, state, args| {
+        to_data(lyrics::commands::refresh(h, state).await?)
+    }
     "get_current_lyrics" => |h, state, args| {
         to_data(state.lyrics.current.lock().clone())
     }
@@ -530,6 +535,7 @@ mod tests {
             "send_sync_control",
             "fetch_lyrics",
             "prefetch_lyrics",
+            "refresh_lyrics",
             "get_current_lyrics",
             "set_lyrics_offset",
             "list_lyrics_candidates",

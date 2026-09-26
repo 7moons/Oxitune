@@ -351,6 +351,12 @@
           "markdownDescription": "Enables the check_for_updates command without any pre-configured scope."
         },
         {
+          "description": "Enables the clear_lyrics_cache command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-clear-lyrics-cache",
+          "markdownDescription": "Enables the clear_lyrics_cache command without any pre-configured scope."
+        },
+        {
           "description": "Enables the close_window command without any pre-configured scope.",
           "type": "string",
           "const": "allow-close-window",
@@ -703,6 +709,12 @@
           "type": "string",
           "const": "deny-check-for-updates",
           "markdownDescription": "Denies the check_for_updates command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the clear_lyrics_cache command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-clear-lyrics-cache",
+          "markdownDescription": "Denies the clear_lyrics_cache command without any pre-configured scope."
         },
         {
           "description": "Denies the close_window command without any pre-configured scope.",

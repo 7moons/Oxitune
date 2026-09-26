@@ -19,6 +19,7 @@
     "allow-import-settings",
     "allow-get-remote-info",
     "allow-regenerate-remote-token",
+    "allow-clear-lyrics-cache",
     "allow-get-app-version",
     "allow-check-for-updates",
     "allow-install-update",

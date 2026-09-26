@@ -113,6 +113,7 @@ export interface YTMDPlugin {
 export const COMMAND_PERMISSIONS: Record<string, Permission> = {
   fetch_lyrics: 'internal:lyrics',
   prefetch_lyrics: 'internal:lyrics',
+  refresh_lyrics: 'internal:lyrics',
   get_current_lyrics: 'internal:lyrics',
   set_lyrics_offset: 'internal:lyrics',
   list_lyrics_candidates: 'internal:lyrics',

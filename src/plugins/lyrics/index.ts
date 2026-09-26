@@ -636,8 +636,30 @@ function buildFooter(ctx: PluginContext, withOffset: boolean): HTMLElement {
       chip(t().lyricsReset, t().lyricsReset, () => shift(null))
     );
   }
-  footer.append(chip(t().lyricsWrong, t().lyricsPickTitle, () => void openPicker(ctx)));
+  footer.append(chip(t().lyricsWrong, t().lyricsPickTitle, () => void openPicker(ctx)), searchAgainChip(ctx));
   return footer;
+}
+
+function searchAgainChip(ctx: PluginContext): HTMLButtonElement {
+  return chip(t().lyricsSearchAgain, t().lyricsSearchAgainTip, () => void searchAgain(ctx));
+}
+
+/** Forgets the playing song's cached lyrics (a pick too) and looks again. */
+async function searchAgain(ctx: PluginContext) {
+  const songKey = currentSongKey;
+  loading = true;
+  renderCurrentLyrics(ctx);
+  try {
+    const result = toCurrentLyrics(await ctx.invoke('refresh_lyrics', {}, { timeoutMs: 15000 }));
+    if (!isCurrentSongKey(songKey, currentSongKey)) return;
+    loading = false;
+    applyLyrics(ctx, result);
+  } catch {
+    if (!isCurrentSongKey(songKey, currentSongKey)) return;
+    loading = false;
+    renderCurrentLyrics(ctx);
+    showToast(t().actionFailed);
+  }
 }
 
 async function openPicker(ctx: PluginContext) {
@@ -726,6 +748,10 @@ function renderCurrentLyrics(ctx: PluginContext): void {
 /** Footer for "nothing found": no source, just the picker. */
 function buildFooterNoSource(ctx: PluginContext): HTMLElement {
   const footer = createEl('div', { className: 'ytmd-native-lyrics-footer' });
-  footer.append(createEl('span', { className: 'ytmd-lyrics-source' }), chip(t().lyricsWrong, t().lyricsPickTitle, () => void openPicker(ctx)));
+  footer.append(
+    createEl('span', { className: 'ytmd-lyrics-source' }),
+    chip(t().lyricsWrong, t().lyricsPickTitle, () => void openPicker(ctx)),
+    searchAgainChip(ctx)
+  );
   return footer;
 }

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-clear-lyrics-cache"
+description = "Enables the clear_lyrics_cache command without any pre-configured scope."
+commands.allow = ["clear_lyrics_cache"]
+
+[[permission]]
+identifier = "deny-clear-lyrics-cache"
+description = "Denies the clear_lyrics_cache command without any pre-configured scope."
+commands.deny = ["clear_lyrics_cache"]

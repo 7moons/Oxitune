@@ -239,6 +239,37 @@ pub async fn fetch_with(
     set_current(ls, &q, lyrics, sink)
 }
 
+/// "Search again": forgets what is cached for the playing song (a pick too)
+/// and looks it up anew, for lyrics that are the right song but still wrong.
+pub async fn refresh_with(
+    ls: &LyricsState,
+    providers: &[Arc<dyn LyricsProvider>],
+    ytm_enabled: bool,
+    sink: &dyn LyricsSink,
+) -> Result<CurrentLyrics, String> {
+    let q = ls.current_query.lock().clone().ok_or("No song is playing")?;
+    if let Some(v) = q.video_id.as_deref() {
+        ls.cache.remove(v);
+    }
+    log::info!("[Oscilla Lyrics] {:?} \"{}\": searching again", q.video_id, q.title);
+    // Not "the song already showing" any more, so fetch_with looks it up.
+    ls.current_query.lock().take();
+    Ok(fetch_with(ls, providers, ytm_enabled, q, sink).await)
+}
+
+pub async fn refresh(app: &AppHandle, state: &AppState) -> Result<CurrentLyrics, String> {
+    let (providers, ytm_enabled) = configured_providers(state);
+    refresh_with(&state.lyrics, &providers, ytm_enabled, app).await
+}
+
+/// Settings: forgets every cached answer; returns how many there were.
+#[tauri::command]
+pub fn clear_lyrics_cache(state: State<'_, Arc<AppState>>) -> usize {
+    let removed = state.lyrics.cache.clear();
+    log::info!("[Oscilla Lyrics] cache cleared ({removed} songs)");
+    removed
+}
+
 pub fn set_offset(ls: &LyricsState, offset_secs: f64, sink: &dyn LyricsSink) -> Result<CurrentLyrics, String> {
     let q = ls.current_query.lock().clone().ok_or("No song is playing")?;
     let (vid, legacy) = offset_keys(&q);
@@ -463,6 +494,24 @@ mod tests {
         fetch_with(&ls, std::slice::from_ref(&p), true, query("vid1"), &sink).await;
         assert_eq!(calls.load(Ordering::SeqCst), 1);
         assert_eq!(ls.current_lyrics.lock().as_ref().map(|l| l.title.clone()).as_deref(), Some("Maniac"));
+    }
+
+    // Right song, wrong lyrics: "Search again" forgets the cached answer
+    // (even a pick) and looks the playing song up anew.
+    #[tokio::test]
+    async fn test_refresh_looks_the_playing_song_up_again() {
+        let (_d, ls) = state();
+        let sink = Recorder::default();
+        let (p, calls) = provider(Ok(vec![lyrics(ProviderId::Lrclib, true, false)]), 0);
+        assert!(refresh_with(&ls, std::slice::from_ref(&p), true, &sink).await.is_err(), "nothing playing yet");
+
+        fetch_with(&ls, std::slice::from_ref(&p), true, query("vid1"), &sink).await;
+        ls.cache.put("vid1", Some(&lyrics(ProviderId::Genius, false, true)), true, now_secs());
+        let again = refresh_with(&ls, std::slice::from_ref(&p), true, &sink).await.unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 2, "looked up anew, not served from the cache");
+        assert_eq!(again.provider.as_deref(), Some("lrclib"));
+        assert_eq!(ls.current.lock().video_id.as_deref(), Some("vid1"));
+        assert!(matches!(ls.cache.get("vid1", now_secs()), Some(Cached::Found { picked: false, .. })));
     }
 
     #[tokio::test]

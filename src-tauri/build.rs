@@ -13,6 +13,7 @@ const APP_COMMANDS: &[&str] = &[
     "save_config",
     "get_current_track",
     "get_current_lyrics",
+    "clear_lyrics_cache",
     "scan_local_music",
     "create_sync_room",
     "join_sync_room",

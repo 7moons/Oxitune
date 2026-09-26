@@ -439,6 +439,7 @@ pub fn run() {
             commands::save_config,
             commands::get_current_track,
             lyrics::commands::get_current_lyrics,
+            lyrics::commands::clear_lyrics_cache,
             commands::scan_local_music,
             commands::create_sync_room,
             commands::join_sync_room,

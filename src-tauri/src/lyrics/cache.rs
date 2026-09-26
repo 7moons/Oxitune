@@ -2,7 +2,8 @@
 //!
 //! Found lyrics are kept 30 days, "not found" 1 day (a provider may add
 //! them), a user's pick until evicted. The folder is held under 50 MB by
-//! deleting the oldest files first.
+//! deleting the oldest files first. An answer found under older matching
+//! rules (`RULES_VERSION`) is looked up again once.
 
 use super::Lyrics;
 use serde::{Deserialize, Serialize};
@@ -13,12 +14,23 @@ pub const MAX_AGE: Duration = Duration::from_secs(30 * 24 * 3600);
 pub const NOT_FOUND_AGE: Duration = Duration::from_secs(24 * 3600);
 pub const MAX_BYTES: u64 = 50 * 1024 * 1024;
 
+/// Bump whenever the matching rules or the providers change in a way that
+/// would find other lyrics: every answer cached under an older version is
+/// looked up again the next time its song plays, instead of being served
+/// for up to 30 days (or its "not found" for a day). A user's pick is kept.
+/// 1: results must be by the song's artist; synced lyrics of another length
+///    are plain; the song's tags are other names for its artist.
+pub const RULES_VERSION: u32 = 1;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Entry {
     saved_at: u64,
     #[serde(default)]
     picked: bool,
     lyrics: Option<Lyrics>,
+    /// `RULES_VERSION` when it was saved; missing (0) before there was one.
+    #[serde(default)]
+    rules: u32,
 }
 
 /// A cached answer: `Found`, or a remembered "no provider had it".
@@ -50,6 +62,9 @@ pub fn file_name(video_id: &str) -> Option<String> {
 fn fresh(entry: &Entry, now: u64) -> bool {
     if entry.picked {
         return true;
+    }
+    if entry.rules < RULES_VERSION {
+        return false;
     }
     let age = if entry.lyrics.is_some() { MAX_AGE } else { NOT_FOUND_AGE };
     now.saturating_sub(entry.saved_at) < age.as_secs()
@@ -102,15 +117,33 @@ impl LyricsCache {
             saved_at: now,
             picked,
             lyrics: lyrics.cloned(),
+            rules: RULES_VERSION,
         };
         let Ok(json) = serde_json::to_vec(&entry) else { return };
         if std::fs::create_dir_all(&self.dir).is_err() {
             return;
         }
-        let tmp = path.with_extension("json.tmp");
-        if std::fs::write(&tmp, json).is_ok() && std::fs::rename(&tmp, &path).is_ok() {
+        // Its own temp file per write: a look-ahead for the next song and
+        // that song starting can write the same entry at once.
+        if crate::secure_fs::write_private(&path, &json).is_ok() {
             self.enforce_cap(&path);
         }
+    }
+
+    /// Forgets one song's answer, the user's pick included ("Search again").
+    pub fn remove(&self, video_id: &str) {
+        if let Some(path) = self.path(video_id) {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+
+    /// Forgets every cached answer; returns how many there were.
+    pub fn clear(&self) -> usize {
+        let Ok(dir) = std::fs::read_dir(&self.dir) else { return 0 };
+        dir.flatten()
+            .filter(|e| e.path().extension().is_some_and(|x| x == "json"))
+            .filter(|e| std::fs::remove_file(e.path()).is_ok())
+            .count()
     }
 
     /// Evicts oldest-first; `just_written` always counts as the newest, since
@@ -175,6 +208,40 @@ mod tests {
         assert_eq!(cache.get("found", t0 + 30 * day + 1), None, "found expires after 30 days");
         assert!(cache.get("picked", t0 + 400 * day).is_some(), "a user's pick doesn't age out");
         assert_eq!(cache.get("never-saved", t0), None);
+    }
+
+    #[test]
+    fn test_answers_from_older_rules_are_looked_up_again_but_picks_stay() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = LyricsCache::new(dir.path().to_path_buf());
+        let l = serde_json::to_value(lyrics(ProviderId::Lrclib, true, false)).unwrap();
+        let write = |name: &str, entry: serde_json::Value| std::fs::write(dir.path().join(name), entry.to_string()).unwrap();
+        // Saved before entries had a rules version.
+        write("old.json", serde_json::json!({ "saved_at": 1, "picked": false, "lyrics": l }));
+        write("oldmiss.json", serde_json::json!({ "saved_at": 1, "lyrics": null }));
+        write("oldpick.json", serde_json::json!({ "saved_at": 1, "picked": true, "lyrics": l }));
+        assert_eq!(cache.get("old", 2), None);
+        assert_eq!(cache.get("oldmiss", 2), None);
+        assert!(cache.get("oldpick", 2).is_some(), "the user's own pick is kept");
+
+        cache.put("old", Some(&lyrics(ProviderId::Lrclib, true, false)), false, 2);
+        assert!(cache.get("old", 3).is_some(), "saved again under the current rules");
+    }
+
+    #[test]
+    fn test_remove_and_clear() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = LyricsCache::new(dir.path().to_path_buf());
+        let l = lyrics(ProviderId::Lrclib, true, false);
+        cache.put("a", Some(&l), true, 1);
+        cache.put("b", Some(&l), false, 1);
+        cache.put("c", None, false, 1);
+        cache.remove("a");
+        assert_eq!(cache.get("a", 2), None, "a pick is removed too");
+        cache.remove("../escape"); // never outside the folder, never panics
+        assert_eq!(cache.clear(), 2);
+        assert_eq!(cache.get("b", 2), None);
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
     }
 
     #[test]

@@ -790,6 +790,14 @@ document.addEventListener('DOMContentLoaded', () => {
       showToast(errorMessage(e));
     }
   });
+  $('lyrics-cache-clear-btn')?.addEventListener('click', async () => {
+    try {
+      const count = (await window.__TAURI__?.core.invoke('clear_lyrics_cache')) as number;
+      showToast(tr('settings.lyricsCache.done', { count: String(count ?? 0) }));
+    } catch (e) {
+      showToast(errorMessage(e));
+    }
+  });
   $('open-logs-btn')?.addEventListener('click', async () => {
     try {
       await window.__TAURI__?.core.invoke('open_logs_folder');
