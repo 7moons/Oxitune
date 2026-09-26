@@ -13,6 +13,7 @@ pub mod i18n;
 pub mod mpris;
 pub mod nav_policy;
 pub mod page_ipc;
+pub mod page_log;
 pub mod plugins;
 pub mod p2p_sync;
 pub mod power_manager;
@@ -191,6 +192,9 @@ pub fn run() {
                     path: logs_dir,
                     file_name: Some("oscilla".into()),
                 }))
+                // Local time, so a line can be matched with when something
+                // was heard (the default is UTC).
+                .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
                 .level(log::LevelFilter::Info)
                 .level_for("rumqttc", log::LevelFilter::Warn)
                 .level_for("tao", log::LevelFilter::Warn)

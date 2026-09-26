@@ -7,6 +7,9 @@ export type MoviePlayer = HTMLElement & {
   getCurrentTime?: () => number;
   getDuration?: () => number;
   seekTo?: (seconds: number, allowSeekAhead?: boolean) => void;
+  /** -1 unstarted, 0 ended, 1 playing, 2 paused, 3 buffering, 5 cued. */
+  getPlayerState?: () => number;
+  getPlayerResponse?: () => { playabilityStatus?: { status?: string; reason?: string } } | undefined;
 };
 
 export class PlayerBridge {

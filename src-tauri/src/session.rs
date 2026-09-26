@@ -163,10 +163,9 @@ impl SessionStore {
         }
         // Write-then-rename (a crash mid-write can't leave half a file),
         // owner-only: it says what the user listens to.
-        if crate::secure_fs::write_private(&self.path, json.as_bytes()).is_ok() {
-            *self.last_write.lock() = Some((now, snapshot.video_id.clone()));
-        } else {
-            log::warn!("[Oscilla Session] Could not save {}", self.path.display());
+        match crate::secure_fs::write_private(&self.path, json.as_bytes()) {
+            Ok(()) => *self.last_write.lock() = Some((now, snapshot.video_id.clone())),
+            Err(e) => log::warn!("[Oscilla Session] Could not save {}: {e}", self.path.display()),
         }
     }
 

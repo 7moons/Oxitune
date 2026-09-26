@@ -284,6 +284,39 @@ describe('RoomSyncController (guest)', () => {
     expect(video.currentTime).toBe(85);
   });
 
+  test('reports YouTube Music’s player time standing still while the video plays, once per song', () => {
+    let songTime = 0;
+    g.document = {
+      getElementById: (id: string) =>
+        id === 'movie_player'
+          ? {
+              classList: { contains: () => false },
+              getVideoData: () => ({ video_id: 'dQw4w9WgXcQ' }),
+              getCurrentTime: () => songTime,
+              getDuration: () => 76
+            }
+          : null,
+      querySelector: () => null
+    };
+    const c = guest();
+    const video = fakeVideo({ currentTime: 85 });
+    expect(c.checkPlayer(video)).toBe(false);
+    video.currentTime = 87;
+    expect(c.checkPlayer(video)).toBe(false); // not long enough yet
+    video.currentTime = 88.5;
+    expect(c.checkPlayer(video)).toBe(true);
+    video.currentTime = 95;
+    expect(c.checkPlayer(video)).toBe(false); // already reported for this song
+
+    const healthy = guest();
+    const v2 = fakeVideo({ currentTime: 10 });
+    for (let i = 0; i < 10; i++) {
+      songTime = i;
+      v2.currentTime = 10 + i;
+      expect(healthy.checkPlayer(v2)).toBe(false);
+    }
+  });
+
   test('YTM skipping a song by itself is not a request; the guest goes back to the host’s song', () => {
     const c = guest();
     c.handleRemotePlayback(payload({ timestamp_ms: 1_000 }), fakeVideo(), 1_000);

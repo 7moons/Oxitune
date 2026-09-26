@@ -7,6 +7,7 @@ import { t } from '../../preload/ui/i18n';
 import { setRoomNextOverride, setSyncGuest } from '../../preload/syncRole';
 import { canControl, MemberRole, roleOf, votesNeeded } from '../../preload/syncRoles';
 import { hideQueuePanel, queueAddFromMenuData, showQueuePanel, syncQueuePanel } from './queuePanel';
+import { pageLog, playerSnapshot } from '../../preload/diagLog';
 
 export interface SyncPlaybackPayload {
   video_id: string;
@@ -154,6 +155,13 @@ const AUTOPLAY_WINDOW_MS = 4000;
  * it skips to its own next song, and a DJ's page sent that skip to the
  * host, which skipped the song for the whole room. */
 const USER_PICK_WINDOW_MS = 8000;
+/** Guest: this many seeks within the window is a seek loop, logged with
+ * the player's state. */
+const SEEK_LOOP_COUNT = 3;
+const SEEK_LOOP_WINDOW_MS = 10_000;
+/** YouTube Music's player time not moving while the video plays on for
+ * this long means its state is broken (it showed 0:00 while a song played). */
+const PLAYER_STALL_SECS = 3;
 /** Guest: a seek never lands closer than this to the end of the song. At
  * the very end the video ends and YTM autoplays the guest's own next song,
  * not the host's. */
@@ -336,6 +344,14 @@ export class RoomSyncController {
   private nearEndAtMs = Number.NEGATIVE_INFINITY;
   /** Guest: when the user last clicked or pressed a key on the page. */
   private userInputAtMs = Number.NEGATIVE_INFINITY;
+  /** Guest, for the log: recent seeks, when a seek loop was last reported,
+   * and whether waiting for the host's next song was already reported. */
+  private recentSeeks: number[] = [];
+  private seekLoopWarnedAtMs = Number.NEGATIVE_INFINITY;
+  private waitingLogged = false;
+  /** Where YouTube Music's player time last stood still, to report it
+   * being stuck (once per song). */
+  private stall: { songId: string | null; songTime: number; videoTime: number; warned: boolean } | null = null;
   /** Guest: the song we last played to (nearly) the end. */
   private finished: { videoId: string; duration: number; atMs: number } | null = null;
   /** Guest: speed catch-up in progress, and what to restore after it. */
@@ -356,6 +372,10 @@ export class RoomSyncController {
     this.ownNavs.clear();
     this.requestedVideo = null;
     this.nearEndAtMs = Number.NEGATIVE_INFINITY;
+    this.recentSeeks = [];
+    this.seekLoopWarnedAtMs = Number.NEGATIVE_INFINITY;
+    this.waitingLogged = false;
+    this.stall = null;
     this.finished = null;
     this.endRateCorrection();
   }
@@ -386,10 +406,15 @@ export class RoomSyncController {
 
     const loaded = loadedPlayback(video);
     if (this.waitingForHostsNext(payload, loaded.videoId, video, now)) {
+      if (!this.waitingLogged) {
+        this.waitingLogged = true;
+        pageLog('info', 'sync', `guest: finished ${payload.video_id} before the host, waiting for its next song`);
+      }
       this.endRateCorrection();
       PlayerBridge.pause();
       return;
     }
+    this.waitingLogged = false;
 
     const local: LocalPlayback = {
       videoId: loaded.videoId,
@@ -407,6 +432,12 @@ export class RoomSyncController {
       const attempts = pending && pending.videoId === action.navigateTo ? pending.attempts + 1 : 1;
       this.pendingNav = { videoId: action.navigateTo, atMs: now, attempts };
       this.rememberOwnNav(action.navigateTo, now);
+      pageLog(
+        attempts > 1 ? 'warn' : 'info',
+        'sync',
+        `guest: host plays ${action.navigateTo} at ${payload.current_time_secs.toFixed(1)} s, we have ${loaded.videoId ?? 'nothing'}: ` +
+          (attempts > 1 ? `switch didn't take, full reload (attempt ${attempts}); ${playerSnapshot()}` : 'switching')
+      );
       // The old song keeps playing while the new one loads; if it ends
       // first, YTM autoplays its own next song over our navigation.
       PlayerBridge.pause();
@@ -426,6 +457,7 @@ export class RoomSyncController {
 
     if (action.seekTo !== null) {
       this.endRateCorrection();
+      this.logSeek(local.currentTime, action.seekTo, payload, now);
       PlayerBridge.seekTo(action.seekTo);
     } else {
       this.setCatchUpRate(video, action.playbackRate);
@@ -453,6 +485,23 @@ export class RoomSyncController {
     );
   }
 
+  /** One line per seek; a guest that keeps seeking is stuck in a loop
+   * (the sync and the player disagree on where it is), so that also gets
+   * a warning with the player's state, at most once per window. */
+  private logSeek(from: number, to: number, payload: SyncPlaybackPayload, now: number) {
+    this.recentSeeks = this.recentSeeks.filter((at) => now - at < SEEK_LOOP_WINDOW_MS);
+    this.recentSeeks.push(now);
+    pageLog(
+      'info',
+      'sync',
+      `guest: seek ${from.toFixed(1)} -> ${to.toFixed(1)} s (host ${payload.current_time_secs.toFixed(1)} s, ${payload.is_playing ? 'playing' : 'paused'})`
+    );
+    if (this.recentSeeks.length >= SEEK_LOOP_COUNT && now - this.seekLoopWarnedAtMs > SEEK_LOOP_WINDOW_MS) {
+      this.seekLoopWarnedAtMs = now;
+      pageLog('warn', 'sync', `guest: ${this.recentSeeks.length} seeks in ${SEEK_LOOP_WINDOW_MS / 1000} s; ${playerSnapshot()}`);
+    }
+  }
+
   private rememberOwnNav(videoId: string, now: number) {
     for (const [id, at] of this.ownNavs) {
       if (now - at > OWN_NAV_MEMORY_MS) this.ownNavs.delete(id);
@@ -467,6 +516,7 @@ export class RoomSyncController {
     }
     if (!this.rateCorrection || this.rateCorrection.video !== video) {
       this.endRateCorrection();
+      pageLog('info', 'sync', `guest: catching up at ${rate.toFixed(3)}x`);
       this.rateCorrection = { video, rate: video.playbackRate, preservesPitch: video.preservesPitch };
     }
     // A pitch shift would be audible; a 10% tempo change with pitch kept isn't.
@@ -493,6 +543,27 @@ export class RoomSyncController {
     }
   }
 
+  /** In a room: reports YouTube Music's player time standing still while
+   * the video plays on. The sync reads the player's time, so from there on
+   * it corrects against a wrong position (this was the seek-every-second
+   * loop). Returns whether it reported. */
+  public checkPlayer(video: HTMLVideoElement | null): boolean {
+    if (!this.inRoom || !video || video.paused || isAdPlaying()) {
+      this.stall = null;
+      return false;
+    }
+    const { videoId, currentTime } = loadedPlayback(video);
+    const s = this.stall;
+    if (!s || s.songId !== videoId || Math.abs(currentTime - s.songTime) > 0.05) {
+      this.stall = { songId: videoId, songTime: currentTime, videoTime: video.currentTime, warned: s?.songId === videoId && s.warned };
+      return false;
+    }
+    if (s.warned || video.currentTime - s.videoTime < PLAYER_STALL_SECS) return false;
+    s.warned = true;
+    pageLog('warn', 'player', `YouTube Music's player time is stuck while the video plays on; ${playerSnapshot()}`);
+    return true;
+  }
+
   /** Guest: the user clicked or pressed a key (trusted events only). */
   public noteUserInput(now = Date.now()) {
     this.userInputAtMs = now;
@@ -509,11 +580,16 @@ export class RoomSyncController {
     if (this.hostVideoId === null || videoId === this.hostVideoId) return null;
     const navAt = this.ownNavs.get(videoId);
     if (navAt !== undefined && now - navAt < OWN_NAV_MEMORY_MS) return null;
-    if (now - this.nearEndAtMs < AUTOPLAY_WINDOW_MS) return null;
+    const ignore = (why: string) => {
+      pageLog('info', 'sync', `guest: now on ${videoId}, host on ${this.hostVideoId}: ${why}, not sent; ${playerSnapshot()}`);
+      return null;
+    };
+    if (now - this.nearEndAtMs < AUTOPLAY_WINDOW_MS) return ignore('autoplay after the song ended');
     // Nobody picked it: the next host broadcast brings the host's song back.
-    if (now - this.userInputAtMs > USER_PICK_WINDOW_MS) return null;
+    if (now - this.userInputAtMs > USER_PICK_WINDOW_MS) return ignore('YouTube Music switched by itself');
     if (this.requestedVideo?.videoId === videoId) return null;
     this.requestedVideo = { videoId, atMs: now };
+    pageLog('info', 'sync', `guest: picked ${videoId} (host on ${this.hostVideoId}), asking the host to play it`);
     return { kind: 'play_video', video_id: videoId };
   }
 
@@ -527,13 +603,13 @@ export class RoomSyncController {
       invoke('vote_sync_skip')
         .then(() => this.notify(t().syncVotedSkip))
         .catch((e) => {
-          console.error('[Oscilla Room Sync] vote failed:', e);
+          pageLog('warn', 'sync', `vote to skip failed: ${String(e)}`);
           this.notify(t().actionFailed);
         });
       return;
     }
     invoke('send_sync_control', { action }).catch((e) => {
-      console.error('[Oscilla Room Sync] control request failed:', e);
+      pageLog('warn', 'sync', `request ${action.kind} to the host failed: ${String(e)}`);
       this.notify(t().actionFailed);
     });
   }
@@ -612,7 +688,7 @@ export class RoomSyncController {
         this.notify(t().syncFromQueue(next.title, next.added_by));
       })
       .catch((e) => {
-        console.error('[Oscilla Room Sync] playing from the shared queue failed:', e);
+        pageLog('warn', 'sync', `host: playing from the shared queue failed: ${String(e)}`);
         fallback();
       });
     return true;
@@ -650,7 +726,7 @@ export class RoomSyncController {
         is_playing: !video.paused,
         timestamp_ms: now
       }
-    }).catch((e) => console.error('[Oscilla Room Sync] broadcast failed:', e));
+    }).catch((e) => pageLog('warn', 'sync', `host: broadcast failed: ${String(e)}`));
   }
 }
 
@@ -674,7 +750,7 @@ function refreshQueuePanel() {
   const track = currentTrack;
   const act = (cmd: string) => (itemId: string) => {
     invoke(cmd, { itemId }).catch((e) => {
-      console.error(`[Oscilla Room Sync] ${cmd} failed:`, e);
+      pageLog('warn', 'sync', `${cmd} failed: ${String(e)}`);
       showToast(t().actionFailed);
     });
   };
@@ -693,7 +769,7 @@ function refreshQueuePanel() {
       remove: act('sync_queue_remove'),
       move: (itemId, toIndex) => {
         invoke('sync_queue_move', { itemId, toIndex }).catch((e) => {
-          console.error('[Oscilla Room Sync] sync_queue_move failed:', e);
+          pageLog('warn', 'sync', `sync_queue_move failed: ${String(e)}`);
           showToast(t().actionFailed);
         });
       }
@@ -720,7 +796,7 @@ function addToSharedQueue(add: { videoId: string | null; next: boolean }, invoke
   invoke('sync_queue_add', { input: add.videoId, next: add.next })
     .then(() => showToast(add.next ? t().syncQueuedNext : t().syncQueued))
     .catch((e) => {
-      console.error('[Oscilla Room Sync] adding to the shared queue failed:', e);
+      pageLog('warn', 'sync', `adding to the shared queue failed: ${String(e)}`);
       showToast(t().actionFailed);
     });
 }
@@ -902,7 +978,7 @@ export const SyncRoomPlugin: YTMDPlugin = {
           controller.handleRemotePlayback(room.playback_state, ctx.getVideoElement());
         }
       })
-      .catch((e) => console.error('[Oscilla Room Sync] failed to restore room state:', e));
+      .catch((e) => pageLog('warn', 'sync', `restoring the room after a page load failed: ${String(e)}`));
 
     cleanup = () => {
       unlistenPromises.forEach((p) => p.then((unlisten) => unlisten()));
@@ -926,6 +1002,12 @@ export const SyncRoomPlugin: YTMDPlugin = {
     if (!controller) return;
     currentTrack = track;
     refreshQueuePanel();
+    if (controller.isInRoom()) {
+      const playability = PlayerBridge.getMoviePlayer()?.getPlayerResponse?.()?.playabilityStatus;
+      if (playability?.status && playability.status !== 'OK') {
+        pageLog('warn', 'player', `${track.videoId ?? '?'} won't play here; ${playerSnapshot()}`);
+      }
+    }
     controller.broadcastLocalState(track, ctx.getVideoElement(), ctx.invoke, true);
     const request = controller.handleLocalTrackChange(track.videoId);
     if (request) controller.requestControl(request, ctx.invoke);
@@ -939,6 +1021,7 @@ export const SyncRoomPlugin: YTMDPlugin = {
     const video = ctx.getVideoElement();
     controllerRef?.broadcastLocalState(ctx.track, video, ctx.invoke);
     controllerRef?.noteLocalTick(video);
+    controllerRef?.checkPlayer(video);
     controllerRef?.advanceQueue(lastRoom?.queue?.length ?? 0, video, ctx.invoke);
   },
 

@@ -179,6 +179,13 @@ fn plugin_manager(h: &AppHandle) -> Arc<crate::plugins::PluginManager> {
 }
 
 #[derive(Deserialize)]
+struct PageLogArgs {
+    level: String,
+    scope: String,
+    message: String,
+}
+
+#[derive(Deserialize)]
 struct InhibitSleepArgs {
     inhibit: bool,
 }
@@ -430,6 +437,14 @@ bridge_commands! {
         }
         Ok(serde_json::json!({ "maximized": win.is_maximized().unwrap_or(false) }))
     }
+    // What the page did and saw, into ~/.oscilla/logs (page_log.rs caps
+    // the rate and cleans each line).
+    "page_log" => |h, state, args| {
+        let p: PageLogArgs = parse_args("page_log", args)?;
+        let level = crate::page_log::PageLevel::parse(&p.level).ok_or("Invalid arguments for `page_log`: level")?;
+        crate::page_log::write(level, &p.scope, &p.message);
+        Ok(Value::Null)
+    }
     "plugin_error" => |h, state, args| {
         let p: PluginErrorArgs = parse_args("plugin_error", args)?;
         to_data(plugin_manager(h).report_error(&p.id, &p.message))
@@ -531,6 +546,7 @@ mod tests {
             "remote_clients",
             "remote_publish",
             "remote_reply",
+            "page_log",
         ] {
             assert!(set.contains(cmd), "`{cmd}` missing from BRIDGE_COMMANDS");
         }

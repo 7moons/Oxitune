@@ -982,9 +982,17 @@ impl SyncRoomManager {
             };
             match room.member(member_id) {
                 Some(m) if m.role.can_control() => m.nickname.clone(),
-                _ => return,
+                Some(m) => {
+                    log::info!("Listen Together: dropped {action:?} from {} ({:?} can't control)", m.nickname, m.role);
+                    return;
+                }
+                None => {
+                    log::info!("Listen Together: dropped {action:?} from non-member {member_id}");
+                    return;
+                }
             }
         };
+        log::info!("Listen Together: {from} asks for {action:?}");
         sink.control_requested(&SyncControlRequest { from, action, source: ControlSource::Member });
     }
 
@@ -1990,6 +1998,7 @@ pub fn send_control(manager: &Arc<SyncRoomManager>, action: SyncControl) -> Resu
     }
     let guard = manager.guest.lock();
     let guest = guard.as_ref().ok_or(ERR_NOT_IN_ROOM)?;
+    log::info!("Listen Together: asking the host for {action:?}");
     guest
         .outbox
         .send(WireMessage::Control { user_id: guest.user_id.clone(), action })
