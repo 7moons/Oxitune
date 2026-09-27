@@ -9,6 +9,7 @@ import { createEl } from '../../utils/dom';
 import { ensureKitStyles, createIconButton, setIconButtonIcon } from './kit';
 import { t } from './i18n';
 import { invokeBackend } from '../bridgeClient';
+import { pageLog } from '../diagLog';
 
 const SLOT_ID = 'ytmd-window-controls';
 
@@ -61,7 +62,9 @@ const INTERACTIVE = [
 
 /** What the page may ask of its own window (`window_action` in bridge.rs):
  * the page has no Tauri window permissions of its own. */
-type WindowAction = 'minimize' | 'toggle_maximize' | 'close' | 'start_dragging' | 'state';
+type WindowAction =
+  | 'minimize' | 'toggle_maximize' | 'close' | 'start_dragging' | 'state'
+  | 'enter_fullscreen' | 'exit_fullscreen';
 
 async function windowAction(action: WindowAction): Promise<boolean> {
   const state = (await invokeBackend('window_action', { action })) as { maximized?: boolean } | null;
@@ -83,8 +86,24 @@ export function isDragTarget(target: EventTarget | null): boolean {
   return target.closest(INTERACTIVE) === null;
 }
 
+/** YTM's fullscreen player (album art or video) is on: by the Fullscreen API or its own attribute. */
+export function isPageFullscreen(): boolean {
+  return document.fullscreenElement != null ||
+    document.querySelector('ytmusic-player-page[player-fullscreened]') !== null;
+}
+
 let maxButton: HTMLButtonElement | null = null;
 let listenersInstalled = false;
+let windowFullscreen = false;
+
+/** The page's fullscreen only fills the webview; the window follows it so the taskbar goes too. */
+function syncWindowFullscreen(): void {
+  const wanted = isPageFullscreen();
+  if (wanted === windowFullscreen) return;
+  windowFullscreen = wanted;
+  windowAction(wanted ? 'enter_fullscreen' : 'exit_fullscreen')
+    .catch((e: unknown) => pageLog('warn', 'Window', `fullscreen ${wanted} failed: ${String(e)}`));
+}
 
 function renderMaximized(maximized: boolean): void {
   if (!maxButton) return;
@@ -113,6 +132,12 @@ function installListeners(): void {
   window.addEventListener('resize', () => {
     if (resizeTimer) clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => void syncMaximizeButton(), 150);
+  });
+  document.addEventListener('fullscreenchange', syncWindowFullscreen);
+  new MutationObserver(syncWindowFullscreen).observe(document.documentElement, {
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['player-fullscreened']
   });
 }
 

@@ -25,6 +25,7 @@ import { RemotePlugin } from '../plugins/remote';
 import { MediaProgress, MediaToolsProgress, TrackInfo } from '../plugins/types';
 import { configureNavMenu, mountNavMenu } from './ui/navMenu';
 import { mountWindowControls } from './ui/windowControls';
+import { installPlayerBarEdges, syncPlayerBarEdges } from './ui/playerBarEdges';
 import { ICONS, showToast } from './ui/kit';
 import { t } from './ui/i18n';
 import { invokeBackend, pageEvents } from './bridgeClient';
@@ -87,7 +88,9 @@ async function initYTMD() {
   const mountNavBar = () => {
     mountNavMenu();
     mountWindowControls();
+    syncPlayerBarEdges();
   };
+  installPlayerBarEdges();
   mountNavBar();
   const navMenuPoll = setInterval(mountNavBar, 1000);
   // No other teardown path exists for this injected script today (its
