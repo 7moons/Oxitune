@@ -446,45 +446,11 @@ bridge_commands! {
             "close" => win.close().map_err(|e| e.to_string())?,
             "start_dragging" => win.start_dragging().map_err(|e| e.to_string())?,
             // YTM's fullscreen player. Tauri already makes the window fullscreen
-            // for the Fullscreen API (not for YTM's attribute alone), but tao keeps
-            // a maximized undecorated window's client area to the monitor's work
-            // area even then: a black band where the taskbar was. So the window
-            // leaves maximized while fullscreen and gets it back afterwards.
-            "enter_fullscreen" | "exit_fullscreen" => {
-                static WAS_MAXIMIZED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-                use std::sync::atomic::Ordering;
-                if p.action == "enter_fullscreen" {
-                    let maximized = win.is_maximized().unwrap_or(false);
-                    WAS_MAXIMIZED.store(maximized, Ordering::Relaxed);
-                    // The restore lands on the event loop; the rest waits for it,
-                    // off this thread so the loop can run.
-                    let win = win.clone();
-                    std::thread::spawn(move || {
-                        if maximized {
-                            let _ = win.unmaximize();
-                            for _ in 0..50 {
-                                if !win.is_maximized().unwrap_or(false) {
-                                    break;
-                                }
-                                std::thread::sleep(std::time::Duration::from_millis(10));
-                            }
-                        }
-                        let _ = win.set_fullscreen(true);
-                        // Restoring a fullscreen window shrinks it to its normal
-                        // size, and tao's own move to the monitor is asynchronous;
-                        // this puts it over the whole monitor.
-                        if let Ok(Some(monitor)) = win.current_monitor() {
-                            let _ = win.set_position(*monitor.position());
-                            let _ = win.set_size(*monitor.size());
-                        }
-                    });
-                } else {
-                    win.set_fullscreen(false).map_err(|e| e.to_string())?;
-                    if WAS_MAXIMIZED.swap(false, Ordering::Relaxed) {
-                        win.maximize().map_err(|e| e.to_string())?;
-                    }
-                }
-            }
+            // for the Fullscreen API, not for YTM's attribute alone; a no-op when
+            // it already is. A maximized window stays maximized underneath
+            // (fullscreen.rs makes it cover the taskbar all the same).
+            "enter_fullscreen" => win.set_fullscreen(true).map_err(|e| e.to_string())?,
+            "exit_fullscreen" => win.set_fullscreen(false).map_err(|e| e.to_string())?,
             "state" => {}
             other => return Err(format!("unknown window action: {other}")),
         }

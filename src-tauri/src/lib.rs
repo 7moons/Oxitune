@@ -6,6 +6,7 @@ pub mod config;
 pub mod connectivity;
 pub mod crash;
 pub mod discord_rpc;
+pub mod fullscreen;
 pub mod join_link;
 pub mod local_files;
 pub mod lyrics;
@@ -378,6 +379,8 @@ pub fn run() {
 
             // Windows: prev/play/next under the taskbar preview.
             thumbbar::install(&handle, &main_win);
+            // Windows: fullscreen covers the whole monitor, taskbar included.
+            fullscreen::install(&main_win);
 
             // Initialize MPRIS (needs the main window's HWND on Windows)
             let mpris_manager = MprisManager::new(handle.clone(), &main_win);
