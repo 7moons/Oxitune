@@ -119,6 +119,31 @@ export function wordProgress(words: LyricsWord[], i: number, time: number, lineE
   return Math.min(1, (time - word.t) / (end - word.t));
 }
 
+/** Roughly how long a sung character takes, for lines timed only as a whole. */
+const SECS_PER_CHAR = 0.11;
+const MIN_SWEEP_SECS = 1.5;
+
+/** Word timing made up for a line that is only timed as a whole (most
+ * LRC lyrics), so it fills like a word-timed one instead of only turning
+ * white: the words share the line's time by their length. The sweep takes
+ * the time until `endSecs` (the next line), but no longer than singing
+ * the text plausibly takes, so a line before a long pause isn't crawled
+ * through. An estimate: it shows the pace, not each word's true moment. */
+export function estimateWords(text: string, startSecs: number, endSecs: number): LyricsWord[] {
+  const parts = text.match(/\S+\s*/g) ?? [];
+  const lengths = parts.map((p) => Math.max(1, p.trim().length));
+  const chars = lengths.reduce((a, b) => a + b, 0);
+  if (chars === 0 || !(endSecs > startSecs)) return [];
+  const duration = Math.min((endSecs - startSecs) * 0.92, Math.max(MIN_SWEEP_SECS, chars * SECS_PER_CHAR));
+  let t = startSecs;
+  return parts.map((part, i) => {
+    const end = t + (duration * lengths[i]) / chars;
+    const word = { t, text: part, end };
+    t = end;
+    return word;
+  });
+}
+
 /** A stretch with no singing, long enough to show as an interlude. */
 export interface LyricsGap {
   /** The line it comes before; `lines.length` is never used (no outro dots). */

@@ -8,6 +8,7 @@ import { LYRICS_CSS } from '../plugins/lyrics/styles';
 import {
   LyricsLine,
   MIN_GAP_SECS,
+  estimateWords,
   findGaps,
   lineEnd,
   shownLines,
@@ -49,6 +50,34 @@ describe('wordProgress', () => {
     expect(wordProgress(broken, 0, 5.01)).toBeGreaterThan(0);
     expect(wordProgress(broken, 0, 6)).toBe(1);
     expect(wordProgress(broken, 7, 6)).toBe(0);
+  });
+});
+
+// Lines timed only as a whole (LRCLIB) used to just turn white: no fill.
+describe('estimated words for a line timed as a whole', () => {
+  test('the words share the time until the next line by their length', () => {
+    const words = estimateWords('One three  go', 10, 11);
+    expect(words.map((w) => w.text)).toEqual(['One ', 'three  ', 'go']);
+    expect(words.map((w) => w.text).join('')).toBe('One three  go');
+    expect(words[0].t).toBe(10);
+    // 3 + 5 + 2 characters over 92% of the second the line has.
+    expect(words[0].end).toBeCloseTo(10 + 0.92 * 0.3);
+    expect(words[1].t).toBe(words[0].end as number);
+    expect(words[2].end).toBeCloseTo(10.92);
+    expect(wordProgress(words, 1, (words[1].t + (words[1].end as number)) / 2)).toBeCloseTo(0.5);
+  });
+
+  test('a line before a long pause is not crawled through', () => {
+    const words = estimateWords('Twelve chars', 10, 70);
+    expect(words.at(-1)?.end).toBeCloseTo(11.5);
+    const long = estimateWords('x'.repeat(40), 10, 70);
+    expect(long.at(-1)?.end).toBeCloseTo(10 + 40 * 0.11);
+  });
+
+  test('text without spaces is one word; nothing to time is no words', () => {
+    expect(estimateWords('\u6B4C\u8A5E\u306E\u4E00\u884C', 5, 8)).toHaveLength(1);
+    expect(estimateWords('   ', 5, 8)).toEqual([]);
+    expect(estimateWords('late', 8, 8)).toEqual([]);
   });
 });
 

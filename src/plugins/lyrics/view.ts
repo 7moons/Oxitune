@@ -13,6 +13,7 @@ import {
   LyricsGap,
   LyricsWord,
   activeLineIndex,
+  estimateWords,
   findGaps,
   lineEnd,
   wordProgress
@@ -144,7 +145,9 @@ export class LyricsView {
         const el = createEl('div', { className: 'ytmd-lyric-line' });
         el.dataset.line = String(i);
         if (line.alt) el.classList.add('ytmd-alt');
-        const main = this.buildText('ytmd-lyric-main', line.text, line.words);
+        // A line timed only as a whole still fills, at an estimated pace.
+        const words = line.words?.length ? line.words : estimateWords(line.text, line.t, lineEnd(lyrics.synced, i));
+        const main = this.buildText('ytmd-lyric-main', line.text, words);
         el.append(main.el);
         let bg: WordRun | null = null;
         if (line.bg) {
