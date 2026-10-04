@@ -167,7 +167,7 @@ export const LYRICS_CSS = `
 
   .ytmd-chip.ytmd-lyrics-resume {
     position: sticky;
-    bottom: 24px;
+    bottom: 76px;
     align-self: center;
     margin-top: 12px;
     background: var(--ytmd-surface, #212121);
@@ -182,27 +182,52 @@ export const LYRICS_CSS = `
     font: 400 16px/24px var(--ytmd-font, Roboto, Arial, sans-serif);
     color: var(--ytmd-text-secondary, rgba(255, 255, 255, 0.7));
   }
-  .ytmd-native-lyrics-footer {
+  /* The controls: one pill that stays at the bottom of the tab while the
+     lyrics scroll under it. Opaque: lines must not show through it. */
+  .ytmd-lyrics-bar {
+    position: sticky;
+    bottom: 16px;
+    z-index: 2;
     display: flex;
-    flex-wrap: wrap;
     align-items: center;
-    gap: 8px;
-    margin-top: 32px;
+    gap: 2px;
+    align-self: stretch;
+    margin-top: 40px;
+    padding: 4px 6px 4px 16px;
+    border-radius: 24px;
+    background: var(--ytmd-surface, #212121);
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
     font: 400 12px/16px var(--ytmd-font, Roboto, Arial, sans-serif);
     color: var(--ytmd-text-secondary, rgba(255, 255, 255, 0.7));
   }
-  .ytmd-native-lyrics-footer .ytmd-lyrics-source { flex: 1 1 100%; }
-  .ytmd-native-lyrics-footer a.ytmd-lyrics-source { color: inherit; text-decoration: none; }
-  .ytmd-native-lyrics-footer a.ytmd-lyrics-source:hover { text-decoration: underline; }
-  .ytmd-lyrics-footer-group { display: inline-flex; align-items: center; gap: 8px; }
+  .ytmd-lyrics-bar .ytmd-lyrics-source {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: inherit;
+    text-decoration: none;
+  }
+  .ytmd-lyrics-bar a.ytmd-lyrics-source:hover { text-decoration: underline; }
+  .ytmd-lyrics-bar .ytmd-icon-btn { width: 36px; height: 36px; flex: none; }
+  .ytmd-lyrics-bar .ytmd-icon-btn svg { width: 20px; height: 20px; }
   /* A switch that is on looks like YTM's selected chip. */
-  .ytmd-chip[aria-pressed="true"] { background: var(--ytmd-text, #fff); color: #030303; }
+  .ytmd-lyrics-bar .ytmd-icon-btn[aria-pressed="true"] { background: var(--ytmd-text, #fff); color: #030303; }
+  .ytmd-lyrics-bar-sep { flex: none; width: 1px; height: 20px; margin: 0 6px; background: var(--ytmd-divider, rgba(255, 255, 255, 0.1)); }
   .ytmd-lyrics-offset-value {
-    min-width: 56px;
+    all: unset;
+    flex: none;
+    min-width: 48px;
     text-align: center;
+    font: 500 12px/36px var(--ytmd-font, Roboto, Arial, sans-serif);
     font-variant-numeric: tabular-nums;
     color: var(--ytmd-text, #fff);
+    cursor: pointer;
+    border-radius: 18px;
   }
+  .ytmd-lyrics-offset-value:hover { background: var(--ytmd-hover, rgba(255, 255, 255, 0.1)); }
+  .ytmd-lyrics-offset-value:focus-visible { outline: 2px solid var(--ytmd-text, #fff); outline-offset: -2px; }
   .ytmd-lyrics-pick-list { display: flex; flex-direction: column; margin: 8px -24px 0; max-height: 50vh; overflow-y: auto; }
   .ytmd-lyrics-pick-list .ytmd-menu-item { width: 100%; text-align: left; }
 

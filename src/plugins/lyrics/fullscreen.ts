@@ -44,6 +44,63 @@ export function seekTarget(x: number, left: number, width: number, durationSecs:
   return Math.max(0, Math.min(1, (x - left) / width)) * durationSecs;
 }
 
+/** YTM's button into its fullscreen player (on the cover, player page). */
+const YTM_ENTER = 'ytmusic-player .fullscreen-button';
+const YTM_EXIT = '.exit-fullscreen-button';
+/** YTM's fullscreen player is on (however it was reached). */
+const YTM_FULLSCREEN =
+  'ytmusic-player-page[player-fullscreened], ytmusic-app-layout[player-ui-state="FULLSCREEN"], ytmusic-player[player-ui-state="FULLSCREEN"]';
+/** How often YTM's fullscreen is looked for when a way in wasn't caught. */
+const TAKEOVER_POLL_MS = 300;
+
+/** YTM's fullscreen shortcut: a bare F. */
+export function isFullscreenKey(e: Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'altKey' | 'metaKey' | 'shiftKey' | 'repeat'>): boolean {
+  return (e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey && !e.repeat;
+}
+
+/** Whether a key press there is typing (the search box, a comment), not a shortcut. */
+export function isTypingTarget(target: { tagName?: string; isContentEditable?: boolean } | null): boolean {
+  if (!target) return false;
+  return target.isContentEditable === true || ['INPUT', 'TEXTAREA', 'SELECT'].includes((target.tagName ?? '').toUpperCase());
+}
+
+/**
+ * Makes the lyrics view the app's fullscreen: YTM's fullscreen button and
+ * its F shortcut are caught before YTM sees them, and if YTM's fullscreen
+ * player comes up some other way (a double click on the cover) it is left
+ * through YTM's own exit button and replaced. Returns the undo.
+ */
+export function takeOverFullscreen(view: { isOpen: () => boolean; open: () => void; close: () => void }): () => void {
+  const toggle = () => (view.isOpen() ? view.close() : view.open());
+  const swallow = (e: Event) => {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+  };
+  const onClick = (e: MouseEvent) => {
+    if (!(e.target instanceof Element) || !e.target.closest(YTM_ENTER)) return;
+    swallow(e);
+    view.open();
+  };
+  const onKey = (e: KeyboardEvent) => {
+    if (!isFullscreenKey(e) || isTypingTarget(e.target as HTMLElement | null)) return;
+    swallow(e);
+    toggle();
+  };
+  const poll = window.setInterval(() => {
+    if (view.isOpen() || !document.querySelector(YTM_FULLSCREEN)) return;
+    const exit = Array.from(document.querySelectorAll<HTMLElement>(YTM_EXIT)).find((el) => el.offsetParent !== null);
+    exit?.click();
+    view.open();
+  }, TAKEOVER_POLL_MS);
+  document.addEventListener('click', onClick, true);
+  document.addEventListener('keydown', onKey, true);
+  return () => {
+    clearInterval(poll);
+    document.removeEventListener('click', onClick, true);
+    document.removeEventListener('keydown', onKey, true);
+  };
+}
+
 export class LyricsFullscreen {
   readonly view: LyricsView;
   private readonly root: HTMLElement;

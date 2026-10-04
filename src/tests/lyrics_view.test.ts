@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DEFAULT_PREFS, carriedPosition, lyricsStamp, readPrefs } from '../plugins/lyrics';
 import { LYRICS_THEMES, activeGapIndex, litDots, plainLineAt, toTheme } from '../plugins/lyrics/view';
-import { formatClock, seekTarget } from '../plugins/lyrics/fullscreen';
+import { formatClock, isFullscreenKey, isTypingTarget, seekTarget } from '../plugins/lyrics/fullscreen';
 import { LYRICS_CSS } from '../plugins/lyrics/styles';
 import {
   LyricsLine,
@@ -237,6 +237,25 @@ describe('lyrics looks', () => {
     expect(wordRules[0]).toContain('var(--ytmd-fill, 0)');
     expect(wordRules[0].split('{')[1]).not.toContain('transition');
     expect(LYRICS_CSS).not.toContain('ytmd-sung');
+  });
+});
+
+describe('fullscreen takeover', () => {
+  const key = (over: Partial<KeyboardEvent>) => ({ key: 'f', ctrlKey: false, altKey: false, metaKey: false, shiftKey: false, repeat: false, ...over });
+  test('a bare F is the fullscreen shortcut', () => {
+    expect(isFullscreenKey(key({}))).toBe(true);
+    expect(isFullscreenKey(key({ key: 'F' }))).toBe(true);
+    for (const other of [{ ctrlKey: true }, { altKey: true }, { metaKey: true }, { shiftKey: true }, { repeat: true }, { key: 'g' }]) {
+      expect(isFullscreenKey(key(other))).toBe(false);
+    }
+  });
+
+  test('typing an F in the search box is not the shortcut', () => {
+    expect(isTypingTarget({ tagName: 'INPUT' })).toBe(true);
+    expect(isTypingTarget({ tagName: 'textarea' })).toBe(true);
+    expect(isTypingTarget({ tagName: 'DIV', isContentEditable: true })).toBe(true);
+    expect(isTypingTarget({ tagName: 'DIV' })).toBe(false);
+    expect(isTypingTarget(null)).toBe(false);
   });
 });
 

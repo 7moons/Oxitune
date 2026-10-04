@@ -1,7 +1,7 @@
 import { YTMDPlugin, PluginContext, TrackInfo, PluginManifest } from '../types';
 import manifest from './manifest.json';
 import { createEl } from '../../utils/dom';
-import { ICONS, ensureKitStyles, icon, openDialog, showToast } from '../../preload/ui/kit';
+import { ICONS, createIconButton, ensureKitStyles, openDialog, showToast } from '../../preload/ui/kit';
 import { t } from '../../preload/ui/i18n';
 import { PlayerBridge } from '../../preload/bridge';
 import { isSyncGuest } from '../../preload/syncRole';
@@ -9,7 +9,7 @@ import { nextInQueue, songTags } from './songInfo';
 import { CurrentLyrics, EMPTY_LYRICS, LyricsCandidate, providerName, toCurrentLyrics, toLineTexts } from '../../types/lyrics';
 import { LYRICS_CSS } from './styles';
 import { LyricsExtras, LyricsTheme, LyricsView, NO_EXTRAS, toTheme } from './view';
-import { LyricsFullscreen } from './fullscreen';
+import { LyricsFullscreen, takeOverFullscreen } from './fullscreen';
 
 /** Lyrics come from the backend (src-tauri/src/lyrics), already parsed and
  * merged across providers; this plugin only shows them: in YTM's Lyrics
@@ -164,6 +164,13 @@ export const LyricsPlugin: YTMDPlugin = {
     });
     fullscreen.view.setEffects(prefs.effects);
     fullscreen.view.setTheme(prefs.theme);
+    // Every way into fullscreen (YTM's button on the cover, the F key, a
+    // double click) opens this view instead of YTM's fullscreen player.
+    const releaseFullscreen = takeOverFullscreen({
+      isOpen: () => fullscreen?.isOpen === true,
+      open: () => openFullscreen(ctx),
+      close: () => fullscreen?.close()
+    });
 
     const style = document.createElement('style');
     style.id = 'ytmd-native-lyrics-styles';
@@ -235,6 +242,7 @@ export const LyricsPlugin: YTMDPlugin = {
       document.removeEventListener('click', onTabClick, true);
       unlisten?.then((fn) => fn()).catch(() => undefined);
       unlistenConfig?.then((fn) => fn()).catch(() => undefined);
+      releaseFullscreen();
       fullscreen?.close();
       fullscreen = null;
       tabView = null;
@@ -710,30 +718,15 @@ function ensureLyricsMounted(ctx: PluginContext): void {
   updateLyricsVisibility();
 }
 
-function chip(text: string, tooltip: string, onClick: () => void, iconPath?: string): HTMLButtonElement {
-  const btn = createEl('button', { className: 'ytmd-chip', text });
-  btn.type = 'button';
-  if (iconPath) btn.prepend(icon(iconPath, 18));
-  btn.dataset.ytmdTooltip = tooltip;
-  btn.setAttribute('aria-label', tooltip);
+function barButton(label: string, iconPath: string, onClick: () => void, pressed?: boolean): HTMLButtonElement {
+  const btn = createIconButton({ label, iconPath, muted: true });
+  if (pressed !== undefined) btn.setAttribute('aria-pressed', String(pressed));
   btn.addEventListener('click', onClick);
   return btn;
 }
 
-/** A chip that is a switch: on looks like YTM's selected chip. */
-function switchChip(text: string, tooltip: string, on: boolean, iconPath: string, onClick: () => void): HTMLButtonElement {
-  const btn = chip(text, tooltip, onClick, iconPath);
-  btn.setAttribute('aria-pressed', String(on));
-  return btn;
-}
-
-function group(...nodes: Node[]): HTMLElement {
-  const el = createEl('span', { className: 'ytmd-lyrics-footer-group' });
-  el.append(...nodes);
-  return el;
-}
-
 function sourceLabel(): HTMLElement {
+  if (!lyrics.provider) return createEl('span', { className: 'ytmd-lyrics-source' });
   const text = t().lyricsSource(providerName(lyrics.provider, t().lyricsLocalFiles));
   if (lyrics.source_url) {
     const link = createEl('a', { className: 'ytmd-lyrics-source', text });
@@ -745,39 +738,44 @@ function sourceLabel(): HTMLElement {
   return createEl('span', { className: 'ytmd-lyrics-source', text });
 }
 
-function buildFooter(ctx: PluginContext, withOffset: boolean): HTMLElement {
-  const footer = createEl('div', { className: 'ytmd-native-lyrics-footer' });
-  footer.append(
-    sourceLabel(),
-    group(
-      switchChip(t().lyricsTranslate, t().lyricsTranslateTip, prefs.translate, ICONS.translate, () => toggleDisplay(ctx, 'translate')),
-      switchChip(t().lyricsRomanize, t().lyricsRomanizeTip, prefs.romanize, ICONS.romanize, () => toggleDisplay(ctx, 'romanize')),
-      chip(t().lyricsFullscreen, t().lyricsFullscreenTip, () => openFullscreen(ctx), ICONS.fullscreen)
-    )
-  );
-  if (withOffset) {
-    const valDisplay = createEl('span', { className: 'ytmd-lyrics-offset-value', text: formatOffset(lyrics.offset_secs) });
+/** The one row of controls under the lyrics: where they came from, the
+ * translate and romanize switches, the timing nudge (timed lyrics only),
+ * and the two ways out of wrong lyrics. Icons with tooltips, like YTM's
+ * player bar; fullscreen is YTM's own button (see takeOverFullscreen). */
+function buildBar(ctx: PluginContext): HTMLElement {
+  const bar = createEl('div', { className: 'ytmd-lyrics-bar' });
+  const separator = () => createEl('span', { className: 'ytmd-lyrics-bar-sep' });
+  bar.append(sourceLabel());
+  if (hasText()) {
+    bar.append(
+      barButton(t().lyricsTranslateTip, ICONS.translate, () => toggleDisplay(ctx, 'translate'), prefs.translate),
+      barButton(t().lyricsRomanizeTip, ICONS.romanize, () => toggleDisplay(ctx, 'romanize'), prefs.romanize),
+      separator()
+    );
+  }
+  if (lyrics.synced.length > 0) {
     const shift = (delta: number | null) => {
       const next = delta === null ? 0 : Math.round((lyrics.offset_secs + delta) * 10) / 10;
       ctx.invoke('set_lyrics_offset', { offsetSecs: next }).catch((e) => console.warn('[Oscilla Lyrics] offset:', e));
     };
     // Positive offset = lyrics run ahead of the audio (see LyricsView.update()).
-    footer.append(
-      group(
-        createEl('span', { text: t().lyricsOffset }),
-      chip('−0.5 s', t().lyricsLater, () => shift(-0.5)),
-      valDisplay,
-      chip('+0.5 s', t().lyricsEarlier, () => shift(0.5)),
-        chip(t().lyricsReset, t().lyricsReset, () => shift(null))
-      )
+    const value = createEl('button', { className: 'ytmd-lyrics-offset-value', text: formatOffset(lyrics.offset_secs) });
+    value.type = 'button';
+    value.dataset.ytmdTooltip = t().lyricsResetTip;
+    value.setAttribute('aria-label', t().lyricsResetTip);
+    value.addEventListener('click', () => shift(null));
+    bar.append(
+      barButton(t().lyricsLater, ICONS.remove, () => shift(-0.5)),
+      value,
+      barButton(t().lyricsEarlier, ICONS.add, () => shift(0.5)),
+      separator()
     );
   }
-  footer.append(group(chip(t().lyricsWrong, t().lyricsPickTitle, () => void openPicker(ctx)), searchAgainChip(ctx)));
-  return footer;
-}
-
-function searchAgainChip(ctx: PluginContext): HTMLButtonElement {
-  return chip(t().lyricsSearchAgain, t().lyricsSearchAgainTip, () => void searchAgain(ctx));
+  bar.append(
+    barButton(t().lyricsWrong, ICONS.swap, () => void openPicker(ctx)),
+    barButton(t().lyricsSearchAgainTip, ICONS.refresh, () => void searchAgain(ctx))
+  );
+  return bar;
 }
 
 /** Forgets the playing song's cached lyrics (a pick too) and looks again. */
@@ -857,21 +855,10 @@ function renderCurrentLyrics(ctx: PluginContext): void {
   if (loading) {
     wrapper.replaceChildren(createEl('div', { className: 'ytmd-native-lyrics-status', text: t().lyricsLoading }));
   } else if (hasText() && tabView) {
-    wrapper.replaceChildren(tabView.root, buildFooter(ctx, lyrics.synced.length > 0));
+    wrapper.replaceChildren(tabView.root, buildBar(ctx));
   } else {
     const nodes: Node[] = [createEl('div', { className: 'ytmd-native-lyrics-status', text: t().lyricsNone })];
-    if (currentTrack) nodes.push(buildFooterNoSource(ctx));
+    if (currentTrack) nodes.push(buildBar(ctx));
     wrapper.replaceChildren(...nodes);
   }
-}
-
-/** Footer for "nothing found": no source, just the picker. */
-function buildFooterNoSource(ctx: PluginContext): HTMLElement {
-  const footer = createEl('div', { className: 'ytmd-native-lyrics-footer' });
-  footer.append(
-    createEl('span', { className: 'ytmd-lyrics-source' }),
-    chip(t().lyricsWrong, t().lyricsPickTitle, () => void openPicker(ctx)),
-    searchAgainChip(ctx)
-  );
-  return footer;
 }
