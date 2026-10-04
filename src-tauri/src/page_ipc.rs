@@ -66,6 +66,11 @@ pub const PAGE_EVENTS: &[&str] = &[
 /// Discord settings stay out.
 pub const PAGE_CONFIG_KEYS: &[&str] = &[
     "lyrics_enabled",
+    "lyrics_translate_enabled",
+    "lyrics_translate_lang",
+    "lyrics_romanize_enabled",
+    "lyrics_auto_open",
+    "lyrics_effects",
     "notifications_enabled",
     "remote_enabled",
     "wheel_volume_step",
@@ -188,6 +193,11 @@ mod tests {
         }
         assert!(obj.contains_key("equalizer_gains"));
         assert!(obj.contains_key("custom_css"));
+        // What the lyrics view needs; the provider list stays in the backend.
+        for key in ["lyrics_translate_enabled", "lyrics_translate_lang", "lyrics_romanize_enabled", "lyrics_auto_open", "lyrics_effects"] {
+            assert!(obj.contains_key(key), "{key} missing from the page's config");
+        }
+        assert!(!obj.contains_key("lyrics_providers"));
     }
 
     #[test]

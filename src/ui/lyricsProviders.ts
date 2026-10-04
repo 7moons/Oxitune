@@ -10,12 +10,14 @@ export interface ProviderSetting {
   enabled: boolean;
 }
 
-export const LYRICS_PROVIDER_IDS = ['local', 'lrclib', 'musixmatch', 'netease', 'ytm', 'genius'] as const;
+export const LYRICS_PROVIDER_IDS = ['local', 'lrcred', 'lrclib', 'unison', 'musixmatch', 'netease', 'ytm', 'genius'] as const;
 /** Unofficial APIs, off unless the user turns them on. */
-export const UNOFFICIAL_PROVIDERS = new Set(['musixmatch', 'netease']);
+export const UNOFFICIAL_PROVIDERS = new Set(['unison', 'musixmatch', 'netease']);
 
-/** Known ids once each, in the given order, missing ones appended with
- * their defaults (mirrors `sanitize_provider_settings` in Rust). */
+/** Known ids once each, in the given order; a missing one (added in a
+ * newer version) goes where the default order has it, right after the
+ * nearest provider before it that the list has (mirrors
+ * `sanitize_provider_settings` in Rust). */
 export function normalizeProviders(list: ProviderSetting[] | undefined): ProviderSetting[] {
   const out: ProviderSetting[] = [];
   for (const p of list ?? []) {
@@ -23,9 +25,18 @@ export function normalizeProviders(list: ProviderSetting[] | undefined): Provide
       out.push({ id: p.id, enabled: !!p.enabled });
     }
   }
-  for (const id of LYRICS_PROVIDER_IDS) {
-    if (!out.some((o) => o.id === id)) out.push({ id, enabled: !UNOFFICIAL_PROVIDERS.has(id) });
-  }
+  LYRICS_PROVIDER_IDS.forEach((id, i) => {
+    if (out.some((o) => o.id === id)) return;
+    let at = 0;
+    for (let before = i - 1; before >= 0; before--) {
+      const pos = out.findIndex((o) => o.id === LYRICS_PROVIDER_IDS[before]);
+      if (pos >= 0) {
+        at = pos + 1;
+        break;
+      }
+    }
+    out.splice(at, 0, { id, enabled: !UNOFFICIAL_PROVIDERS.has(id) });
+  });
   return out;
 }
 

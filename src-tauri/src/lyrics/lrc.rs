@@ -50,7 +50,7 @@ fn parse_words(text: &str, shift: f64) -> Option<(String, Vec<Word>)> {
         let chunk = &rest[..next];
         plain.push_str(chunk);
         match (pending.take(), words.last_mut()) {
-            (Some(t), _) => words.push(Word { t, text: chunk.to_string() }),
+            (Some(t), _) => words.push(Word { t, text: chunk.to_string(), end: None }),
             (None, Some(last)) => last.text.push_str(chunk),
             (None, None) => {}
         }
@@ -108,6 +108,7 @@ pub fn parse_lrc(content: &str) -> Vec<Line> {
                 t: (t - shift).max(0.0),
                 text: text.clone(),
                 words: words.clone(),
+                ..Default::default()
             });
         }
     }

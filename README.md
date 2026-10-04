@@ -25,7 +25,9 @@ Oscilla wraps music.youtube.com with what a desktop player should have: media ke
 - Polish and English, following the system/YouTube Music language.
 
 ### Lyrics
-- Synced lyrics in YouTube Music's own Lyrics tab and in the mini player, from several providers (local `.lrc`/tags, LRCLIB, YouTube Music, Genius; Musixmatch and NetEase optional), with per-song timing offsets and a "wrong lyrics?" picker.
+- Synced lyrics in YouTube Music's own Lyrics tab and in the mini player, from several providers (local `.lrc`/tags, lrc.red, LRCLIB, YouTube Music, Genius; Unison, Musixmatch and NetEase optional), with per-song timing offsets and a "wrong lyrics?" picker.
+- Word-by-word highlighting where the source has it, with duet voices on opposite sides, background vocals and interlude dots; a fullscreen lyrics view with the cover and player controls.
+- Optional translation under each line and romanization of lyrics in other scripts (both go through Google Translate, off by default).
 
 ### Listen Together
 - Play the same music at the same time as friends, on the same network or over the internet (public MQTT brokers, all tried at once).

@@ -390,6 +390,75 @@ pub fn get_current_lyrics(state: State<'_, Arc<AppState>>) -> CurrentLyrics {
     state.lyrics.current.lock().clone()
 }
 
+/// One text per line of the lyrics showing now (a translation or a
+/// romanization); `null` where a line has none.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct LineTexts {
+    /// The song these belong to, so a reply for a skipped song is dropped.
+    pub video_id: Option<String>,
+    pub lines: Vec<Option<String>>,
+}
+
+/// More than this is not a song's lyrics.
+const MAX_TRANSLATED_LINES: usize = 600;
+const MAX_TRANSLATED_CHARS: usize = 30_000;
+
+/// The lines every lyrics view shows, in its order: the timed lines, else
+/// the plain text line by line.
+pub fn shown_lines(lyrics: &Lyrics) -> Vec<String> {
+    if lyrics.is_synced() {
+        lyrics.synced.iter().map(|l| l.text.clone()).collect()
+    } else {
+        lyrics.plain.as_deref().unwrap_or("").split('\n').map(str::to_string).collect()
+    }
+}
+
+/// The current lyrics' lines with the key their translations are cached under.
+fn current_texts(ls: &LyricsState) -> Result<(String, Option<String>, Vec<String>), String> {
+    let lyrics = ls.current_lyrics.lock().clone().ok_or("No lyrics to work on")?;
+    let video_id = ls.current.lock().video_id.clone();
+    let lines = shown_lines(&lyrics);
+    if lines.len() > MAX_TRANSLATED_LINES || lines.iter().map(|l| l.chars().count()).sum::<usize>() > MAX_TRANSLATED_CHARS {
+        return Err("These lyrics are too long".into());
+    }
+    let key = format!("{}|{}|{}|{}", video_id.as_deref().unwrap_or(""), lyrics.provider.as_str(), lyrics.id, lines.len());
+    Ok((key, video_id, lines))
+}
+
+/// The playing song's lyrics in `lang`, line by line.
+pub async fn translate_current(ls: &LyricsState, lang: &str) -> Result<LineTexts, String> {
+    if !super::translate::is_lang(lang) {
+        return Err("Invalid language".into());
+    }
+    let (key, video_id, lines) = current_texts(ls)?;
+    let key = format!("t|{lang}|{key}");
+    let translated = match ls.translations.get(&key) {
+        Some(hit) => hit,
+        None => {
+            let fresh = super::translate::translate(&ls.http, &lines, lang).await?;
+            ls.translations.put(key, fresh.clone());
+            fresh
+        }
+    };
+    Ok(LineTexts { video_id, lines: translated })
+}
+
+/// The playing song's lyrics in Latin letters, for lines in another script.
+pub async fn romanize_current(ls: &LyricsState) -> Result<LineTexts, String> {
+    let (key, video_id, lines) = current_texts(ls)?;
+    let key = format!("r|{key}");
+    let romanized = match ls.translations.get(&key) {
+        Some(hit) => hit,
+        None if !lines.iter().any(|l| super::translate::needs_romanization(l)) => vec![None; lines.len()],
+        None => {
+            let fresh = super::translate::romanize(&ls.http, &lines).await?;
+            ls.translations.put(key, fresh.clone());
+            fresh
+        }
+    };
+    Ok(LineTexts { video_id, lines: romanized })
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::test_util::lyrics;
@@ -670,6 +739,36 @@ mod tests {
         assert_eq!(added, 1);
         assert_eq!(ls.current.lock().offset_secs, 0.5);
         assert_eq!(import_offsets(&ls, vec![("Maniac - Carpenter Brut".into(), 9.0)], &sink), 0);
+    }
+
+    #[tokio::test]
+    async fn test_translation_is_for_the_lines_showing_and_cached() {
+        let (_d, ls) = state();
+        let sink = Recorder::default();
+        assert!(translate_current(&ls, "pl").await.is_err(), "no lyrics yet");
+        assert!(romanize_current(&ls).await.is_err());
+
+        let (p, _) = provider(Ok(vec![lyrics(ProviderId::Lrclib, true, true)]), 0);
+        fetch_with(&ls, std::slice::from_ref(&p), true, query("vid1"), &sink).await;
+        assert_eq!(translate_current(&ls, "en&tl=x").await.unwrap_err(), "Invalid language");
+
+        // Latin text has nothing to romanize: answered without the network.
+        let roman = romanize_current(&ls).await.unwrap();
+        assert_eq!(roman, LineTexts { video_id: Some("vid1".into()), lines: vec![None] });
+
+        // A cached translation is served as is (no request is made).
+        ls.translations.put("t|pl|vid1|lrclib|lrclib-1|1".into(), vec![Some("la po polsku".into())]);
+        let got = translate_current(&ls, "pl").await.unwrap();
+        assert_eq!(got.lines, [Some("la po polsku".to_string())]);
+        assert_eq!(got.video_id.as_deref(), Some("vid1"));
+    }
+
+    #[test]
+    fn test_shown_lines_follow_what_the_views_render() {
+        assert_eq!(shown_lines(&lyrics(ProviderId::Lrclib, true, true)), ["la"], "timed lines win");
+        let mut plain = lyrics(ProviderId::Genius, false, true);
+        plain.plain = Some("one\n\ntwo".into());
+        assert_eq!(shown_lines(&plain), ["one", "", "two"], "empty lines keep their place");
     }
 
     #[test]

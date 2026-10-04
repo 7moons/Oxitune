@@ -1,28 +1,67 @@
 import { YTMDPlugin, PluginContext, TrackInfo, PluginManifest } from '../types';
 import manifest from './manifest.json';
 import { createEl } from '../../utils/dom';
-import { ensureKitStyles, openDialog, showToast } from '../../preload/ui/kit';
+import { ICONS, ensureKitStyles, icon, openDialog, showToast } from '../../preload/ui/kit';
 import { t } from '../../preload/ui/i18n';
 import { PlayerBridge } from '../../preload/bridge';
 import { isSyncGuest } from '../../preload/syncRole';
 import { nextInQueue, songTags } from './songInfo';
-import {
-  CurrentLyrics,
-  EMPTY_LYRICS,
-  LyricsCandidate,
-  activeLineIndex,
-  activeWordIndex,
-  providerName,
-  toCurrentLyrics
-} from '../../types/lyrics';
+import { CurrentLyrics, EMPTY_LYRICS, LyricsCandidate, providerName, toCurrentLyrics, toLineTexts } from '../../types/lyrics';
+import { LYRICS_CSS } from './styles';
+import { LyricsExtras, LyricsView, NO_EXTRAS } from './view';
+import { LyricsFullscreen } from './fullscreen';
 
 /** Lyrics come from the backend (src-tauri/src/lyrics), already parsed and
- * merged across providers; this plugin only shows them in YTM's Lyrics tab. */
+ * merged across providers; this plugin only shows them: in YTM's Lyrics
+ * tab and in its own fullscreen view (view.ts, fullscreen.ts). */
 let lyrics: CurrentLyrics = { ...EMPTY_LYRICS };
 let loading = false;
-let currentActiveIdx = -1;
-let currentWordIdx = -1;
 let currentSongKey = '';
+/** The view in the Lyrics tab, and the fullscreen one. */
+let tabView: LyricsView | null = null;
+let fullscreen: LyricsFullscreen | null = null;
+/** The lyrics the fullscreen view was last built for (see `lyricsStamp`). */
+let fullscreenStamp = '';
+let extras: LyricsExtras = { ...NO_EXTRAS };
+/** What the translation / romanization showing was asked for; '' = none. */
+let translationFor = '';
+let romanizationFor = '';
+/** The song whose Lyrics tab is still to be opened (`lyrics_auto_open`). */
+let autoOpenPending = '';
+
+/** The lyrics settings the page uses (AppConfig's `lyrics_*` fields). */
+export interface LyricsPrefs {
+  translate: boolean;
+  lang: string;
+  romanize: boolean;
+  autoOpen: boolean;
+  effects: boolean;
+}
+
+export const DEFAULT_PREFS: LyricsPrefs = { translate: false, lang: 'en', romanize: false, autoOpen: false, effects: true };
+
+/** `prev` with whatever lyrics settings `config` carries: the whole config
+ * at start, only the changed fields in a `config-updated` event. */
+export function readPrefs(config: Record<string, unknown>, prev: LyricsPrefs = DEFAULT_PREFS): LyricsPrefs {
+  const bool = (key: string, fallback: boolean) => (typeof config[key] === 'boolean' ? (config[key] as boolean) : fallback);
+  const lang = config.lyrics_translate_lang;
+  return {
+    translate: bool('lyrics_translate_enabled', prev.translate),
+    lang: typeof lang === 'string' && /^[A-Za-z]{2,3}(-[A-Za-z]{2,4})?$/.test(lang) ? lang : prev.lang,
+    romanize: bool('lyrics_romanize_enabled', prev.romanize),
+    autoOpen: bool('lyrics_auto_open', prev.autoOpen),
+    effects: bool('lyrics_effects', prev.effects)
+  };
+}
+
+let prefs: LyricsPrefs = { ...DEFAULT_PREFS };
+
+/** Identifies the lyrics showing, so a translation asked for other lyrics
+ * (another song, or another pick for this one) is never shown under them. */
+export const lyricsStamp = (l: Pick<CurrentLyrics, 'video_id' | 'provider' | 'synced' | 'plain'>, songKey: string): string =>
+  `${songKey}|${l.video_id ?? ''}|${l.provider ?? ''}|${l.synced.length}|${l.plain?.length ?? 0}`;
+
+const hasText = (): boolean => lyrics.synced.length > 0 || !!lyrics.plain;
 let lastPosition = 0;
 /** When `lastPosition` was reported (`performance.now()`): between the
  * player's ticks (~4 a second) the position is carried forward every frame,
@@ -67,18 +106,40 @@ export const LyricsPlugin: YTMDPlugin = {
   id: 'lyrics',
   manifest: manifest as PluginManifest,
   name: 'Native Synced Lyrics',
-  description: 'Synchronized lyrics from several providers in the native Lyrics tab, with active highlighting and seek-on-click',
+  description: 'Synchronized lyrics from several providers in the native Lyrics tab and in full screen: word by word, with translation, romanization and seek-on-click',
   defaultEnabled: true,
 
   onInit(ctx: PluginContext) {
     lyrics = { ...EMPTY_LYRICS };
     loading = false;
-    currentActiveIdx = -1;
-    currentWordIdx = -1;
     currentSongKey = '';
     staleYtmText = '';
     ytmTextSent = false;
     currentTrack = null;
+    extras = { ...NO_EXTRAS };
+    translationFor = '';
+    romanizationFor = '';
+    fullscreenStamp = '';
+    autoOpenPending = '';
+    prefs = readPrefs(ctx.config);
+
+    const seekTo = (secs: number) => PlayerBridge.seekTo(secs);
+    tabView = new LyricsView({ onSeek: seekTo, resumeLabel: t().lyricsResumeSync });
+    tabView.setEffects(prefs.effects);
+    fullscreen = new LyricsFullscreen({
+      labels: {
+        close: t().close,
+        previous: t().playerPrevious,
+        next: t().playerNext,
+        play: t().playerPlay,
+        pause: t().playerPause,
+        resume: t().lyricsResumeSync
+      },
+      onCommand: (command) => ctx.sendPlayerCommand(command),
+      onSeek: seekTo,
+      onClose: () => tabView?.scrollToCurrent()
+    });
+    fullscreen.view.setEffects(prefs.effects);
 
     const style = document.createElement('style');
     style.id = 'ytmd-native-lyrics-styles';
@@ -87,18 +148,21 @@ export const LyricsPlugin: YTMDPlugin = {
     ensureKitStyles();
 
     const checkTab = () => {
+      // Settings loaded late (or changed without an event) still arrive.
+      applyPrefs(ctx, readPrefs(ctx.config, prefs));
       unlockLyricsTabHeader();
       ensureLyricsMounted(ctx);
       offerYtmText(ctx);
+      openLyricsTabIfWanted();
       lyricsVisible = isLyricsTabVisible();
     };
 
-    // Every frame while lyrics are on screen and playing; the classes only
-    // change when the line or word does.
+    // Every frame while lyrics are on screen and playing; the classes and
+    // the word fill only change when the line or word does.
     let frame = 0;
     const onFrame = () => {
       frame = requestAnimationFrame(onFrame);
-      if (!lyricsVisible || lyrics.synced.length === 0) return;
+      if ((!lyricsVisible && !fullscreen?.isOpen) || lyrics.synced.length === 0) return;
       const video = ctx.getVideoElement();
       if (!video || video.paused) return;
       const carried = Math.min(MAX_CARRY_SECS, (performance.now() - lastTickAt) / 1000) * (video.playbackRate || 1);
@@ -132,12 +196,22 @@ export const LyricsPlugin: YTMDPlugin = {
           applyLyrics(ctx, next);
         })
       : null;
+    // The lyrics settings, changed in Settings or by the switches under the lyrics.
+    const unlistenConfig = ctx.events
+      ? ctx.events.listen<unknown>('config-updated', (e) => {
+          if (e.payload && typeof e.payload === 'object') applyPrefs(ctx, readPrefs(e.payload as Record<string, unknown>, prefs));
+        })
+      : null;
 
     cleanup = () => {
       cancelAnimationFrame(frame);
       clearInterval(pollInterval);
       document.removeEventListener('click', onTabClick, true);
-      unlisten?.then((fn) => fn());
+      unlisten?.then((fn) => fn()).catch(() => undefined);
+      unlistenConfig?.then((fn) => fn()).catch(() => undefined);
+      fullscreen?.close();
+      fullscreen = null;
+      tabView = null;
       style.remove();
       document.querySelectorAll('#ytmd-native-lyrics-wrapper').forEach((w) => w.remove());
     };
@@ -151,21 +225,35 @@ export const LyricsPlugin: YTMDPlugin = {
     currentSongKey = songKey;
     lyrics = { ...EMPTY_LYRICS, video_id: track.videoId ?? null };
     loading = true;
-    currentActiveIdx = -1;
-    currentWordIdx = -1;
     shownPosition = 0;
     staleYtmText = readYtmText();
     ytmTextSent = false;
+    extras = { ...NO_EXTRAS };
+    translationFor = '';
+    romanizationFor = '';
+    autoOpenPending = prefs.autoOpen ? songKey : '';
 
     unlockLyricsTabHeader();
+    tabView?.setLyrics(lyrics, extras);
     renderCurrentLyrics(ctx);
     await requestLyrics(ctx, track, songKey, null);
+  },
+
+  onPlaybackChange(isPlaying: boolean) {
+    fullscreen?.setPlaying(isPlaying);
   },
 
   onTick(currentTimeSecs: number, ctx: PluginContext) {
     lastPosition = currentTimeSecs;
     lastTickAt = performance.now();
     showPosition(currentTimeSecs, true);
+    const duration = currentTrack?.durationSecs ?? 0;
+    fullscreen?.setProgress(currentTimeSecs, duration);
+    if (lyrics.synced.length === 0 && duration > 0) {
+      const progress = currentTimeSecs / duration;
+      tabView?.updatePlain(progress, lyricsVisible);
+      if (fullscreen?.isOpen) fullscreen.view.updatePlain(progress, true);
+    }
     if (currentTimeSecs >= PREFETCH_AFTER_SECS) prefetchNext(ctx);
   },
 
@@ -176,102 +264,6 @@ export const LyricsPlugin: YTMDPlugin = {
     }
   }
 };
-
-const LYRICS_CSS = `
-  /* Scoped to tabs unlockLyricsTabHeader() has explicitly matched by
-     label — NOT blind tab position (nth-of-type), since a layout where
-     "Tekst"/"Lyrics" isn't the 2nd tab would otherwise force
-     pointer-events:auto on some unrelated tab. */
-  .ytmd-lyrics-tab-unlocked {
-    pointer-events: auto !important;
-    cursor: pointer !important;
-  }
-  .ytmd-lyrics-tab-unlocked[disabled],
-  .ytmd-lyrics-tab-unlocked[aria-disabled="true"] {
-    opacity: 1 !important;
-    color: var(--ytmd-text, #fff) !important;
-  }
-
-  /* Hide default un-synced text, spinners and unavailable messages inside lyrics tab ONLY */
-  #tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"] ytmusic-description-shelf-renderer,
-  #tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"] ytmusic-message-renderer,
-  #tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"] tp-yt-paper-spinner,
-  ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"] ytmusic-description-shelf-renderer,
-  ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"] ytmusic-message-renderer,
-  ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"] tp-yt-paper-spinner {
-    display: none !important;
-  }
-
-  #ytmd-native-lyrics-wrapper {
-    display: none !important;
-    flex-direction: column;
-    gap: 8px;
-    padding: 24px 0 160px;
-    max-width: 760px;
-    margin: 0 auto;
-    box-sizing: border-box;
-    width: 100%;
-  }
-
-  /* Strict visibility: show ONLY inside the active lyrics tab renderer */
-  ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"].iron-selected #ytmd-native-lyrics-wrapper,
-  ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"]:not([hidden]):not([aria-hidden="true"]) #ytmd-native-lyrics-wrapper {
-    display: flex !important;
-  }
-
-  /* Never show inside queue / related / hidden tabs */
-  ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"][hidden] #ytmd-native-lyrics-wrapper,
-  ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"][aria-hidden="true"] #ytmd-native-lyrics-wrapper,
-  ytmusic-tab-renderer:not([page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"]) #ytmd-native-lyrics-wrapper,
-  ytmusic-player-page ytmusic-tab-renderer:not(.iron-selected) #ytmd-native-lyrics-wrapper {
-    display: none !important;
-  }
-  /* Same treatment as YTM's own timed lyrics: large display type,
-     upcoming/past lines dimmed, the current line full white. Size and
-     weight never change between states, so the text doesn't reflow
-     as the active line moves. */
-  .ytmd-native-lyric-line {
-    font: 700 24px/32px var(--ytmd-font-display, "YouTube Sans", Roboto, Arial, sans-serif);
-    color: rgba(255, 255, 255, 0.4);
-    cursor: pointer;
-    padding: 4px 0;
-    user-select: none;
-    word-break: break-word;
-    transition: color 0.2s ease;
-  }
-  .ytmd-native-lyric-line:hover { color: rgba(255, 255, 255, 0.7); }
-  .ytmd-native-lyric-line.active { color: #fff; }
-  .ytmd-native-lyric-line.ytmd-plain { cursor: default; color: #fff; }
-  /* Word-by-word: in the active line, words light up as they are sung. */
-  .ytmd-native-lyric-line.active.ytmd-has-words .ytmd-lyric-word { color: rgba(255, 255, 255, 0.4); transition: color 0.1s linear; }
-  .ytmd-native-lyric-line.active.ytmd-has-words .ytmd-lyric-word.ytmd-sung { color: #fff; }
-  .ytmd-native-lyrics-status {
-    padding: 48px 0;
-    text-align: center;
-    font: 400 16px/24px var(--ytmd-font, Roboto, Arial, sans-serif);
-    color: var(--ytmd-text-secondary, rgba(255, 255, 255, 0.7));
-  }
-  .ytmd-native-lyrics-footer {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
-    margin-top: 32px;
-    font: 400 12px/16px var(--ytmd-font, Roboto, Arial, sans-serif);
-    color: var(--ytmd-text-secondary, rgba(255, 255, 255, 0.7));
-  }
-  .ytmd-native-lyrics-footer .ytmd-lyrics-source { flex: 1; min-width: 120px; }
-  .ytmd-native-lyrics-footer a.ytmd-lyrics-source { color: inherit; text-decoration: none; }
-  .ytmd-native-lyrics-footer a.ytmd-lyrics-source:hover { text-decoration: underline; }
-  .ytmd-lyrics-offset-value {
-    min-width: 56px;
-    text-align: center;
-    font-variant-numeric: tabular-nums;
-    color: var(--ytmd-text, #fff);
-  }
-  .ytmd-lyrics-pick-list { display: flex; flex-direction: column; margin: 8px -24px 0; max-height: 50vh; overflow-y: auto; }
-  .ytmd-lyrics-pick-list .ytmd-menu-item { width: 100%; text-align: left; }
-`;
 
 function isForCurrentSong(next: CurrentLyrics): boolean {
   if (!currentTrack) return false;
@@ -324,13 +316,89 @@ function applyLyrics(ctx: PluginContext, next: CurrentLyrics) {
   if (onlyOffsetChanged) {
     const value = document.querySelector('.ytmd-lyrics-offset-value');
     if (value) value.textContent = formatOffset(next.offset_secs);
+    tabView?.setOffset(next.offset_secs);
+    fullscreen?.view.setOffset(next.offset_secs);
     highlight(lastPosition, false);
     return;
   }
-  currentActiveIdx = -1;
-  currentWordIdx = -1;
+  // Other lyrics: what was translated belongs to the ones before.
+  extras = { ...NO_EXTRAS };
+  translationFor = '';
+  romanizationFor = '';
+  tabView?.setLyrics(lyrics, extras);
   renderCurrentLyrics(ctx);
   highlight(lastPosition, false);
+  void loadExtras(ctx);
+}
+
+/** New lyrics settings: the switches, the effects and the extra lines follow. */
+function applyPrefs(ctx: PluginContext, next: LyricsPrefs) {
+  const changed = (Object.keys(next) as (keyof LyricsPrefs)[]).some((k) => next[k] !== prefs[k]);
+  prefs = next;
+  if (!changed) return;
+  tabView?.setEffects(prefs.effects);
+  fullscreen?.view.setEffects(prefs.effects);
+  renderCurrentLyrics(ctx);
+  void loadExtras(ctx);
+}
+
+function showExtras() {
+  tabView?.setExtras(extras);
+  if (fullscreen?.isOpen) fullscreen.view.setExtras(extras);
+}
+
+/** Fetches the translation and the romanization the settings ask for, for
+ * the lyrics showing; drops them when the settings no longer do. */
+async function loadExtras(ctx: PluginContext) {
+  const stamp = hasText() && !loading ? lyricsStamp(lyrics, currentSongKey) : '';
+  const stillShowing = () => stamp !== '' && stamp === lyricsStamp(lyrics, currentSongKey);
+  const sameSong = (videoId: string | null) => !videoId || !lyrics.video_id || videoId === lyrics.video_id;
+  const anyLine = (lines: (string | null)[]) => (lines.some((l) => l !== null) ? lines : null);
+
+  const wantTranslation = prefs.translate && stamp !== '' ? `${stamp}|${prefs.lang}` : '';
+  if (wantTranslation !== translationFor) {
+    translationFor = wantTranslation;
+    extras = { ...extras, translation: null };
+    showExtras();
+    if (wantTranslation) {
+      try {
+        const reply = toLineTexts(await ctx.invoke('translate_lyrics', { lang: prefs.lang }, { timeoutMs: 20000 }));
+        if (translationFor === wantTranslation && stillShowing() && sameSong(reply.video_id)) {
+          extras = { ...extras, translation: anyLine(reply.lines) };
+          showExtras();
+        }
+      } catch {
+        if (translationFor === wantTranslation) showToast(t().lyricsTranslateFailed);
+      }
+    }
+  }
+
+  const wantRomanization = prefs.romanize && stamp !== '' ? stamp : '';
+  if (wantRomanization !== romanizationFor) {
+    romanizationFor = wantRomanization;
+    extras = { ...extras, romanization: null };
+    showExtras();
+    if (wantRomanization) {
+      try {
+        const reply = toLineTexts(await ctx.invoke('romanize_lyrics', {}, { timeoutMs: 20000 }));
+        if (romanizationFor === wantRomanization && stillShowing() && sameSong(reply.video_id)) {
+          extras = { ...extras, romanization: anyLine(reply.lines) };
+          showExtras();
+        }
+      } catch {
+        if (romanizationFor === wantRomanization) showToast(t().lyricsRomanizeFailed);
+      }
+    }
+  }
+}
+
+/** A switch under the lyrics: shown at once, then saved for every window. */
+function toggleDisplay(ctx: PluginContext, key: 'translate' | 'romanize') {
+  const value = !prefs[key];
+  // The page's copy of the settings is what the poll below re-reads.
+  ctx.config[key === 'translate' ? 'lyrics_translate_enabled' : 'lyrics_romanize_enabled'] = value;
+  applyPrefs(ctx, { ...prefs, [key]: value });
+  ctx.invoke('set_lyrics_display', { [key]: value }).catch(() => showToast(t().actionFailed));
 }
 
 /** Highlights `position`, never stepping back for a tick that lands a hair
@@ -367,37 +435,55 @@ function prefetchNext(ctx: PluginContext) {
     .catch(() => undefined);
 }
 
-/** Moves the active-line and sung-word classes to `position`. */
+/** Moves the highlight to `position` in both views; a view follows the
+ * song by scrolling only while it is the one on screen. */
 function highlight(position: number, scroll: boolean) {
   if (lyrics.synced.length === 0) return;
-  const wrapper = document.getElementById('ytmd-native-lyrics-wrapper');
-  if (!wrapper) return;
-  const lineEls = wrapper.querySelectorAll<HTMLElement>('.ytmd-native-lyric-line');
-  const activeIdx = activeLineIndex(lyrics.synced, position, lyrics.offset_secs);
+  const fullscreenOpen = fullscreen?.isOpen === true;
+  tabView?.update(position, scroll && lyricsVisible && !fullscreenOpen);
+  if (fullscreenOpen) fullscreen?.view.update(position, scroll);
+}
 
-  if (activeIdx !== currentActiveIdx) {
-    lineEls[currentActiveIdx]?.classList.remove('active');
-    lineEls[currentActiveIdx]?.querySelectorAll('.ytmd-sung').forEach((w) => w.classList.remove('ytmd-sung'));
-    currentActiveIdx = activeIdx;
-    currentWordIdx = -1;
-    const activeEl = lineEls[activeIdx];
-    if (activeEl) {
-      activeEl.classList.add('active');
-      const lyricsTab = document.querySelector<HTMLElement>(
-        '#tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"], ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"]'
-      );
-      if (scroll && lyricsTab && isElementVisible(lyricsTab)) {
-        activeEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      }
-    }
-  }
+function lyricsTabHeader(): HTMLElement | null {
+  const tabs = document.querySelectorAll<HTMLElement>(
+    '#tabsContent > .tab-header, ytmusic-player-page tp-yt-paper-tab, ytmusic-tab-header-renderer'
+  );
+  return Array.from(tabs).find((tab) => /tekst|lyrics|paroles|letras/.test(tab.textContent?.toLowerCase() || '')) ?? null;
+}
 
-  const wordIdx = activeWordIndex(lyrics.synced[activeIdx], position, lyrics.offset_secs);
-  if (wordIdx !== currentWordIdx) {
-    const words = lineEls[activeIdx]?.querySelectorAll('.ytmd-lyric-word');
-    words?.forEach((w, i) => w.classList.toggle('ytmd-sung', i <= wordIdx));
-    currentWordIdx = wordIdx;
+/** `lyrics_auto_open`: once per song that has lyrics, as soon as the player
+ * page (and so the tab) is on screen, the same click the listener would make. */
+function openLyricsTabIfWanted() {
+  if (!autoOpenPending || autoOpenPending !== currentSongKey || loading || !hasText()) return;
+  const tab = lyricsTabHeader();
+  if (!tab || !isElementVisible(tab)) return;
+  autoOpenPending = '';
+  const selected = tab.classList.contains('iron-selected') || tab.getAttribute('aria-selected') === 'true';
+  if (!selected) tab.click();
+}
+
+/** The fullscreen view shows what the tab shows. */
+function syncFullscreen() {
+  if (!fullscreen?.isOpen) return;
+  fullscreen.setTrack(currentTrack);
+  fullscreen.setStatus(loading ? t().lyricsLoading : hasText() ? null : t().lyricsNone);
+  const stamp = `${lyricsStamp(lyrics, currentSongKey)}|${loading}`;
+  if (stamp !== fullscreenStamp) {
+    fullscreenStamp = stamp;
+    fullscreen.view.setLyrics(loading ? { ...EMPTY_LYRICS } : lyrics, extras);
+  } else {
+    fullscreen.view.setExtras(extras);
   }
+}
+
+function openFullscreen(ctx: PluginContext) {
+  if (!fullscreen) return;
+  fullscreen.show();
+  fullscreen.setPlaying(ctx.getVideoElement()?.paused === false);
+  fullscreen.setProgress(lastPosition, currentTrack?.durationSecs ?? 0);
+  syncFullscreen();
+  highlight(lastPosition, false);
+  fullscreen.view.scrollToCurrent();
 }
 
 /** Text of YTM's own lyrics shelf, if it has rendered one. */
@@ -588,8 +674,6 @@ function ensureLyricsMounted(ctx: PluginContext): void {
       wrapper = createEl('div', { id: 'ytmd-native-lyrics-wrapper' });
     }
     tabRenderer.appendChild(wrapper);
-    currentActiveIdx = -1;
-    currentWordIdx = -1;
     renderCurrentLyrics(ctx);
     highlight(lastPosition, false);
   }
@@ -597,13 +681,27 @@ function ensureLyricsMounted(ctx: PluginContext): void {
   updateLyricsVisibility();
 }
 
-function chip(text: string, tooltip: string, onClick: () => void): HTMLButtonElement {
+function chip(text: string, tooltip: string, onClick: () => void, iconPath?: string): HTMLButtonElement {
   const btn = createEl('button', { className: 'ytmd-chip', text });
   btn.type = 'button';
+  if (iconPath) btn.prepend(icon(iconPath, 18));
   btn.dataset.ytmdTooltip = tooltip;
   btn.setAttribute('aria-label', tooltip);
   btn.addEventListener('click', onClick);
   return btn;
+}
+
+/** A chip that is a switch: on looks like YTM's selected chip. */
+function switchChip(text: string, tooltip: string, on: boolean, iconPath: string, onClick: () => void): HTMLButtonElement {
+  const btn = chip(text, tooltip, onClick, iconPath);
+  btn.setAttribute('aria-pressed', String(on));
+  return btn;
+}
+
+function group(...nodes: Node[]): HTMLElement {
+  const el = createEl('span', { className: 'ytmd-lyrics-footer-group' });
+  el.append(...nodes);
+  return el;
 }
 
 function sourceLabel(): HTMLElement {
@@ -620,23 +718,32 @@ function sourceLabel(): HTMLElement {
 
 function buildFooter(ctx: PluginContext, withOffset: boolean): HTMLElement {
   const footer = createEl('div', { className: 'ytmd-native-lyrics-footer' });
-  footer.append(sourceLabel());
+  footer.append(
+    sourceLabel(),
+    group(
+      switchChip(t().lyricsTranslate, t().lyricsTranslateTip, prefs.translate, ICONS.translate, () => toggleDisplay(ctx, 'translate')),
+      switchChip(t().lyricsRomanize, t().lyricsRomanizeTip, prefs.romanize, ICONS.romanize, () => toggleDisplay(ctx, 'romanize')),
+      chip(t().lyricsFullscreen, t().lyricsFullscreenTip, () => openFullscreen(ctx), ICONS.fullscreen)
+    )
+  );
   if (withOffset) {
     const valDisplay = createEl('span', { className: 'ytmd-lyrics-offset-value', text: formatOffset(lyrics.offset_secs) });
     const shift = (delta: number | null) => {
       const next = delta === null ? 0 : Math.round((lyrics.offset_secs + delta) * 10) / 10;
       ctx.invoke('set_lyrics_offset', { offsetSecs: next }).catch((e) => console.warn('[Oscilla Lyrics] offset:', e));
     };
-    // Positive offset = lyrics run ahead of the audio (see highlight()).
+    // Positive offset = lyrics run ahead of the audio (see LyricsView.update()).
     footer.append(
-      createEl('span', { text: t().lyricsOffset }),
+      group(
+        createEl('span', { text: t().lyricsOffset }),
       chip('−0.5 s', t().lyricsLater, () => shift(-0.5)),
       valDisplay,
       chip('+0.5 s', t().lyricsEarlier, () => shift(0.5)),
-      chip(t().lyricsReset, t().lyricsReset, () => shift(null))
+        chip(t().lyricsReset, t().lyricsReset, () => shift(null))
+      )
     );
   }
-  footer.append(chip(t().lyricsWrong, t().lyricsPickTitle, () => void openPicker(ctx)), searchAgainChip(ctx));
+  footer.append(group(chip(t().lyricsWrong, t().lyricsPickTitle, () => void openPicker(ctx)), searchAgainChip(ctx)));
   return footer;
 }
 
@@ -710,34 +817,18 @@ async function openPicker(ctx: PluginContext) {
   );
 }
 
+/** Lays out the Lyrics tab for the current state: "loading", the lines (the
+ * view keeps them; they aren't rebuilt here) with the controls under them,
+ * or "no lyrics". The fullscreen view follows. */
 function renderCurrentLyrics(ctx: PluginContext): void {
+  syncFullscreen();
   const wrapper = document.getElementById('ytmd-native-lyrics-wrapper');
   if (!wrapper) return;
 
   if (loading) {
     wrapper.replaceChildren(createEl('div', { className: 'ytmd-native-lyrics-status', text: t().lyricsLoading }));
-  } else if (lyrics.synced.length > 0) {
-    wrapper.replaceChildren(
-      ...lyrics.synced.map((line) => {
-        const el = createEl('div', { className: 'ytmd-native-lyric-line' });
-        if (line.words?.length) {
-          el.classList.add('ytmd-has-words');
-          el.append(...line.words.map((w) => createEl('span', { className: 'ytmd-lyric-word', text: w.text })));
-        } else {
-          el.textContent = line.text;
-        }
-        el.addEventListener('click', () => PlayerBridge.seekTo(Math.max(0, line.t - lyrics.offset_secs)));
-        return el;
-      }),
-      buildFooter(ctx, true)
-    );
-  } else if (lyrics.plain) {
-    wrapper.replaceChildren(
-      ...lyrics.plain
-        .split('\n')
-        .map((line) => createEl('div', { className: 'ytmd-native-lyric-line ytmd-plain', text: line })),
-      buildFooter(ctx, false)
-    );
+  } else if (hasText() && tabView) {
+    wrapper.replaceChildren(tabView.root, buildFooter(ctx, lyrics.synced.length > 0));
   } else {
     const nodes: Node[] = [createEl('div', { className: 'ytmd-native-lyrics-status', text: t().lyricsNone })];
     if (currentTrack) nodes.push(buildFooterNoSource(ctx));

@@ -13,10 +13,14 @@ pub mod genius;
 pub mod local;
 pub mod lrc;
 pub mod lrclib;
+pub mod lrcred;
 pub mod matching;
 pub mod musixmatch;
 pub mod netease;
 pub mod offsets;
+pub mod translate;
+pub mod ttml;
+pub mod unison;
 
 use futures_util::future::BoxFuture;
 use futures_util::stream::{FuturesUnordered, StreamExt};
@@ -29,27 +33,48 @@ use std::time::Duration;
 
 pub const PROVIDER_TIMEOUT: Duration = Duration::from_secs(6);
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Word {
     /// Seconds from the start of the song.
     pub t: f64,
     pub text: String,
+    /// When the word stops being sung, when the provider says.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<f64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// Background vocals sung under a line ("(ooh, ooh)").
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Background {
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub words: Option<Vec<Word>>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Line {
     /// Seconds from the start of the song.
     pub t: f64,
     pub text: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub words: Option<Vec<Word>>,
+    /// When the line stops being sung, when the provider says.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<f64>,
+    /// Sung by the song's second voice (a duet): shown on the other side.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub alt: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bg: Option<Background>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ProviderId {
     Local,
+    Lrcred,
     Lrclib,
+    Unison,
     Musixmatch,
     Netease,
     Ytm,
@@ -58,9 +83,11 @@ pub enum ProviderId {
 
 impl ProviderId {
     /// Default priority order.
-    pub const ALL: [ProviderId; 6] = [
+    pub const ALL: [ProviderId; 8] = [
         ProviderId::Local,
+        ProviderId::Lrcred,
         ProviderId::Lrclib,
+        ProviderId::Unison,
         ProviderId::Musixmatch,
         ProviderId::Netease,
         ProviderId::Ytm,
@@ -70,7 +97,9 @@ impl ProviderId {
     pub fn as_str(self) -> &'static str {
         match self {
             ProviderId::Local => "local",
+            ProviderId::Lrcred => "lrcred",
             ProviderId::Lrclib => "lrclib",
+            ProviderId::Unison => "unison",
             ProviderId::Musixmatch => "musixmatch",
             ProviderId::Netease => "netease",
             ProviderId::Ytm => "ytm",
@@ -83,9 +112,11 @@ impl ProviderId {
     }
 
     /// Musixmatch and NetEase go through unofficial APIs that may break or
-    /// be against those services' terms, so the user has to turn them on.
+    /// be against those services' terms, and Unison is Better Lyrics' own
+    /// community service with no stated permission for other apps, so the
+    /// user has to turn them on.
     pub fn unofficial(self) -> bool {
-        matches!(self, ProviderId::Musixmatch | ProviderId::Netease)
+        matches!(self, ProviderId::Musixmatch | ProviderId::Netease | ProviderId::Unison)
     }
 }
 
@@ -108,8 +139,11 @@ pub fn default_provider_settings() -> Vec<ProviderSetting> {
         .collect()
 }
 
-/// Known ids only, each once, in the user's order; providers missing from
-/// the list are appended with their defaults.
+/// Known ids only, each once, in the user's order. A provider missing from
+/// the list (one added in a newer version) goes where the default order
+/// has it: right after the nearest provider before it that the list has,
+/// else first. Appended at the end, a new word-by-word source would sit
+/// behind every source the user already had and never be picked.
 pub fn sanitize_provider_settings(settings: Vec<ProviderSetting>) -> Vec<ProviderSetting> {
     let mut out: Vec<ProviderSetting> = Vec::new();
     for s in settings {
@@ -117,10 +151,17 @@ pub fn sanitize_provider_settings(settings: Vec<ProviderSetting>) -> Vec<Provide
             out.push(s);
         }
     }
-    for d in default_provider_settings() {
-        if !out.iter().any(|o| o.id == d.id) {
-            out.push(d);
+    let defaults = default_provider_settings();
+    for (i, d) in defaults.iter().enumerate() {
+        if out.iter().any(|o| o.id == d.id) {
+            continue;
         }
+        let at = defaults[..i]
+            .iter()
+            .rev()
+            .find_map(|before| out.iter().position(|o| o.id == before.id))
+            .map_or(0, |pos| pos + 1);
+        out.insert(at, d.clone());
     }
     out
 }
@@ -344,6 +385,8 @@ pub struct LyricsState {
     pub candidates: Mutex<Vec<Lyrics>>,
     /// Bumped per lookup so a slow answer for a skipped song is dropped.
     pub generation: AtomicU64,
+    /// Translations and romanizations of recent songs.
+    pub translations: translate::TranslationCache,
 }
 
 impl LyricsState {
@@ -365,6 +408,7 @@ impl LyricsState {
             current_lyrics: Mutex::new(None),
             candidates: Mutex::new(Vec::new()),
             generation: AtomicU64::new(0),
+            translations: translate::TranslationCache::default(),
         }
     }
 
@@ -374,7 +418,9 @@ impl LyricsState {
             .map(|id| -> Arc<dyn LyricsProvider> {
                 match id {
                     ProviderId::Local => Arc::new(local::LocalProvider::new(self.local_index.clone(), local_roots.clone())),
+                    ProviderId::Lrcred => Arc::new(lrcred::LrcRed::new(self.http.clone())),
                     ProviderId::Lrclib => Arc::new(lrclib::Lrclib::new(self.http.clone())),
+                    ProviderId::Unison => Arc::new(unison::Unison::new(self.http.clone())),
                     ProviderId::Musixmatch => Arc::new(musixmatch::Musixmatch::new(self.musixmatch.clone())),
                     ProviderId::Netease => Arc::new(netease::Netease::new()),
                     ProviderId::Ytm => Arc::new(YtmProvider),
@@ -467,7 +513,7 @@ pub(crate) mod test_util {
             title: "Maniac".into(),
             artist: "Carpenter Brut".into(),
             synced: if synced {
-                vec![Line { t: 1.0, text: "la".into(), words: None }]
+                vec![Line { t: 1.0, text: "la".into(), ..Default::default() }]
             } else {
                 Vec::new()
             },
@@ -484,7 +530,7 @@ mod tests {
 
     fn timed(times: &[f64]) -> Lyrics {
         let mut l = lyrics(ProviderId::Lrclib, false, false);
-        l.synced = times.iter().map(|&t| Line { t, text: format!("at {t}"), words: None }).collect();
+        l.synced = times.iter().map(|&t| Line { t, text: format!("at {t}"), ..Default::default() }).collect();
         l
     }
 
@@ -594,10 +640,29 @@ mod tests {
             ProviderSetting { id: "lrclib".into(), enabled: false },
         ];
         let clean = sanitize_provider_settings(user.clone());
-        assert_eq!(clean[0], ProviderSetting { id: "genius".into(), enabled: true });
-        assert_eq!(clean[1].id, "lrclib");
-        assert_eq!(clean.len(), ProviderId::ALL.len());
-        assert_eq!(enabled_providers(&user), [ProviderId::Genius, ProviderId::Local, ProviderId::Ytm]);
+        let ids = |list: &[ProviderSetting]| list.iter().map(|s| s.id.clone()).collect::<Vec<_>>();
+        // The user's two, in their order; the rest where the default order has them.
+        assert_eq!(ids(&clean), ["local", "lrcred", "genius", "lrclib", "unison", "musixmatch", "netease", "ytm"]);
+        assert!(clean.iter().find(|s| s.id == "genius").unwrap().enabled);
+        assert!(!clean.iter().find(|s| s.id == "lrclib").unwrap().enabled);
+        assert!(!clean.iter().find(|s| s.id == "unison").unwrap().enabled, "unofficial: off until turned on");
+        assert_eq!(enabled_providers(&user), [ProviderId::Local, ProviderId::Lrcred, ProviderId::Genius, ProviderId::Ytm]);
+    }
+
+    // A config saved before lrc.red existed: the new word-by-word source
+    // goes ahead of LRCLIB as in the default order, not behind everything.
+    #[test]
+    fn test_new_providers_join_an_older_list_at_their_default_place() {
+        let list = |ids: [&str; 6]| ids.map(|id| ProviderSetting { id: id.into(), enabled: true }).to_vec();
+        let ids = |l: Vec<ProviderSetting>| l.into_iter().map(|s| s.id).collect::<Vec<_>>();
+        let old = list(["local", "lrclib", "musixmatch", "netease", "ytm", "genius"]);
+        assert_eq!(ids(sanitize_provider_settings(old)), ProviderId::ALL.map(|p| p.as_str().to_string()));
+
+        let reordered = list(["genius", "lrclib", "local", "musixmatch", "netease", "ytm"]);
+        assert_eq!(
+            ids(sanitize_provider_settings(reordered)),
+            ["genius", "lrclib", "unison", "local", "lrcred", "musixmatch", "netease", "ytm"]
+        );
     }
 
     #[test]
@@ -613,7 +678,7 @@ mod tests {
     #[test]
     fn test_current_lyrics_payload_matches_contract() {
         let mut l = lyrics(ProviderId::Lrclib, true, true);
-        l.synced[0].words = Some(vec![Word { t: 1.0, text: "la".into() }]);
+        l.synced[0].words = Some(vec![Word { t: 1.0, text: "la".into(), end: None }]);
         let payload = CurrentLyrics::from_lyrics(Some("vid".into()), Some(&l), 0.5);
         let v = serde_json::to_value(&payload).unwrap();
         let keys: std::collections::BTreeSet<_> = v.as_object().unwrap().keys().cloned().collect();
@@ -645,6 +710,26 @@ mod tests {
         expected.push(None);
         assert_eq!(providers, expected);
         assert!(ProviderId::ALL.iter().all(|p| serde_json::to_value(p).unwrap() == p.as_str()));
+
+        // The optional parts of a line are the ones the schema lists.
+        let line = Line {
+            t: 1.0,
+            text: "la".into(),
+            words: Some(vec![Word { t: 1.0, text: "la".into(), end: Some(2.0) }]),
+            end: Some(2.0),
+            alt: true,
+            bg: Some(Background { text: "(ooh)".into(), words: Some(vec![Word::default()]) }),
+        };
+        let keys = |v: &serde_json::Value| v.as_object().unwrap().keys().cloned().collect::<std::collections::BTreeSet<_>>();
+        let props = |v: &serde_json::Value| keys(&v["properties"]);
+        let line_schema = &schema["properties"]["synced"]["items"];
+        let json = serde_json::to_value(&line).unwrap();
+        assert_eq!(keys(&json), props(line_schema));
+        assert_eq!(keys(&json["bg"]), props(&line_schema["properties"]["bg"]));
+        assert_eq!(keys(&json["words"][0]), props(&schema["$defs"]["Word"]));
+        // What a plain timed line sends is unchanged: only its time and text.
+        let bare = serde_json::to_value(Line { t: 1.0, text: "la".into(), ..Default::default() }).unwrap();
+        assert_eq!(keys(&bare), ["t", "text"].map(String::from).into());
     }
 
     #[test]

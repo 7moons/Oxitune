@@ -192,7 +192,7 @@ pub fn parse_subtitle_body(body: &str) -> Option<Vec<Line>> {
         .filter_map(|i| {
             let t = i.pointer("/time/total").and_then(Value::as_f64)?;
             let text = i.get("text").and_then(Value::as_str)?.trim().to_string();
-            (!text.is_empty()).then_some(Line { t, text, words: None })
+            (!text.is_empty()).then_some(Line { t, text, ..Default::default() })
         })
         .collect();
     (!lines.is_empty()).then_some(lines)
@@ -219,13 +219,14 @@ pub fn parse_richsync(body: &str) -> Option<Vec<Line>> {
                 match words.last_mut() {
                     Some(last) if c.trim().is_empty() => last.text.push_str(c),
                     _ if c.is_empty() => {}
-                    _ => words.push(Word { t: ts + o, text: c.to_string() }),
+                    _ => words.push(Word { t: ts + o, text: c.to_string(), end: None }),
                 }
             }
             Some(Line {
                 t: ts,
                 text,
                 words: (!words.is_empty()).then_some(words),
+                ..Default::default()
             })
         })
         .collect();

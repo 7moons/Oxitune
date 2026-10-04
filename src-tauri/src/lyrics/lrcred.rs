@@ -1,0 +1,212 @@
+//! lrc.red: lyrics timed word by word (TTML), with duet voices and
+//! background vocals. A search returns matching recordings; each one's
+//! lyrics are a separate TTML document.
+
+use super::matching::{clean_track_name, encode, score_match, synced_length_fits, Candidate, MIN_MATCH_SCORE};
+use super::ttml::{parse_ttml, MAX_TTML_BYTES};
+use super::{Lyrics, LyricsProvider, ProviderId, Query};
+use futures_util::future::BoxFuture;
+use serde_json::Value;
+
+const SEARCH_URL: &str = "https://lrc.red/api/v1";
+const SITE_URL: &str = "https://lrc.red/";
+/// Lyrics documents fetched per lookup: the best match, and one more for
+/// "Wrong lyrics?".
+const MAX_DOCUMENTS: usize = 2;
+
+pub struct LrcRed {
+    http: reqwest::Client,
+}
+
+impl LrcRed {
+    pub fn new(http: reqwest::Client) -> Self {
+        Self { http }
+    }
+}
+
+fn str_field<'a>(item: &'a Value, key: &str) -> &'a str {
+    item.get(key).and_then(Value::as_str).unwrap_or("")
+}
+
+fn is_timed(item: &Value) -> bool {
+    matches!(str_field(item, "timing_type"), "word" | "line" | "syllable")
+}
+
+/// The result's lyrics document, only when it is on lrc.red itself: the
+/// address comes from a response and must not send the app elsewhere.
+pub fn document_url(item: &Value) -> Option<url::Url> {
+    let url = url::Url::parse(str_field(item, "lyricsUrl")).ok()?;
+    (url.scheme() == "https" && url.host_str() == Some("lrc.red") && url.path().ends_with(".ttml")).then_some(url)
+}
+
+/// Search results that match the song and have a lyrics document, best first.
+pub fn rank_results<'a>(results: &'a [Value], q: &Query) -> Vec<&'a Value> {
+    let title = clean_track_name(&q.title);
+    let mut scored: Vec<(f64, &Value)> = results
+        .iter()
+        .filter(|item| document_url(item).is_some())
+        .map(|item| {
+            let cand = Candidate {
+                title: str_field(item, "track_name"),
+                artist: str_field(item, "artist_name"),
+                duration: item.get("duration").and_then(Value::as_f64),
+                has_synced: is_timed(item),
+            };
+            (score_match(&cand, &title, q.artist.trim(), &q.artist_aliases, q.duration), item)
+        })
+        .filter(|(score, _)| *score > MIN_MATCH_SCORE)
+        .collect();
+    scored.sort_by(|a, b| b.0.total_cmp(&a.0));
+    scored.into_iter().map(|(_, item)| item).collect()
+}
+
+/// A search result and its TTML document as lyrics for a `song`-long song.
+pub fn from_document(item: &Value, ttml: &str, song: Option<f64>) -> Option<Lyrics> {
+    let parsed = parse_ttml(ttml)?;
+    let mut lyrics = Lyrics {
+        provider: ProviderId::Lrcred,
+        id: str_field(item, "id").to_string(),
+        title: str_field(item, "track_name").to_string(),
+        artist: str_field(item, "artist_name").to_string(),
+        synced: parsed.synced,
+        plain: parsed.plain,
+        source_url: Some(SITE_URL.to_string()),
+    };
+    // Timed for a recording of another length: only its words are used.
+    if lyrics.is_synced() && !synced_length_fits(item.get("duration").and_then(Value::as_f64), song) {
+        lyrics.demote_to_plain();
+    }
+    lyrics.has_text().then_some(lyrics)
+}
+
+async fn search(http: &reqwest::Client, query: &str) -> Result<Vec<Value>, String> {
+    let res = http.get(format!("{SEARCH_URL}?{query}")).send().await.map_err(|e| e.to_string())?;
+    if res.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(Vec::new());
+    }
+    if !res.status().is_success() {
+        return Err(format!("lrc.red search: HTTP {}", res.status()));
+    }
+    let body: Value = res.json().await.map_err(|e| e.to_string())?;
+    Ok(body.get("results").and_then(Value::as_array).cloned().unwrap_or_default())
+}
+
+async fn document(http: &reqwest::Client, url: url::Url) -> Option<String> {
+    let res = http.get(url).send().await.ok()?;
+    if !res.status().is_success() || res.content_length().is_some_and(|len| len > MAX_TTML_BYTES as u64) {
+        return None;
+    }
+    res.text().await.ok()
+}
+
+impl LyricsProvider for LrcRed {
+    fn id(&self) -> ProviderId {
+        ProviderId::Lrcred
+    }
+
+    fn search<'a>(&'a self, q: &'a Query) -> BoxFuture<'a, Result<Vec<Lyrics>, String>> {
+        Box::pin(async move {
+            let title = clean_track_name(&q.title);
+            let artist = q.artist.trim();
+            if title.trim().is_empty() {
+                return Ok(Vec::new());
+            }
+            let mut by_fields = format!("track={}&artist={}", encode(&title), encode(artist));
+            if let Some(d) = q.duration {
+                by_fields.push_str(&format!("&duration={}", d.round() as i64));
+            }
+            let mut results = search(&self.http, &by_fields).await?;
+            if rank_results(&results, q).is_empty() {
+                // Several artists in one string ("A, B & C") rarely match as a field.
+                results = search(&self.http, &format!("q={}", encode(&format!("{artist} {title}")))).await?;
+            }
+
+            let mut found = Vec::new();
+            for item in rank_results(&results, q).into_iter().take(MAX_DOCUMENTS) {
+                let Some(url) = document_url(item) else { continue };
+                if let Some(lyrics) = document(&self.http, url).await.and_then(|ttml| from_document(item, &ttml, q.duration)) {
+                    found.push(lyrics);
+                }
+            }
+            Ok(found)
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn result(id: &str, title: &str, artist: &str, duration: f64, timing: &str) -> Value {
+        json!({ "id": id, "isrc": id, "track_name": title, "artist_name": artist, "album_name": "Album",
+            "duration": duration, "timing_type": timing, "lyricsUrl": format!("https://lrc.red/s/{id}.ttml") })
+    }
+
+    fn query() -> Query {
+        Query { title: "Take A Slice".into(), artist: "Glass Animals".into(), duration: Some(210.0), ..Default::default() }
+    }
+
+    const TTML: &str = r#"<tt xmlns="http://www.w3.org/ns/ttml"><body><div>
+        <p begin="10.000" end="12.000"><span begin="10.000" end="11.000">Made</span> <span begin="11.000" end="12.000">up</span></p>
+    </div></body></tt>"#;
+
+    #[test]
+    fn test_rank_prefers_the_right_song_timed_and_of_the_right_length() {
+        let results = vec![
+            result("A", "Different Song", "Glass Animals", 210.0, "word"),
+            result("B", "Take A Slice", "Glass Animals", 190.0, "word"),
+            result("C", "Take A Slice", "Glass Animals", 211.0, "none"),
+            result("D", "Take A Slice", "Glass Animals", 211.0, "word"),
+            result("E", "Take A Slice", "Someone Else", 210.0, "word"),
+        ];
+        let ranked: Vec<&str> = rank_results(&results, &query()).into_iter().map(|r| r["id"].as_str().unwrap()).collect();
+        assert_eq!(ranked, ["D", "C", "B"]);
+    }
+
+    #[test]
+    fn test_document_must_be_on_lrc_red() {
+        let ok = result("X", "T", "A", 1.0, "word");
+        assert_eq!(document_url(&ok).unwrap().as_str(), "https://lrc.red/s/X.ttml");
+        for bad in [
+            "http://lrc.red/s/X.ttml",
+            "https://evil.example/s/X.ttml",
+            "https://lrc.red.evil.example/s/X.ttml",
+            "https://lrc.red/s/X.exe",
+            "file:///etc/passwd",
+            "",
+        ] {
+            let mut item = ok.clone();
+            item["lyricsUrl"] = json!(bad);
+            assert!(document_url(&item).is_none(), "{bad}");
+            assert!(rank_results(&[item], &query()).is_empty());
+        }
+    }
+
+    #[test]
+    fn test_document_becomes_word_timed_lyrics() {
+        let item = result("D", "Take A Slice", "Glass Animals", 211.0, "word");
+        let l = from_document(&item, TTML, Some(210.0)).unwrap();
+        assert_eq!((l.provider, l.id.as_str(), l.title.as_str()), (ProviderId::Lrcred, "D", "Take A Slice"));
+        assert_eq!(l.synced[0].words.as_ref().unwrap().len(), 2);
+        assert_eq!(l.synced[0].text, "Made up");
+    }
+
+    #[test]
+    fn test_lyrics_of_another_length_keep_only_their_words() {
+        let item = result("B", "Take A Slice", "Glass Animals", 150.0, "word");
+        let l = from_document(&item, TTML, Some(210.0)).unwrap();
+        assert!(l.synced.is_empty());
+        assert_eq!(l.plain.as_deref(), Some("Made up"));
+        assert!(from_document(&item, "<html>Sorry</html>", Some(210.0)).is_none());
+    }
+
+    #[tokio::test]
+    #[ignore = "network"]
+    async fn test_live_lrcred() {
+        let http = reqwest::Client::builder().user_agent("Oscilla-tests").build().unwrap();
+        let q = Query { title: "Never Gonna Give You Up".into(), artist: "Rick Astley".into(), duration: Some(213.0), ..Default::default() };
+        let found = LrcRed::new(http).search(&q).await.unwrap();
+        assert!(found.first().is_some_and(|l| l.synced.iter().any(|line| line.words.is_some())));
+    }
+}

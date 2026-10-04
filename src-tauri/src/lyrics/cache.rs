@@ -334,7 +334,7 @@ mod tests {
         let cache = LyricsCache::new(dir.path().to_path_buf());
         let song = |t: &str| Some(SongRef { title: t.into(), artist: "bambi".into() });
         let mut synced = lyrics(ProviderId::Lrclib, true, false);
-        synced.synced.insert(0, super::super::Line { t: 0.0, text: "♪".into(), words: None });
+        synced.synced.insert(0, super::super::Line { t: 0.0, text: "♪".into(), ..Default::default() });
         cache.put_song("aaaaaaaaaaa", song("GORSET"), Some(&synced), false, 100);
         cache.put_song("bbbbbbbbbbb", song("BIG BIG GIRL"), None, false, 300);
         cache.put_song("ccccccccccc", song("LET IT B"), Some(&lyrics(ProviderId::Genius, false, true)), true, 200);

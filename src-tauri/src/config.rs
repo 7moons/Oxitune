@@ -19,6 +19,20 @@ pub struct AppConfig {
     /// Lyrics providers in priority order, each on or off.
     #[serde(default = "crate::lyrics::default_provider_settings")]
     pub lyrics_providers: Vec<crate::lyrics::ProviderSetting>,
+    /// A translation under each lyrics line, into `lyrics_translate_lang`.
+    #[serde(default)]
+    pub lyrics_translate_enabled: bool,
+    #[serde(default = "default_lyrics_translate_lang")]
+    pub lyrics_translate_lang: String,
+    /// Lyrics in other scripts also shown in Latin letters.
+    #[serde(default)]
+    pub lyrics_romanize_enabled: bool,
+    /// Open the Lyrics tab when a song that has lyrics starts.
+    #[serde(default)]
+    pub lyrics_auto_open: bool,
+    /// Blur on the lines not being sung and the glow on the one that is.
+    #[serde(default = "default_lyrics_effects")]
+    pub lyrics_effects: bool,
     pub miniplayer_enabled: bool,
     pub wheel_volume_step: f64,
     #[serde(default)]
@@ -66,6 +80,16 @@ fn default_true() -> bool {
     true
 }
 
+fn default_lyrics_translate_lang() -> String {
+    "en".to_string()
+}
+
+/// Off on Linux: WebKitGTK repaints a blurred layer on every frame, and
+/// one per lyrics line made the whole page stutter there.
+fn default_lyrics_effects() -> bool {
+    !cfg!(target_os = "linux")
+}
+
 fn default_remote_bind() -> String {
     "lan".to_string()
 }
@@ -111,6 +135,11 @@ impl Default for AppConfig {
             notifications_enabled: false,
             lyrics_enabled: true,
             lyrics_providers: crate::lyrics::default_provider_settings(),
+            lyrics_translate_enabled: false,
+            lyrics_translate_lang: default_lyrics_translate_lang(),
+            lyrics_romanize_enabled: false,
+            lyrics_auto_open: false,
+            lyrics_effects: default_lyrics_effects(),
             miniplayer_enabled: true,
             wheel_volume_step: 0.05,
             wheel_volume_on_player_page: false,
@@ -194,6 +223,9 @@ impl AppConfig {
         // Custom presets: well-formed ids, no duplicates, a name, exactly one
         // gain per band, everything in range.
         self.lyrics_providers = crate::lyrics::sanitize_provider_settings(std::mem::take(&mut self.lyrics_providers));
+        if !crate::lyrics::translate::is_lang(&self.lyrics_translate_lang) {
+            self.lyrics_translate_lang = default_lyrics_translate_lang();
+        }
 
         let mut seen = std::collections::HashSet::new();
         self.equalizer_custom_presets.retain(|p| is_custom_preset_id(&p.id) && seen.insert(p.id.clone()));
@@ -345,6 +377,25 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn test_lyrics_translation_language_is_a_language_tag() {
+        let with = |lang: &str| AppConfig { lyrics_translate_lang: lang.into(), ..AppConfig::default() }.sanitized().lyrics_translate_lang;
+        assert_eq!(with("pl"), "pl");
+        assert_eq!(with("zh-CN"), "zh-CN");
+        for bad in ["", "polish language", "en&q=x"] {
+            assert_eq!(with(bad), "en", "{bad}");
+        }
+        // A config saved before these settings existed loads with them off.
+        let mut old = serde_json::to_value(AppConfig::default()).unwrap();
+        for key in ["lyrics_translate_enabled", "lyrics_translate_lang", "lyrics_romanize_enabled", "lyrics_auto_open", "lyrics_effects"] {
+            old.as_object_mut().unwrap().remove(key);
+        }
+        let loaded: AppConfig = serde_json::from_value(old).unwrap();
+        assert!(!loaded.lyrics_translate_enabled && !loaded.lyrics_romanize_enabled && !loaded.lyrics_auto_open);
+        assert_eq!(loaded.lyrics_translate_lang, "en");
+        assert_eq!(loaded.lyrics_effects, !cfg!(target_os = "linux"));
+    }
 
     #[test]
     fn test_sanitized_clamps_malicious_out_of_range_values() {

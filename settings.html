@@ -191,6 +191,46 @@
 
           <div class="setting-row">
             <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.lyricsEffects.title">Lyrics effects</span>
+              <span class="setting-desc" data-i18n="settings.lyricsEffects.desc">The line being sung stands out and the others are softly blurred. Turn off if lyrics scroll unevenly</span>
+            </div>
+            <label class="toggle"><input type="checkbox" id="lyrics_effects" /><span class="toggle-track"></span></label>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.lyricsAutoOpen.title">Open the Lyrics tab by itself</span>
+              <span class="setting-desc" data-i18n="settings.lyricsAutoOpen.desc">Switches to the Lyrics tab when a song that has lyrics starts</span>
+            </div>
+            <label class="toggle"><input type="checkbox" id="lyrics_auto_open" /><span class="toggle-track"></span></label>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.lyricsTranslate.title">Translate lyrics</span>
+              <span class="setting-desc" data-i18n="settings.lyricsTranslate.desc">Shows a translation under each line. The lyrics are sent to Google Translate</span>
+            </div>
+            <label class="toggle"><input type="checkbox" id="lyrics_translate_enabled" /><span class="toggle-track"></span></label>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.lyricsLang.title">Translate into</span>
+              <span class="setting-desc" data-i18n="settings.lyricsLang.desc">Lines already in this language are left as they are</span>
+            </div>
+            <select id="lyrics_translate_lang" class="select" data-i18n-label="settings.lyricsLang.title"></select>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.lyricsRomanize.title">Romanize lyrics</span>
+              <span class="setting-desc" data-i18n="settings.lyricsRomanize.desc">Shows lyrics written in other scripts (Japanese, Korean, Cyrillic\u2026) in Latin letters too. The lyrics are sent to Google Translate</span>
+            </div>
+            <label class="toggle"><input type="checkbox" id="lyrics_romanize_enabled" /><span class="toggle-track"></span></label>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-text">
               <span class="setting-title" data-i18n="settings.lyricsCache.title">Saved lyrics</span>
               <span class="setting-desc" data-i18n="settings.lyricsCache.desc">Lyrics are kept for 30 days. Clearing them makes every song look its lyrics up again.</span>
             </div>

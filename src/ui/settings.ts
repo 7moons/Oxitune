@@ -20,6 +20,11 @@ interface AppConfig {
   notifications_enabled: boolean;
   lyrics_enabled: boolean;
   lyrics_providers?: ProviderSetting[];
+  lyrics_translate_enabled: boolean;
+  lyrics_translate_lang: string;
+  lyrics_romanize_enabled: boolean;
+  lyrics_auto_open: boolean;
+  lyrics_effects: boolean;
   custom_css: string;
   equalizer_preset: string;
   equalizer_gains: number[];
@@ -63,6 +68,10 @@ const TOGGLES: [keyof AppConfig & string, boolean][] = [
   ['close_to_tray', true],
   ['autostart', false],
   ['lyrics_enabled', true],
+  ['lyrics_translate_enabled', false],
+  ['lyrics_romanize_enabled', false],
+  ['lyrics_auto_open', false],
+  ['lyrics_effects', true],
   ['loudness_normalization', false],
   ['skip_silence_enabled', false],
   ['preserve_pitch', true],
@@ -79,6 +88,32 @@ const SAVE_DEBOUNCE_MS = 500;
 
 let currentConfig: AppConfig | null = null;
 let lyricsProviders: ProviderSetting[] = normalizeProviders(undefined);
+
+/** Languages lyrics can be translated into, named in the app's language. */
+const TRANSLATE_LANGS = [
+  'en', 'pl', 'de', 'es', 'fr', 'it', 'pt', 'nl', 'sv', 'cs', 'uk', 'ru', 'tr', 'ja', 'ko', 'zh-CN', 'zh-TW', 'ar', 'hi', 'id', 'vi'
+];
+
+function renderTranslateLangs(selected: string) {
+  const select = $<HTMLSelectElement>('lyrics_translate_lang');
+  if (!select) return;
+  const codes = TRANSLATE_LANGS.includes(selected) ? TRANSLATE_LANGS : [selected, ...TRANSLATE_LANGS];
+  let names: Intl.DisplayNames | null = null;
+  try {
+    names = new Intl.DisplayNames([document.documentElement.lang || 'en'], { type: 'language' });
+  } catch {
+    names = null;
+  }
+  select.replaceChildren(
+    ...codes.map((code) => {
+      const option = document.createElement('option');
+      option.value = code;
+      option.textContent = names?.of(code) ?? code;
+      return option;
+    })
+  );
+  select.value = selected;
+}
 
 function renderLyricsProviders() {
   const list = $('lyrics-providers-list');
@@ -455,6 +490,7 @@ function applyConfig(config: AppConfig) {
 
   lyricsProviders = normalizeProviders(config.lyrics_providers);
   renderLyricsProviders();
+  renderTranslateLangs(config.lyrics_translate_lang || 'en');
 }
 
 /** After an import: every live effect the settings drive, pushed to the
@@ -500,6 +536,7 @@ function collectConfig(config: AppConfig): AppConfig {
   next.equalizer_custom_presets = customPresets;
   next.shortcuts = shortcuts;
   next.lyrics_providers = lyricsProviders;
+  next.lyrics_translate_lang = $<HTMLSelectElement>('lyrics_translate_lang')?.value || next.lyrics_translate_lang;
   return next;
 }
 
@@ -791,6 +828,18 @@ document.addEventListener('DOMContentLoaded', () => {
       showToast(errorMessage(e));
     }
   });
+  // The translate/romanize switches under the lyrics in the player change
+  // the same two settings: keep these toggles (and the next save) in step.
+  void window.__TAURI__?.event.listen<Record<string, unknown>>('config-updated', (e) => {
+    for (const id of ['lyrics_translate_enabled', 'lyrics_romanize_enabled'] as const) {
+      const value = e.payload?.[id];
+      const el = $<HTMLInputElement>(id);
+      if (typeof value !== 'boolean' || !el || !currentConfig) continue;
+      el.checked = value;
+      currentConfig[id] = value;
+    }
+  });
+
   $('lyrics-cache-browse-btn')?.addEventListener('click', () => void openLyricsCacheBrowser());
   $('lyrics-cache-clear-btn')?.addEventListener('click', async () => {
     try {

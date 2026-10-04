@@ -58,6 +58,8 @@ rust-embed = { version = "8", features = ["mime-guess"] }
 tauri-plugin-window-state = "2"
 tauri-plugin-autostart = "2"
 semver = "1"
+# TTML lyrics (src/lyrics/ttml.rs): read-only XML tree, pure Rust, no deps.
+roxmltree = "0.20"
 tar = "0.4"
 flate2 = "1"
 minisign-verify = "0.2"

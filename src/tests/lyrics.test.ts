@@ -60,6 +60,8 @@ describe('toCurrentLyrics', () => {
 describe('providerName', () => {
   test('brand names and the translated local label', () => {
     expect(providerName('musixmatch', 'Local')).toBe('Musixmatch');
+    expect(providerName('lrcred', 'Local')).toBe('lrc.red');
+    expect(providerName('unison', 'Local')).toBe('Unison');
     expect(providerName('local', 'Pliki lokalne')).toBe('Pliki lokalne');
     expect(providerName(null, 'x')).toBe('');
   });
@@ -131,22 +133,37 @@ describe('old localStorage offsets are read for the one-time migration', () => {
 });
 
 describe('lyrics provider settings', () => {
-  test('unknown and duplicate ids dropped, missing ones appended with defaults', () => {
+  test('unknown and duplicate ids dropped, missing ones added with defaults', () => {
     const list = normalizeProviders([
       { id: 'genius', enabled: true },
       { id: 'bogus', enabled: true },
       { id: 'genius', enabled: false }
     ]);
-    expect(list[0]).toEqual({ id: 'genius', enabled: true });
-    expect(list.map((p) => p.id).sort()).toEqual(['genius', 'local', 'lrclib', 'musixmatch', 'netease', 'ytm']);
-    expect(list.find((p) => p.id === 'musixmatch')?.enabled).toBe(false);
-    expect(list.find((p) => p.id === 'netease')?.enabled).toBe(false);
+    expect(list.find((p) => p.id === 'genius')).toEqual({ id: 'genius', enabled: true });
+    expect(list.map((p) => p.id).sort()).toEqual(['genius', 'local', 'lrclib', 'lrcred', 'musixmatch', 'netease', 'unison', 'ytm']);
+    for (const unofficial of ['musixmatch', 'netease', 'unison']) {
+      expect(list.find((p) => p.id === unofficial)?.enabled).toBe(false);
+    }
     expect(list.find((p) => p.id === 'lrclib')?.enabled).toBe(true);
+    expect(list.find((p) => p.id === 'lrcred')?.enabled).toBe(true);
+  });
+
+  // Same rule (and the same cases) as sanitize_provider_settings in Rust.
+  test('a provider new to a saved list goes where the default order has it', () => {
+    const saved = (ids: string[]) => ids.map((id) => ({ id, enabled: true }));
+    const ids = (list: { id: string }[]) => list.map((p) => p.id);
+    expect(ids(normalizeProviders(undefined))).toEqual(['local', 'lrcred', 'lrclib', 'unison', 'musixmatch', 'netease', 'ytm', 'genius']);
+    expect(ids(normalizeProviders(saved(['local', 'lrclib', 'musixmatch', 'netease', 'ytm', 'genius'])))).toEqual(
+      ids(normalizeProviders(undefined))
+    );
+    expect(ids(normalizeProviders(saved(['genius', 'lrclib', 'local', 'musixmatch', 'netease', 'ytm'])))).toEqual([
+      'genius', 'lrclib', 'unison', 'local', 'lrcred', 'musixmatch', 'netease', 'ytm'
+    ]);
   });
 
   test('moving keeps every provider and clamps at the ends', () => {
     const list = normalizeProviders(undefined);
-    expect(moveProvider(list, 1, -1).map((p) => p.id).slice(0, 2)).toEqual(['lrclib', 'local']);
+    expect(moveProvider(list, 1, -1).map((p) => p.id).slice(0, 2)).toEqual(['lrcred', 'local']);
     expect(moveProvider(list, 0, -1)).toEqual(list);
     expect(moveProvider(list, list.length - 1, 1)).toEqual(list);
     expect(moveProvider(list, 2, 1)).toHaveLength(list.length);

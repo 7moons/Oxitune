@@ -13,7 +13,7 @@
     },
     "provider": {
       "type": ["string", "null"],
-      "enum": ["local", "lrclib", "musixmatch", "netease", "ytm", "genius", null],
+      "enum": ["local", "lrcred", "lrclib", "unison", "musixmatch", "netease", "ytm", "genius", null],
       "description": "Where the lyrics came from; null while loading or when none were found."
     },
     "synced": {
@@ -29,14 +29,22 @@
           "words": {
             "type": "array",
             "description": "Word-by-word timing when the provider has it. Concatenating `text` of all words gives the line text (spaces stay on the preceding word).",
-            "items": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": ["t", "text"],
-              "properties": {
-                "t": { "type": "number", "minimum": 0, "description": "Word start, seconds from the start of the song." },
-                "text": { "type": "string" }
-              }
+            "items": { "$ref": "#/$defs/Word" }
+          },
+          "end": { "type": "number", "minimum": 0, "description": "When the line stops being sung, when the provider says. Absent otherwise: the line lasts until the next one." },
+          "alt": { "type": "boolean", "description": "True for lines sung by the song's second voice (a duet), shown on the other side. Absent means false." },
+          "bg": {
+            "type": "object",
+            "description": "Background vocals sung under the line.",
+            "additionalProperties": false,
+            "required": ["text"],
+            "properties": {
+              "text": { "type": "string" },
+              "words": {
+            "type": "array",
+            "description": "Word-by-word timing when the provider has it. Concatenating `text` of all words gives the line text (spaces stay on the preceding word).",
+            "items": { "$ref": "#/$defs/Word" }
+          }
             }
           }
         }
@@ -55,6 +63,18 @@
     "source_url": {
       "type": ["string", "null"],
       "description": "Page of these lyrics on the provider's site, when it has one."
+    }
+  },
+  "$defs": {
+    "Word": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t", "text"],
+      "properties": {
+        "t": { "type": "number", "minimum": 0, "description": "Word start, seconds from the start of the song." },
+        "text": { "type": "string" },
+        "end": { "type": "number", "minimum": 0, "description": "When the word stops being sung, when the provider says." }
+      }
     }
   }
 }

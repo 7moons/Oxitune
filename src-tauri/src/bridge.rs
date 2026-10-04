@@ -84,6 +84,20 @@ struct PickLyricsArgs {
 }
 
 #[derive(Deserialize)]
+struct TranslateLyricsArgs {
+    lang: String,
+}
+
+/// The two switches under the lyrics; a missing one is left as it is.
+#[derive(Deserialize)]
+struct LyricsDisplayArgs {
+    #[serde(default)]
+    translate: Option<bool>,
+    #[serde(default)]
+    romanize: Option<bool>,
+}
+
+#[derive(Deserialize)]
 struct ImportOffsetsArgs {
     entries: Vec<(String, f64)>,
 }
@@ -304,6 +318,28 @@ bridge_commands! {
     "pick_lyrics" => |h, state, args| {
         let p: PickLyricsArgs = parse_args("pick_lyrics", args)?;
         to_data(lyrics::commands::pick(&state.lyrics, &p.provider, &p.id, h)?)
+    }
+    "translate_lyrics" => |h, state, args| {
+        let p: TranslateLyricsArgs = parse_args("translate_lyrics", args)?;
+        to_data(lyrics::commands::translate_current(&state.lyrics, &p.lang).await?)
+    }
+    "romanize_lyrics" => |h, state, args| {
+        to_data(lyrics::commands::romanize_current(&state.lyrics).await?)
+    }
+    // The translate/romanize switches under the lyrics: just these two
+    // settings, saved and announced to every window.
+    "set_lyrics_display" => |h, state, args| {
+        let p: LyricsDisplayArgs = parse_args("set_lyrics_display", args)?;
+        let mut config = state.config_manager.load();
+        config.lyrics_translate_enabled = p.translate.unwrap_or(config.lyrics_translate_enabled);
+        config.lyrics_romanize_enabled = p.romanize.unwrap_or(config.lyrics_romanize_enabled);
+        state.config_manager.save(&config)?;
+        let changed = serde_json::json!({
+            "lyrics_translate_enabled": config.lyrics_translate_enabled,
+            "lyrics_romanize_enabled": config.lyrics_romanize_enabled,
+        });
+        let _ = h.emit("config-updated", &changed);
+        Ok(changed)
     }
     "import_lyrics_offsets" => |h, state, args| {
         let mut p: ImportOffsetsArgs = parse_args("import_lyrics_offsets", args)?;
@@ -550,6 +586,9 @@ mod tests {
             "list_lyrics_candidates",
             "pick_lyrics",
             "import_lyrics_offsets",
+            "translate_lyrics",
+            "romanize_lyrics",
+            "set_lyrics_display",
             "get_config",
             "open_remote_pairing",
             "notify_track_change",
