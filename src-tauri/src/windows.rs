@@ -104,12 +104,31 @@ pub fn show(app: &AppHandle, label: &str) {
     }
 }
 
-/// Shows the window, or closes it if it's already showing.
+/// Closes the window if the user can see it, else brings it to the front.
 pub fn toggle(app: &AppHandle, label: &str) {
     match app.get_webview_window(label) {
-        Some(win) if win.is_visible().unwrap_or(false) => close(&win),
+        Some(win) if in_sight(&win) => close(&win),
         _ => show(app, label),
     }
+}
+
+/// Whether the window is in front of the user. `is_visible` alone is also
+/// true for a minimized window, or one behind the main window, so clicking
+/// its menu entry closed it instead of showing it.
+fn in_sight(win: &WebviewWindow) -> bool {
+    let on_top = spec(win.label()).is_some_and(|s| s.always_on_top);
+    should_close(
+        win.is_visible().unwrap_or(false),
+        win.is_minimized().unwrap_or(false),
+        on_top || win.is_focused().unwrap_or(false),
+    )
+}
+
+/// A window not always on top may sit under the main window, where the
+/// toggle is clicked from (so it's never focused then): showing it is the
+/// only safe answer. Its own close button closes it.
+fn should_close(visible: bool, minimized: bool, in_front: bool) -> bool {
+    visible && !minimized && in_front
 }
 
 /// Shows Settings on one section (`sec-…` id in settings.html).
@@ -149,6 +168,16 @@ mod tests {
                 .unwrap();
             assert!(caps.contains(&format!("\"{}\"", s.label)), "{} capability", s.label);
         }
+    }
+
+    // Regression: a minimized Settings was closed by its menu entry instead
+    // of being shown, and only the next click brought it up.
+    #[test]
+    fn test_toggle_closes_only_a_window_in_front() {
+        assert!(should_close(true, false, true));
+        assert!(!should_close(true, true, true), "minimized: show it");
+        assert!(!should_close(true, false, false), "behind another window: show it");
+        assert!(!should_close(false, false, true), "hidden: show it");
     }
 
     #[test]
