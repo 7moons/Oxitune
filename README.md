@@ -26,7 +26,7 @@ Oscilla wraps music.youtube.com with what a desktop player should have: media ke
 
 ### Lyrics
 - Synced lyrics in YouTube Music's own Lyrics tab and in the mini player, from several providers (local `.lrc`/tags, lrc.red, LRCLIB, YouTube Music, Genius; Unison, Musixmatch and NetEase optional), with per-song timing offsets and a "wrong lyrics?" picker.
-- Word-by-word highlighting where the source has it, with duet voices on opposite sides, background vocals and interlude dots; a fullscreen lyrics view with the cover and player controls.
+- Word-by-word highlighting where the source has it, with duet voices on opposite sides, background vocals and interlude dots; a fullscreen lyrics view with the cover and player controls; six looks to pick from in Settings.
 - Optional translation under each line and romanization of lyrics in other scripts (both go through Google Translate, off by default).
 
 ### Listen Together

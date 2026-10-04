@@ -25,6 +25,7 @@ interface AppConfig {
   lyrics_romanize_enabled: boolean;
   lyrics_auto_open: boolean;
   lyrics_effects: boolean;
+  lyrics_theme: string;
   custom_css: string;
   equalizer_preset: string;
   equalizer_gains: number[];
@@ -491,6 +492,8 @@ function applyConfig(config: AppConfig) {
   lyricsProviders = normalizeProviders(config.lyrics_providers);
   renderLyricsProviders();
   renderTranslateLangs(config.lyrics_translate_lang || 'en');
+  const lyricsTheme = $<HTMLSelectElement>('lyrics_theme');
+  if (lyricsTheme) lyricsTheme.value = config.lyrics_theme || 'classic';
 }
 
 /** After an import: every live effect the settings drive, pushed to the
@@ -537,6 +540,7 @@ function collectConfig(config: AppConfig): AppConfig {
   next.shortcuts = shortcuts;
   next.lyrics_providers = lyricsProviders;
   next.lyrics_translate_lang = $<HTMLSelectElement>('lyrics_translate_lang')?.value || next.lyrics_translate_lang;
+  next.lyrics_theme = $<HTMLSelectElement>('lyrics_theme')?.value || next.lyrics_theme;
   return next;
 }
 

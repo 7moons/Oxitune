@@ -53,6 +53,9 @@ export const LYRICS_CSS = `
     --ytmd-lyric-on: #fff;
     --ytmd-lyric-off: rgba(255, 255, 255, 0.35);
     --ytmd-lyric-size: 28px;
+    --ytmd-lyric-scale: 1;
+    --ytmd-lyric-weight: 700;
+    --ytmd-lyric-gap: 14px;
     position: relative;
     display: flex;
     flex-direction: column;
@@ -60,13 +63,13 @@ export const LYRICS_CSS = `
     overflow-x: clip;
   }
   .ytmd-lyrics-view[hidden] { display: none; }
-  .ytmd-lyrics-lines { display: flex; flex-direction: column; gap: 14px; }
+  .ytmd-lyrics-lines { display: flex; flex-direction: column; gap: var(--ytmd-lyric-gap); }
 
   /* Large display type; the lines not being sung are dimmed. Size and
      weight never change between states (the sung line grows by transform
      only), so the text doesn't reflow as the highlight moves. */
   .ytmd-lyric-line {
-    font: 700 var(--ytmd-lyric-size)/1.25 var(--ytmd-font-display, "YouTube Sans", Roboto, Arial, sans-serif);
+    font: var(--ytmd-lyric-weight) calc(var(--ytmd-lyric-size) * var(--ytmd-lyric-scale))/1.25 var(--ytmd-font-display, "YouTube Sans", Roboto, Arial, sans-serif);
     color: var(--ytmd-lyric-off);
     cursor: pointer;
     padding: 4px 6% 4px 0;
@@ -82,23 +85,21 @@ export const LYRICS_CSS = `
   .ytmd-lyric-line.ytmd-plain:hover { color: var(--ytmd-lyric-on); }
   .ytmd-lyric-line.ytmd-empty { min-height: 0.6em; padding: 0; }
 
-  /* Word by word: the word being sung fills from its start to its end. */
+  /* Word by word: the word being sung fills from its start to its end.
+     Every word of the sung line is painted the same way, by one gradient
+     whose edge sits at --ytmd-fill (0 = not sung yet, 1 = sung). A word
+     never switches between ways of being painted, and nothing here has a
+     transition: switching made each syllable blink as it finished. */
   .ytmd-lyric-line.ytmd-active .ytmd-has-words .ytmd-lyric-word {
-    color: var(--ytmd-lyric-off);
-    transition: color 0.15s linear;
-  }
-  .ytmd-lyric-line.ytmd-active .ytmd-has-words .ytmd-lyric-word.ytmd-sung { color: var(--ytmd-lyric-on); }
-  .ytmd-lyric-line.ytmd-active .ytmd-has-words .ytmd-lyric-word[style*="--ytmd-fill"] {
     background-image: linear-gradient(
       90deg,
-      var(--ytmd-lyric-on) calc(var(--ytmd-fill) * 112% - 12%),
-      var(--ytmd-lyric-off) calc(var(--ytmd-fill) * 112%)
+      var(--ytmd-lyric-on) calc(var(--ytmd-fill, 0) * 112% - 12%),
+      var(--ytmd-lyric-off) calc(var(--ytmd-fill, 0) * 112%)
     );
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
     -webkit-text-fill-color: transparent;
-    transition: none;
   }
 
   /* Background vocals, the romanization and the translation sit under the line, smaller. */
@@ -115,8 +116,9 @@ export const LYRICS_CSS = `
   .ytmd-lyric-line.ytmd-plain .ytmd-lyric-trans { color: rgba(255, 255, 255, 0.7); }
 
   /* An interlude: three dots that light up as it passes. */
-  .ytmd-lyric-gap { display: none; gap: 10px; padding: 10px 0; }
-  .ytmd-lyric-gap.ytmd-active { display: flex; }
+  /* Always laid out (appearing would push every line below it down). */
+  .ytmd-lyric-gap { display: flex; gap: 10px; padding: 10px 0; opacity: 0; transition: opacity 0.4s ease; }
+  .ytmd-lyric-gap.ytmd-active { opacity: 1; }
   .ytmd-lyric-dot {
     width: 12px;
     height: 12px;
@@ -125,6 +127,36 @@ export const LYRICS_CSS = `
     transition: background-color 0.4s ease, transform 0.4s ease;
   }
   .ytmd-lyric-dot.ytmd-lit { background: var(--ytmd-lyric-on); transform: scale(1.15); }
+
+  /* ---- Looks (Settings > Lyrics look; LYRICS_THEMES in view.ts). "classic" is the base above. ---- */
+  .ytmd-lyrics-view[data-theme="spotlight"] {
+    --ytmd-lyric-scale: 1.3;
+    --ytmd-lyric-weight: 800;
+    --ytmd-lyric-gap: 22px;
+    --ytmd-lyric-off: rgba(255, 255, 255, 0.2);
+  }
+  .ytmd-lyrics-view[data-theme="compact"] {
+    --ytmd-lyric-scale: 0.72;
+    --ytmd-lyric-weight: 500;
+    --ytmd-lyric-gap: 4px;
+    --ytmd-lyric-off: rgba(255, 255, 255, 0.5);
+  }
+  .ytmd-lyrics-view[data-theme="accent"],
+  .ytmd-lyrics-view[data-theme="karaoke"] {
+    /* The cover's color, lifted toward white so it reads on any cover. */
+    --ytmd-lyric-on: color-mix(in srgb, var(--ytmd-accent, #fff) 65%, #fff);
+  }
+  .ytmd-lyrics-view[data-theme="centered"] { --ytmd-lyric-weight: 600; }
+  .ytmd-lyrics-view[data-theme="karaoke"] { --ytmd-lyric-scale: 1.15; --ytmd-lyric-weight: 800; --ytmd-lyric-gap: 20px; }
+  .ytmd-lyrics-view[data-theme="karaoke"] .ytmd-lyric-line:not(.ytmd-plain) { text-transform: uppercase; letter-spacing: 0.02em; }
+  .ytmd-lyrics-view[data-theme="centered"] .ytmd-lyric-line,
+  .ytmd-lyrics-view[data-theme="karaoke"] .ytmd-lyric-line {
+    text-align: center;
+    padding: 4px 3%;
+    transform-origin: center;
+  }
+  .ytmd-lyrics-view[data-theme="centered"] .ytmd-lyric-gap,
+  .ytmd-lyrics-view[data-theme="karaoke"] .ytmd-lyric-gap { justify-content: center; }
 
   /* Effects (Settings): the sung line stands out, the rest falls back. Off
      while the listener scrolls through the lyrics themselves. */
@@ -253,7 +285,7 @@ export const LYRICS_CSS = `
   }
   .ytmd-fs-lyrics::-webkit-scrollbar { display: none; }
   .ytmd-fs-lyrics .ytmd-lyrics-view { --ytmd-lyric-size: clamp(28px, 3.2vw, 52px); }
-  .ytmd-fs-lyrics .ytmd-lyrics-lines { gap: 22px; }
+  .ytmd-fs-lyrics .ytmd-lyrics-lines { gap: calc(var(--ytmd-lyric-gap) * 1.5); }
   .ytmd-fs-lyrics .ytmd-native-lyrics-status { font-size: 20px; }
   @media (max-width: 800px) {
     .ytmd-fs-side { display: none; }

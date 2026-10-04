@@ -8,7 +8,7 @@ import { isSyncGuest } from '../../preload/syncRole';
 import { nextInQueue, songTags } from './songInfo';
 import { CurrentLyrics, EMPTY_LYRICS, LyricsCandidate, providerName, toCurrentLyrics, toLineTexts } from '../../types/lyrics';
 import { LYRICS_CSS } from './styles';
-import { LyricsExtras, LyricsView, NO_EXTRAS } from './view';
+import { LyricsExtras, LyricsTheme, LyricsView, NO_EXTRAS, toTheme } from './view';
 import { LyricsFullscreen } from './fullscreen';
 
 /** Lyrics come from the backend (src-tauri/src/lyrics), already parsed and
@@ -36,9 +36,10 @@ export interface LyricsPrefs {
   romanize: boolean;
   autoOpen: boolean;
   effects: boolean;
+  theme: LyricsTheme;
 }
 
-export const DEFAULT_PREFS: LyricsPrefs = { translate: false, lang: 'en', romanize: false, autoOpen: false, effects: true };
+export const DEFAULT_PREFS: LyricsPrefs = { translate: false, lang: 'en', romanize: false, autoOpen: false, effects: true, theme: 'classic' };
 
 /** `prev` with whatever lyrics settings `config` carries: the whole config
  * at start, only the changed fields in a `config-updated` event. */
@@ -50,7 +51,8 @@ export function readPrefs(config: Record<string, unknown>, prev: LyricsPrefs = D
     lang: typeof lang === 'string' && /^[A-Za-z]{2,3}(-[A-Za-z]{2,4})?$/.test(lang) ? lang : prev.lang,
     romanize: bool('lyrics_romanize_enabled', prev.romanize),
     autoOpen: bool('lyrics_auto_open', prev.autoOpen),
-    effects: bool('lyrics_effects', prev.effects)
+    effects: bool('lyrics_effects', prev.effects),
+    theme: 'lyrics_theme' in config ? toTheme(config.lyrics_theme) : prev.theme
   };
 }
 
@@ -67,6 +69,26 @@ let lastPosition = 0;
  * player's ticks (~4 a second) the position is carried forward every frame,
  * so lines and words light up on time instead of in 250 ms steps. */
 let lastTickAt = 0;
+/** The video element's own clock at that tick: how far it has moved since
+ * is how far the song has. */
+let videoTimeAtTick = Number.NaN;
+
+/** The song's position between two ticks: the last tick's position plus
+ * how far the video's clock has moved since. Timing it with the wall clock
+ * drifted from the player by a few hundredths of a second per tick, and
+ * every tick then snapped the word fill forward. The wall clock is only
+ * the fallback (the video's clock jumped: a seek, another video element). */
+export function carriedPosition(
+  tickPosition: number,
+  videoNow: number,
+  videoAtTick: number,
+  elapsedMs: number,
+  playbackRate: number
+): number {
+  const moved = videoNow - videoAtTick;
+  if (Number.isFinite(moved) && moved >= 0 && moved <= MAX_CARRY_SECS) return tickPosition + moved;
+  return tickPosition + Math.min(MAX_CARRY_SECS, Math.max(0, elapsedMs) / 1000) * (playbackRate || 1);
+}
 /** The furthest position shown for this song, so a tick that lands a hair
  * behind the carried-forward one doesn't step a line back. */
 let shownPosition = 0;
@@ -126,6 +148,7 @@ export const LyricsPlugin: YTMDPlugin = {
     const seekTo = (secs: number) => PlayerBridge.seekTo(secs);
     tabView = new LyricsView({ onSeek: seekTo, resumeLabel: t().lyricsResumeSync });
     tabView.setEffects(prefs.effects);
+    tabView.setTheme(prefs.theme);
     fullscreen = new LyricsFullscreen({
       labels: {
         close: t().close,
@@ -140,6 +163,7 @@ export const LyricsPlugin: YTMDPlugin = {
       onClose: () => tabView?.scrollToCurrent()
     });
     fullscreen.view.setEffects(prefs.effects);
+    fullscreen.view.setTheme(prefs.theme);
 
     const style = document.createElement('style');
     style.id = 'ytmd-native-lyrics-styles';
@@ -165,8 +189,10 @@ export const LyricsPlugin: YTMDPlugin = {
       if ((!lyricsVisible && !fullscreen?.isOpen) || lyrics.synced.length === 0) return;
       const video = ctx.getVideoElement();
       if (!video || video.paused) return;
-      const carried = Math.min(MAX_CARRY_SECS, (performance.now() - lastTickAt) / 1000) * (video.playbackRate || 1);
-      showPosition(lastPosition + carried, true);
+      showPosition(
+        carriedPosition(lastPosition, video.currentTime, videoTimeAtTick, performance.now() - lastTickAt, video.playbackRate),
+        true
+      );
     };
     frame = requestAnimationFrame(onFrame);
 
@@ -246,6 +272,7 @@ export const LyricsPlugin: YTMDPlugin = {
   onTick(currentTimeSecs: number, ctx: PluginContext) {
     lastPosition = currentTimeSecs;
     lastTickAt = performance.now();
+    videoTimeAtTick = ctx.getVideoElement()?.currentTime ?? Number.NaN;
     showPosition(currentTimeSecs, true);
     const duration = currentTrack?.durationSecs ?? 0;
     fullscreen?.setProgress(currentTimeSecs, duration);
@@ -338,6 +365,8 @@ function applyPrefs(ctx: PluginContext, next: LyricsPrefs) {
   if (!changed) return;
   tabView?.setEffects(prefs.effects);
   fullscreen?.view.setEffects(prefs.effects);
+  tabView?.setTheme(prefs.theme);
+  fullscreen?.view.setTheme(prefs.theme);
   renderCurrentLyrics(ctx);
   void loadExtras(ctx);
 }

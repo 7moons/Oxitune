@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { DEFAULT_PREFS, lyricsStamp, readPrefs } from '../plugins/lyrics';
-import { activeGapIndex, litDots, plainLineAt } from '../plugins/lyrics/view';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { DEFAULT_PREFS, carriedPosition, lyricsStamp, readPrefs } from '../plugins/lyrics';
+import { LYRICS_THEMES, activeGapIndex, litDots, plainLineAt, toTheme } from '../plugins/lyrics/view';
 import { formatClock, seekTarget } from '../plugins/lyrics/fullscreen';
 import { LYRICS_CSS } from '../plugins/lyrics/styles';
 import {
@@ -160,14 +162,15 @@ describe('lyrics settings on the page', () => {
         lyrics_translate_lang: 'pl',
         lyrics_romanize_enabled: true,
         lyrics_auto_open: true,
-        lyrics_effects: false
+        lyrics_effects: false,
+        lyrics_theme: 'karaoke'
       })
-    ).toEqual({ translate: true, lang: 'pl', romanize: true, autoOpen: true, effects: false });
+    ).toEqual({ translate: true, lang: 'pl', romanize: true, autoOpen: true, effects: false, theme: 'karaoke' });
     expect(readPrefs({})).toEqual(DEFAULT_PREFS);
   });
 
   test('an update carrying only some fields keeps the rest', () => {
-    const before = { translate: true, lang: 'pl', romanize: false, autoOpen: true, effects: false };
+    const before = { translate: true, lang: 'pl', romanize: false, autoOpen: true, effects: false, theme: 'compact' as const };
     expect(readPrefs({ lyrics_romanize_enabled: true }, before)).toEqual({ ...before, romanize: true });
     expect(readPrefs({ custom_css: 'a{}' }, before)).toEqual(before);
   });
@@ -186,6 +189,54 @@ describe('lyrics settings on the page', () => {
     expect(lyricsStamp({ ...lyrics, provider: 'genius' }, 'v|song')).not.toBe(stamp);
     expect(lyricsStamp({ ...lyrics, synced: [] }, 'v|song')).not.toBe(stamp);
     expect(lyricsStamp(lyrics, 'w|other')).not.toBe(stamp);
+  });
+});
+
+describe('position between ticks', () => {
+  test('follows the video clock, so a tick never snaps the fill', () => {
+    // 0.1 s of song since the tick, whatever the wall clock says.
+    expect(carriedPosition(30, 100.1, 100, 140, 1)).toBeCloseTo(30.1);
+    expect(carriedPosition(30, 100.1, 100, 60, 1.5)).toBeCloseTo(30.1);
+    expect(carriedPosition(30, 100, 100, 500, 1)).toBe(30);
+  });
+
+  test('a clock that jumped (seek, other video) falls back to the wall clock, capped', () => {
+    expect(carriedPosition(30, 20, 100, 200, 1)).toBeCloseTo(30.2);
+    expect(carriedPosition(30, 160, 100, 200, 2)).toBeCloseTo(30.4);
+    expect(carriedPosition(30, Number.NaN, 100, 9000, 1)).toBe(31);
+    expect(carriedPosition(30, 100, Number.NaN, -50, 1)).toBe(30);
+  });
+});
+
+describe('lyrics looks', () => {
+  const root = join(import.meta.dir, '..', '..');
+  test('the same ids in the backend, the stylesheet and Settings', () => {
+    const rust = readFileSync(join(root, 'src-tauri/src/config.rs'), 'utf8');
+    const listed = /LYRICS_THEMES: \[&str; \d+\] = \[([^\]]+)\]/.exec(rust)?.[1].match(/[a-z]+/g);
+    expect(listed).toEqual([...LYRICS_THEMES]);
+    const html = readFileSync(join(root, 'settings.html'), 'utf8');
+    const select = /<select id="lyrics_theme"[\s\S]*?<\/select>/.exec(html)?.[0] ?? '';
+    expect([...select.matchAll(/value="([a-z]+)"/g)].map((m) => m[1])).toEqual([...LYRICS_THEMES]);
+    for (const theme of LYRICS_THEMES.filter((id) => id !== 'classic')) {
+      expect(LYRICS_CSS).toContain(`[data-theme="${theme}"]`);
+    }
+  });
+
+  test('an unknown look is the classic one', () => {
+    expect(toTheme('karaoke')).toBe('karaoke');
+    expect(toTheme('neon')).toBe('classic');
+    expect(toTheme(undefined)).toBe('classic');
+    expect(readPrefs({ lyrics_theme: 'nope' }).theme).toBe('classic');
+  });
+
+  // Each finished syllable blinked: its color animated from transparent
+  // while the gradient that had been painting it was already gone.
+  test('a word is painted one way only, with no transition', () => {
+    const wordRules = LYRICS_CSS.split('}').filter((rule) => (rule.split('{')[0] ?? '').includes('.ytmd-lyric-word'));
+    expect(wordRules).toHaveLength(1);
+    expect(wordRules[0]).toContain('var(--ytmd-fill, 0)');
+    expect(wordRules[0].split('{')[1]).not.toContain('transition');
+    expect(LYRICS_CSS).not.toContain('ytmd-sung');
   });
 });
 

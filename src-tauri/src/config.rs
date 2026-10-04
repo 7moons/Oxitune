@@ -30,6 +30,9 @@ pub struct AppConfig {
     /// Open the Lyrics tab when a song that has lyrics starts.
     #[serde(default)]
     pub lyrics_auto_open: bool,
+    /// How the lyrics look (one of `LYRICS_THEMES`).
+    #[serde(default = "default_lyrics_theme")]
+    pub lyrics_theme: String,
     /// Blur on the lines not being sung and the glow on the one that is.
     #[serde(default = "default_lyrics_effects")]
     pub lyrics_effects: bool,
@@ -78,6 +81,13 @@ pub struct AppConfig {
 
 fn default_true() -> bool {
     true
+}
+
+/// The looks the lyrics come in (styles.ts has a block per id).
+pub const LYRICS_THEMES: [&str; 6] = ["classic", "spotlight", "centered", "accent", "compact", "karaoke"];
+
+fn default_lyrics_theme() -> String {
+    LYRICS_THEMES[0].to_string()
 }
 
 fn default_lyrics_translate_lang() -> String {
@@ -140,6 +150,7 @@ impl Default for AppConfig {
             lyrics_romanize_enabled: false,
             lyrics_auto_open: false,
             lyrics_effects: default_lyrics_effects(),
+            lyrics_theme: default_lyrics_theme(),
             miniplayer_enabled: true,
             wheel_volume_step: 0.05,
             wheel_volume_on_player_page: false,
@@ -225,6 +236,9 @@ impl AppConfig {
         self.lyrics_providers = crate::lyrics::sanitize_provider_settings(std::mem::take(&mut self.lyrics_providers));
         if !crate::lyrics::translate::is_lang(&self.lyrics_translate_lang) {
             self.lyrics_translate_lang = default_lyrics_translate_lang();
+        }
+        if !LYRICS_THEMES.contains(&self.lyrics_theme.as_str()) {
+            self.lyrics_theme = default_lyrics_theme();
         }
 
         let mut seen = std::collections::HashSet::new();
@@ -388,12 +402,15 @@ mod tests {
         }
         // A config saved before these settings existed loads with them off.
         let mut old = serde_json::to_value(AppConfig::default()).unwrap();
-        for key in ["lyrics_translate_enabled", "lyrics_translate_lang", "lyrics_romanize_enabled", "lyrics_auto_open", "lyrics_effects"] {
+        for key in ["lyrics_translate_enabled", "lyrics_translate_lang", "lyrics_romanize_enabled", "lyrics_auto_open", "lyrics_effects", "lyrics_theme"] {
             old.as_object_mut().unwrap().remove(key);
         }
+        let theme = |id: &str| AppConfig { lyrics_theme: id.into(), ..AppConfig::default() }.sanitized().lyrics_theme;
+        assert_eq!((theme("karaoke"), theme("neon"), theme("")), ("karaoke".into(), "classic".into(), "classic".into()));
         let loaded: AppConfig = serde_json::from_value(old).unwrap();
         assert!(!loaded.lyrics_translate_enabled && !loaded.lyrics_romanize_enabled && !loaded.lyrics_auto_open);
         assert_eq!(loaded.lyrics_translate_lang, "en");
+        assert_eq!(loaded.lyrics_theme, "classic");
         assert_eq!(loaded.lyrics_effects, !cfg!(target_os = "linux"));
     }
 

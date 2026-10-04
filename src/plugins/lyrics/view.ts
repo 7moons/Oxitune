@@ -66,8 +66,12 @@ export function plainLineAt(lineCount: number, progress: number): number {
   return Math.max(0, Math.min(lineCount - 1, Math.floor(progress * lineCount)));
 }
 
-/** Fill steps smaller than this aren't worth a style write. */
-const FILL_STEP = 0.02;
+/** The looks the lyrics come in (mirrors `LYRICS_THEMES` in config.rs; styles.ts has a block per id). */
+export const LYRICS_THEMES = ['classic', 'spotlight', 'centered', 'accent', 'compact', 'karaoke'] as const;
+export type LyricsTheme = (typeof LYRICS_THEMES)[number];
+
+export const toTheme = (value: unknown): LyricsTheme =>
+  (LYRICS_THEMES as readonly unknown[]).includes(value) ? (value as LyricsTheme) : 'classic';
 
 export class LyricsView {
   readonly root: HTMLElement;
@@ -107,6 +111,10 @@ export class LyricsView {
   /** Blur and glow on or off (`lyrics_effects`). */
   setEffects(on: boolean): void {
     this.root.classList.toggle('ytmd-lyrics-effects', on);
+  }
+
+  setTheme(theme: LyricsTheme): void {
+    this.root.dataset.theme = theme;
   }
 
   get hasLines(): boolean {
@@ -302,13 +310,13 @@ export class LyricsView {
   private fill(run: WordRun | null, time: number, lineEndSecs: number): void {
     if (!run) return;
     for (let i = 0; i < run.words.length; i++) {
+      // Written every frame for the word being sung (one or two words), so
+      // the fill moves with the song instead of in steps.
       const p = wordProgress(run.words, i, time, lineEndSecs);
-      const shown = run.shown[i];
-      if (p === shown || (p > 0 && p < 1 && Math.abs(p - shown) < FILL_STEP)) continue;
+      if (p === run.shown[i]) continue;
       run.shown[i] = p;
       const el = run.els[i];
-      el.classList.toggle('ytmd-sung', p >= 1);
-      if (p > 0 && p < 1) el.style.setProperty('--ytmd-fill', p.toFixed(2));
+      if (p > 0) el.style.setProperty('--ytmd-fill', p >= 1 ? '1' : p.toFixed(3));
       else el.style.removeProperty('--ytmd-fill');
     }
   }
@@ -318,7 +326,6 @@ export class LyricsView {
     run.els.forEach((el, i) => {
       if (run.shown[i] === 0) return;
       run.shown[i] = 0;
-      el.classList.remove('ytmd-sung');
       el.style.removeProperty('--ytmd-fill');
     });
   }

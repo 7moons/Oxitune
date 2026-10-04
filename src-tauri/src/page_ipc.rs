@@ -71,6 +71,7 @@ pub const PAGE_CONFIG_KEYS: &[&str] = &[
     "lyrics_romanize_enabled",
     "lyrics_auto_open",
     "lyrics_effects",
+    "lyrics_theme",
     "notifications_enabled",
     "remote_enabled",
     "wheel_volume_step",
