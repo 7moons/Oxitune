@@ -20,7 +20,9 @@ pub const MAX_BYTES: u64 = 50 * 1024 * 1024;
 /// for up to 30 days (or its "not found" for a day). A user's pick is kept.
 /// 1: results must be by the song's artist; synced lyrics of another length
 ///    are plain; the song's tags are other names for its artist.
-pub const RULES_VERSION: u32 = 1;
+/// 2: synced lyrics of a longer recording stay timed when their last line
+///    is sung within the song (an album outro the video doesn't have).
+pub const RULES_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Entry {

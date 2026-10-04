@@ -2,7 +2,7 @@
 //! background vocals. A search returns matching recordings; each one's
 //! lyrics are a separate TTML document.
 
-use super::matching::{clean_track_name, encode, score_match, synced_length_fits, Candidate, MIN_MATCH_SCORE};
+use super::matching::{clean_track_name, encode, last_line_secs, score_match, synced_timing_fits, Candidate, MIN_MATCH_SCORE};
 use super::ttml::{parse_ttml, MAX_TTML_BYTES};
 use super::{Lyrics, LyricsProvider, ProviderId, Query};
 use futures_util::future::BoxFuture;
@@ -73,7 +73,8 @@ pub fn from_document(item: &Value, ttml: &str, song: Option<f64>) -> Option<Lyri
         source_url: Some(SITE_URL.to_string()),
     };
     // Timed for a recording of another length: only its words are used.
-    if lyrics.is_synced() && !synced_length_fits(item.get("duration").and_then(Value::as_f64), song) {
+    let found = item.get("duration").and_then(Value::as_f64);
+    if lyrics.is_synced() && !synced_timing_fits(found, song, last_line_secs(&lyrics.synced)) {
         lyrics.demote_to_plain();
     }
     lyrics.has_text().then_some(lyrics)
@@ -199,6 +200,16 @@ mod tests {
         assert!(l.synced.is_empty());
         assert_eq!(l.plain.as_deref(), Some("Made up"));
         assert!(from_document(&item, "<html>Sorry</html>", Some(210.0)).is_none());
+    }
+
+    // Regression: "Ebe ebe" is 207 s on the album and 157 s on YouTube, the
+    // lyrics end at 156 s; they were shown as plain text, with no highlight.
+    #[test]
+    fn test_a_longer_recording_whose_lyrics_end_within_the_song_stays_timed() {
+        let album = result("L", "Take A Slice", "Glass Animals", 207.0, "line");
+        // TTML's last line ends at 12 s.
+        assert!(from_document(&album, TTML, Some(157.0)).unwrap().is_synced());
+        assert!(from_document(&album, TTML, Some(11.0)).unwrap().synced.is_empty(), "its last line is past the song's end");
     }
 
     #[tokio::test]

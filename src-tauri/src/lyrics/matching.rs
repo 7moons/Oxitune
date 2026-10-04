@@ -225,6 +225,21 @@ pub fn synced_length_fits(found: Option<f64>, song: Option<f64>) -> bool {
     }
 }
 
+/// Whether a provider's synced lyrics can follow the song: the lengths
+/// fit, or the recording is longer than the song but its last line is
+/// still sung before the song ends. That is the album track with a long
+/// outro the video doesn't have ("Ebe ebe": 207 s on the album, 157 s on
+/// YouTube, last line at 156 s): the timing holds, only the tail differs.
+/// A version with a longer intro fails this, its last line comes too late.
+pub fn synced_timing_fits(found: Option<f64>, song: Option<f64>, last_line: Option<f64>) -> bool {
+    synced_length_fits(found, song) || matches!((found, song, last_line), (Some(f), Some(s), Some(last)) if f > s && last <= s)
+}
+
+/// When the last synced line is over (its end, else its start).
+pub fn last_line_secs(lines: &[super::Line]) -> Option<f64> {
+    lines.last().map(|l| l.end.unwrap_or(l.t).max(l.t))
+}
+
 pub fn encode(s: &str) -> String {
     url::form_urlencoded::byte_serialize(s.as_bytes()).collect()
 }

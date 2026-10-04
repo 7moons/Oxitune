@@ -1,7 +1,7 @@
 //! LRCLIB (lrclib.net): open database with synced and plain lyrics.
 
 use super::lrc::parse_lrc;
-use super::matching::{clean_track_name, encode, score_match, synced_length_fits, Candidate, MIN_MATCH_SCORE};
+use super::matching::{clean_track_name, encode, last_line_secs, score_match, synced_timing_fits, Candidate, MIN_MATCH_SCORE};
 use super::{Lyrics, LyricsProvider, ProviderId, Query};
 use futures_util::future::BoxFuture;
 use serde_json::Value;
@@ -64,7 +64,7 @@ pub fn from_item(item: &Value) -> Option<Lyrics> {
 pub fn fitted(item: &Value, song: Option<f64>) -> Option<Lyrics> {
     let mut lyrics = from_item(item)?;
     let found = item.get("duration").and_then(Value::as_f64);
-    if lyrics.is_synced() && !synced_length_fits(found, song) {
+    if lyrics.is_synced() && !synced_timing_fits(found, song, last_line_secs(&lyrics.synced)) {
         log::info!(
             "[Oscilla Lyrics] lrclib \"{}\" is {:.0} s, song is {:.0} s: using it as plain text",
             lyrics.title,
@@ -160,6 +160,10 @@ mod tests {
         assert!(far.synced.is_empty() && far.plain.is_some(), "37 s shorter: words only");
         assert!(fitted(&item, Some(155.0)).unwrap().is_synced(), "5 s off: kept synced");
         assert!(fitted(&item, None).unwrap().is_synced(), "unknown length: kept");
+        // Longer than the song, but its last line (10 s) is sung within it:
+        // the same recording with a longer outro.
+        assert!(fitted(&item, Some(120.0)).unwrap().is_synced());
+        assert!(fitted(&item, Some(9.0)).unwrap().synced.is_empty());
     }
 
     #[test]

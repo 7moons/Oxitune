@@ -81,7 +81,8 @@ export const LYRICS_CSS = `
   .ytmd-lyric-line:hover { color: rgba(255, 255, 255, 0.7); }
   .ytmd-lyric-line.ytmd-active { color: var(--ytmd-lyric-on); }
   .ytmd-lyric-line.ytmd-alt { text-align: right; padding: 4px 0 4px 6%; transform-origin: right center; }
-  .ytmd-lyric-line.ytmd-plain { cursor: default; color: var(--ytmd-lyric-on); font-weight: 500; --ytmd-lyric-size: 22px; }
+  /* Text-only lyrics: the same type as timed ones, all of it lit. */
+  .ytmd-lyric-line.ytmd-plain { cursor: default; color: var(--ytmd-lyric-on); }
   .ytmd-lyric-line.ytmd-plain:hover { color: var(--ytmd-lyric-on); }
   .ytmd-lyric-line.ytmd-empty { min-height: 0.6em; padding: 0; }
 
