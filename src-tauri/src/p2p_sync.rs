@@ -400,7 +400,16 @@ async fn run_host_loop(
                         }
                     }
                     Ok(Event::Incoming(Packet::PubAck(_))) => {
-                        let _ = unacked.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1));
+                        // Down by one, never below zero. A plain CAS loop:
+                        // `fetch_update` is deprecated on newer Rust and its
+                        // replacement `try_update` missing on older.
+                        let mut n = unacked.load(Ordering::SeqCst);
+                        while n > 0 {
+                            match unacked.compare_exchange_weak(n, n - 1, Ordering::SeqCst, Ordering::SeqCst) {
+                                Ok(_) => break,
+                                Err(now) => n = now,
+                            }
+                        }
                     }
                     Ok(_) => {}
                     Err(e) => {
