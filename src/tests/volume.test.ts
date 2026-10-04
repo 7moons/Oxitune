@@ -177,6 +177,13 @@ function createPage() {
       return Object.assign(new FakeElement(), { closest: () => container });
     },
     dispatchInput() { documentHandlers.get('input')?.({} as Event); },
+    // The user let go of YTM's own slider: YTM has set the player from it.
+    releaseNativeSlider(value: number) {
+      this.setSliderValue(value);
+      const target = Object.assign(new FakeElement(), { closest: () => slider });
+      documentHandlers.get('change')?.({ type: 'change', target } as unknown as Event);
+    },
+    get playerVolume() { return player.getVolume(); },
     tick() { intervalHandler?.(); },
     moveVideo(left: number, top: number) {
       video.rect = { ...video.rect, left, top, right: left + video.rect.width, bottom: top + video.rect.height };
@@ -198,6 +205,12 @@ function createPage() {
       }
     },
     lastWheelStopped: false,
+    wheelDown() {
+      wheelHandler?.({
+        deltaY: 100, ctrlKey: false, target: null, clientX: 100, clientY: 100,
+        preventDefault: () => {}, stopPropagation: () => {}
+      } as unknown as WheelEvent);
+    },
     wheelUp(clientX = 100, clientY = 100, target: unknown = null) {
       let prevented = false;
       this.lastWheelStopped = false;
@@ -247,6 +260,39 @@ test("a handled wheel never reaches YTM's own bigger-step volume scroll", () => 
   // Not ours to handle (outside the bar and player page): left alone.
   expect(page.wheelUp(1200, 400)).toBe(false);
   expect(page.lastWheelStopped).toBe(false);
+});
+
+// Regression: YTM rounds its curved player volume to whole percent, so
+// slider values 1-7 played nothing ("below 5% it's silent").
+test('the wheel never stops on a slider value YTM plays as silence', () => {
+  const page = createPage();
+  page.setWheelStep(0.01);
+  page.wheelUp(); // our first change puts the slider on 1% steps
+  page.setSliderValue(8);
+  expect(page.playerVolume).toBe(1);
+
+  page.wheelDown();
+  expect(page.sliderValue).toBe(0);
+  expect(page.indicator?.textContent).toBe('0%');
+
+  page.wheelUp();
+  expect(page.sliderValue).toBe(8);
+  expect(page.playerVolume).toBe(1);
+  expect(page.indicator?.textContent).toBe('8%');
+});
+
+test("letting go of YTM's slider on a silent value moves it up to the first audible one", () => {
+  const page = createPage();
+  page.releaseNativeSlider(5);
+  expect(page.playerVolume).toBe(0);
+  page.frame();
+  // The fake slider keeps YTM's 5% steps until we set 1%.
+  expect(page.sliderValue).toBe(8);
+  expect(page.playerVolume).toBe(1);
+
+  page.releaseNativeSlider(0);
+  page.frame();
+  expect(page.sliderValue).toBe(0);
 });
 
 test('configured one-point steps are reflected exactly by both native sliders', () => {

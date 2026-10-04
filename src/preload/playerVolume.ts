@@ -57,17 +57,58 @@ export function isPlayerMuted(video: HTMLVideoElement): boolean {
   return getMoviePlayer()?.isMuted?.() === true || video.muted;
 }
 
-export function setPlayerVolumePercent(percent: number, video: HTMLVideoElement): void {
+function applySlider(slider: VolumeSlider, percent: number): void {
+  setSliderValue(slider, percent);
+  // What a finished drag fires; YTM sets the player (and unmutes) from it.
+  slider.dispatchEvent(new CustomEvent('change', { bubbles: true, composed: true }));
+  const expanded = getSlider('#expand-volume-slider');
+  if (expanded) setSliderValue(expanded, percent);
+}
+
+/** The player plays at volume 0 although the slider isn't at 0. */
+function silentAbove0(slider: VolumeSlider): boolean {
+  const playerVolume = getMoviePlayer()?.getVolume?.();
+  return Number(slider.value) > 0 && playerVolume === 0;
+}
+
+/**
+ * YTM rounds the curved player volume to a whole percent, so the lowest
+ * slider values (1-7 or so) play nothing at all: "below 5% it's silent".
+ * Such a value moves to the nearest one that plays: up to the first audible
+ * one, or, when turning down, to 0. Bounded, so a player that answers late
+ * can't be pushed loud.
+ */
+const MAX_LIFT = 20;
+
+function leaveSilence(slider: VolumeSlider, direction: 'up' | 'down'): void {
+  if (!silentAbove0(slider)) return;
+  if (direction === 'down') {
+    applySlider(slider, 0);
+    return;
+  }
+  for (let value = Number(slider.value) + 1; value <= MAX_LIFT && silentAbove0(slider); value++) {
+    applySlider(slider, value);
+  }
+}
+
+/** After the user let go of YTM's own slider on a value that plays nothing. */
+export function liftOutOfSilence(): void {
+  const slider = playerBarSlider();
+  if (slider) leaveSilence(slider, 'up');
+}
+
+export function setPlayerVolumePercent(
+  percent: number,
+  video: HTMLVideoElement,
+  direction: 'up' | 'down' = 'up'
+): void {
   if (!Number.isFinite(percent)) return;
   const clamped = clampPercent(percent);
 
   const slider = playerBarSlider();
   if (slider) {
-    setSliderValue(slider, clamped);
-    // What a finished drag fires; YTM sets the player (and unmutes) from it.
-    slider.dispatchEvent(new CustomEvent('change', { bubbles: true, composed: true }));
-    const expanded = getSlider('#expand-volume-slider');
-    if (expanded) setSliderValue(expanded, clamped);
+    applySlider(slider, clamped);
+    leaveSilence(slider, direction);
     return;
   }
 
