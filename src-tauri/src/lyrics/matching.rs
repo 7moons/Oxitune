@@ -225,19 +225,30 @@ pub fn synced_length_fits(found: Option<f64>, song: Option<f64>) -> bool {
     }
 }
 
-/// Whether a provider's synced lyrics can follow the song: the lengths
-/// fit, or the recording is longer than the song but its last line is
-/// still sung before the song ends. That is the album track with a long
-/// outro the video doesn't have ("Ebe ebe": 207 s on the album, 157 s on
-/// YouTube, last line at 156 s): the timing holds, only the tail differs.
-/// A version with a longer intro fails this, its last line comes too late.
-pub fn synced_timing_fits(found: Option<f64>, song: Option<f64>, last_line: Option<f64>) -> bool {
-    synced_length_fits(found, song) || matches!((found, song, last_line), (Some(f), Some(s), Some(last)) if f > s && last <= s)
-}
-
-/// When the last synced line is over (its end, else its start).
-pub fn last_line_secs(lines: &[super::Line]) -> Option<f64> {
-    lines.last().map(|l| l.end.unwrap_or(l.t).max(l.t))
+/// Fits synced lines timed for a `found`-long recording to a `song`-long
+/// song; `false` means their timing can't be used. Lengths that fit pass as
+/// they are. A longer recording is taken to be the song with more after it
+/// (an album outro, or a closing part the video doesn't have: "Ebe ebe" is
+/// 207 s on the album and 157 s on YouTube, which ends where the album's
+/// first part does): the lines that start within the song keep their
+/// timing, the rest are dropped, as long as most of the lyrics remain. If
+/// the two differ at the start instead, the lines are off by a constant
+/// the listener can correct with the timing offset, which plain text
+/// (no highlight at all) never allowed. A shorter recording stays unfit.
+pub fn fit_synced_to_song(lines: &mut Vec<super::Line>, found: Option<f64>, song: Option<f64>) -> bool {
+    if synced_length_fits(found, song) {
+        return true;
+    }
+    let (Some(found), Some(song)) = (found, song) else { return true };
+    if found < song {
+        return false;
+    }
+    let within = lines.iter().filter(|l| l.t < song).count();
+    if within == 0 || within * 2 < lines.len() {
+        return false;
+    }
+    lines.retain(|l| l.t < song);
+    true
 }
 
 pub fn encode(s: &str) -> String {

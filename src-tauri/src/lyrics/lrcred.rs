@@ -2,7 +2,7 @@
 //! background vocals. A search returns matching recordings; each one's
 //! lyrics are a separate TTML document.
 
-use super::matching::{clean_track_name, encode, last_line_secs, score_match, synced_timing_fits, Candidate, MIN_MATCH_SCORE};
+use super::matching::{clean_track_name, encode, fit_synced_to_song, score_match, Candidate, MIN_MATCH_SCORE};
 use super::ttml::{parse_ttml, MAX_TTML_BYTES};
 use super::{Lyrics, LyricsProvider, ProviderId, Query};
 use futures_util::future::BoxFuture;
@@ -74,7 +74,7 @@ pub fn from_document(item: &Value, ttml: &str, song: Option<f64>) -> Option<Lyri
     };
     // Timed for a recording of another length: only its words are used.
     let found = item.get("duration").and_then(Value::as_f64);
-    if lyrics.is_synced() && !synced_timing_fits(found, song, last_line_secs(&lyrics.synced)) {
+    if lyrics.is_synced() && !fit_synced_to_song(&mut lyrics.synced, found, song) {
         lyrics.demote_to_plain();
     }
     lyrics.has_text().then_some(lyrics)
@@ -202,14 +202,21 @@ mod tests {
         assert!(from_document(&item, "<html>Sorry</html>", Some(210.0)).is_none());
     }
 
-    // Regression: "Ebe ebe" is 207 s on the album and 157 s on YouTube, the
-    // lyrics end at 156 s; they were shown as plain text, with no highlight.
+    // Regression: "Ebe ebe" is 207 s on the album and 157 s on YouTube (the
+    // video ends where the album's first part does). Its lyrics were shown
+    // as plain text, with nothing highlighted.
     #[test]
-    fn test_a_longer_recording_whose_lyrics_end_within_the_song_stays_timed() {
+    fn test_a_longer_recording_keeps_the_timing_of_the_lines_within_the_song() {
         let album = result("L", "Take A Slice", "Glass Animals", 207.0, "line");
-        // TTML's last line ends at 12 s.
-        assert!(from_document(&album, TTML, Some(157.0)).unwrap().is_synced());
-        assert!(from_document(&album, TTML, Some(11.0)).unwrap().synced.is_empty(), "its last line is past the song's end");
+        let ttml = r#"<tt xmlns="http://www.w3.org/ns/ttml"><body>
+            <div><p begin="19.0" end="21.0">First</p><p begin="100.0" end="103.0">Second</p><p begin="150.0" end="156.0">Third</p></div>
+            <div><p begin="166.0" end="170.0">Only on the album</p><p begin="190.0" end="195.0">Also</p></div>
+        </body></tt>"#;
+        let l = from_document(&album, ttml, Some(157.0)).unwrap();
+        assert_eq!(l.synced.iter().map(|x| x.text.as_str()).collect::<Vec<_>>(), ["First", "Second", "Third"]);
+        // Most of the lyrics would be gone: another version, text only.
+        let short = from_document(&album, ttml, Some(60.0)).unwrap();
+        assert!(short.synced.is_empty() && short.plain.is_some());
     }
 
     #[tokio::test]
