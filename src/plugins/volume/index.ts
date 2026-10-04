@@ -1,6 +1,6 @@
 import { YTMDPlugin, PluginContext, PluginManifest } from '../types';
 import manifest from './manifest.json';
-import { getPlayerVolumePercent, isPlayerMuted, liftOutOfSilence, setPlayerVolumePercent } from '../../preload/playerVolume';
+import { getPlayerVolumePercent, isPlayerMuted, keepQuietVolumesAudible, setPlayerVolumePercent } from '../../preload/playerVolume';
 import { isResumeMuting } from '../../preload/resume';
 import { ensureKitStyles } from '../../preload/ui/kit';
 import { t } from '../../preload/ui/i18n';
@@ -117,6 +117,8 @@ export const VolumePlugin: YTMDPlugin = {
         hideIndicator();
         return;
       }
+      // Also after YTM itself set the volume (its slider, a new song).
+      keepQuietVolumesAudible(video);
       const volume = isPlayerMuted(video) ? 0 : getPlayerVolumePercent(video);
       // Resume on launch mutes and unmutes the player itself; that's no change to announce.
       const changed = lastVolume !== null && volume !== lastVolume && !isResumeMuting();
@@ -160,12 +162,7 @@ export const VolumePlugin: YTMDPlugin = {
     const handleNativeVolumeInput = (event: Event) => {
       const target = event.target;
       if (target instanceof Element && target.closest('ytmusic-player-bar')) {
-        // A frame later: this capture listener runs before YTM's own one
-        // has set the player from the slider.
-        window.requestAnimationFrame(() => {
-          if (event.type === 'change') liftOutOfSilence();
-          syncIndicator();
-        });
+        window.requestAnimationFrame(syncIndicator);
       }
     };
 
@@ -200,8 +197,7 @@ export const VolumePlugin: YTMDPlugin = {
       // YTM's player bar has its own wheel handler over the volume slider
       // (onVolumeScroll, a much bigger step); ours handled it, so it stops here.
       e.stopPropagation();
-      const up = e.deltaY < 0;
-      setPlayerVolumePercent(getPlayerVolumePercent(video) + (up ? step : -step) * 100, video, up ? 'up' : 'down');
+      setPlayerVolumePercent(getPlayerVolumePercent(video) + (e.deltaY < 0 ? step : -step) * 100, video);
       syncIndicator();
     };
 

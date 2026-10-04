@@ -65,50 +65,46 @@ function applySlider(slider: VolumeSlider, percent: number): void {
   if (expanded) setSliderValue(expanded, percent);
 }
 
-/** The player plays at volume 0 although the slider isn't at 0. */
-function silentAbove0(slider: VolumeSlider): boolean {
-  const playerVolume = getMoviePlayer()?.getVolume?.();
-  return Number(slider.value) > 0 && playerVolume === 0;
-}
-
 /**
- * YTM rounds the curved player volume to a whole percent, so the lowest
- * slider values (1-7 or so) play nothing at all: "below 5% it's silent".
- * Such a value moves to the nearest one that plays: up to the first audible
- * one, or, when turning down, to 0. Bounded, so a player that answers late
- * can't be pushed loud.
+ * YTM rounds the curved player volume to a whole percent, so its lowest
+ * slider values (1-4 measured) play at 0: "below 5% it's silent". Those get
+ * a share of YTM's quietest step (player volume 1) on the video itself:
+ * slider 1 plays at 0.2%, 4 at 0.8%. YTM's own state stays as it set it.
  */
-const MAX_LIFT = 20;
+const QUIET_STEP = 0.002;
+const QUIET_MAX = 0.01;
 
-function leaveSilence(slider: VolumeSlider, direction: 'up' | 'down'): void {
-  if (!silentAbove0(slider)) return;
-  if (direction === 'down') {
-    applySlider(slider, 0);
-    return;
-  }
-  for (let value = Number(slider.value) + 1; value <= MAX_LIFT && silentAbove0(slider); value++) {
-    applySlider(slider, value);
-  }
-}
+// A player that puts its 0 back after every write must not ping-pong with
+// us: the same value is written again at most a few times in a while.
+const MAX_REWRITES = 6;
+const REWRITE_WINDOW_MS = 2000;
+let lastQuiet = { target: -1, writes: 0, since: 0 };
 
-/** After the user let go of YTM's own slider on a value that plays nothing. */
-export function liftOutOfSilence(): void {
+export function keepQuietVolumesAudible(video: HTMLVideoElement): void {
   const slider = playerBarSlider();
-  if (slider) leaveSilence(slider, 'up');
+  if (!slider) return;
+  const value = Number(slider.value);
+  const player = getMoviePlayer();
+  if (!(value > 0) || player?.getVolume?.() !== 0 || isPlayerMuted(video)) return;
+  const target = Math.min(QUIET_MAX, value * QUIET_STEP);
+  if (Math.abs(video.volume - target) < 1e-4) return;
+  const now = Date.now();
+  if (target !== lastQuiet.target || now - lastQuiet.since > REWRITE_WINDOW_MS) {
+    lastQuiet = { target, writes: 0, since: now };
+  }
+  if (lastQuiet.writes >= MAX_REWRITES) return;
+  lastQuiet.writes++;
+  video.volume = target;
 }
 
-export function setPlayerVolumePercent(
-  percent: number,
-  video: HTMLVideoElement,
-  direction: 'up' | 'down' = 'up'
-): void {
+export function setPlayerVolumePercent(percent: number, video: HTMLVideoElement): void {
   if (!Number.isFinite(percent)) return;
   const clamped = clampPercent(percent);
 
   const slider = playerBarSlider();
   if (slider) {
     applySlider(slider, clamped);
-    leaveSilence(slider, direction);
+    keepQuietVolumesAudible(video);
     return;
   }
 

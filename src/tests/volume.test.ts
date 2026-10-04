@@ -263,36 +263,45 @@ test("a handled wheel never reaches YTM's own bigger-step volume scroll", () => 
 });
 
 // Regression: YTM rounds its curved player volume to whole percent, so
-// slider values 1-7 played nothing ("below 5% it's silent").
-test('the wheel never stops on a slider value YTM plays as silence', () => {
+// slider values 1-4 played nothing ("below 5% it's silent"), and skipping
+// them (0 -> 5) made no sense either.
+test('the lowest slider values play quietly instead of not at all', () => {
   const page = createPage();
   page.setWheelStep(0.01);
   page.wheelUp(); // our first change puts the slider on 1% steps
-  page.setSliderValue(8);
-  expect(page.playerVolume).toBe(1);
-
-  page.wheelDown();
-  expect(page.sliderValue).toBe(0);
-  expect(page.indicator?.textContent).toBe('0%');
+  page.setSliderValue(0);
 
   page.wheelUp();
-  expect(page.sliderValue).toBe(8);
-  expect(page.playerVolume).toBe(1);
-  expect(page.indicator?.textContent).toBe('8%');
+  expect(page.sliderValue).toBe(1);
+  expect(page.playerVolume).toBe(0);
+  expect(page.video.volume).toBeCloseTo(0.002);
+  expect(page.indicator?.textContent).toBe('1%');
+
+  page.wheelUp();
+  page.wheelUp();
+  expect(page.sliderValue).toBe(3);
+  expect(page.video.volume).toBeCloseTo(0.006);
+
+  page.wheelDown();
+  page.wheelDown();
+  page.wheelDown();
+  expect(page.sliderValue).toBe(0);
+  expect(page.video.volume).toBe(0);
 });
 
-test("letting go of YTM's slider on a silent value moves it up to the first audible one", () => {
+test("YTM's own slider and a new song keep a quiet value audible", () => {
   const page = createPage();
   page.releaseNativeSlider(5);
-  expect(page.playerVolume).toBe(0);
+  page.setSliderValue(0);
+  page.wheelUp(); // slider now on 1% steps
+  page.releaseNativeSlider(2);
   page.frame();
-  // The fake slider keeps YTM's 5% steps until we set 1%.
-  expect(page.sliderValue).toBe(8);
-  expect(page.playerVolume).toBe(1);
+  expect(page.video.volume).toBeCloseTo(0.004);
 
-  page.releaseNativeSlider(0);
-  page.frame();
-  expect(page.sliderValue).toBe(0);
+  // YTM applies its volume (0) to the next song's video.
+  page.setPlayerVolumeOnly(0);
+  page.tick();
+  expect(page.video.volume).toBeCloseTo(0.004);
 });
 
 test('configured one-point steps are reflected exactly by both native sliders', () => {
