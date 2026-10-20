@@ -387,6 +387,12 @@
           "markdownDescription": "Enables the export_settings command without any pre-configured scope."
         },
         {
+          "description": "Enables the finish_onboarding command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-finish-onboarding",
+          "markdownDescription": "Enables the finish_onboarding command without any pre-configured scope."
+        },
+        {
           "description": "Enables the get_app_version command without any pre-configured scope.",
           "type": "string",
           "const": "allow-get-app-version",
@@ -475,6 +481,24 @@
           "type": "string",
           "const": "allow-open-logs-folder",
           "markdownDescription": "Enables the open_logs_folder command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open_welcome_window command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-welcome-window",
+          "markdownDescription": "Enables the open_welcome_window command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the oxitune_bridge command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-oxitune-bridge",
+          "markdownDescription": "Enables the oxitune_bridge command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the oxitune_subscribe command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-oxitune-subscribe",
+          "markdownDescription": "Enables the oxitune_subscribe command without any pre-configured scope."
         },
         {
           "description": "Enables the plugins_add_dev command without any pre-configured scope.",
@@ -705,18 +729,6 @@
           "markdownDescription": "Enables the vote_sync_skip command without any pre-configured scope."
         },
         {
-          "description": "Enables the oxitune_bridge command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-oxitune-bridge",
-          "markdownDescription": "Enables the oxitune_bridge command without any pre-configured scope."
-        },
-        {
-          "description": "Enables the oxitune_subscribe command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-oxitune-subscribe",
-          "markdownDescription": "Enables the oxitune_subscribe command without any pre-configured scope."
-        },
-        {
           "description": "Denies the check_for_updates command without any pre-configured scope.",
           "type": "string",
           "const": "deny-check-for-updates",
@@ -757,6 +769,12 @@
           "type": "string",
           "const": "deny-export-settings",
           "markdownDescription": "Denies the export_settings command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the finish_onboarding command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-finish-onboarding",
+          "markdownDescription": "Denies the finish_onboarding command without any pre-configured scope."
         },
         {
           "description": "Denies the get_app_version command without any pre-configured scope.",
@@ -847,6 +865,24 @@
           "type": "string",
           "const": "deny-open-logs-folder",
           "markdownDescription": "Denies the open_logs_folder command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_welcome_window command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-welcome-window",
+          "markdownDescription": "Denies the open_welcome_window command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the oxitune_bridge command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-oxitune-bridge",
+          "markdownDescription": "Denies the oxitune_bridge command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the oxitune_subscribe command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-oxitune-subscribe",
+          "markdownDescription": "Denies the oxitune_subscribe command without any pre-configured scope."
         },
         {
           "description": "Denies the plugins_add_dev command without any pre-configured scope.",
@@ -1075,18 +1111,6 @@
           "type": "string",
           "const": "deny-vote-sync-skip",
           "markdownDescription": "Denies the vote_sync_skip command without any pre-configured scope."
-        },
-        {
-          "description": "Denies the oxitune_bridge command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-oxitune-bridge",
-          "markdownDescription": "Denies the oxitune_bridge command without any pre-configured scope."
-        },
-        {
-          "description": "Denies the oxitune_subscribe command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-oxitune-subscribe",
-          "markdownDescription": "Denies the oxitune_subscribe command without any pre-configured scope."
         },
         {
           "description": "This permission set configures if your\napplication can enable or disable auto\nstarting the application on boot.\n\n#### Granted Permissions\n\nIt allows all to check, enable and\ndisable the automatic start on boot.\n\n\n#### This default permission set includes:\n\n- `allow-enable`\n- `allow-disable`\n- `allow-is-enabled`",
