@@ -187,6 +187,8 @@ not in a public issue.
 - **Lyrics** are as good as their providers. Translation and romanization go through Google
   Translate and are off by default.
 - **Windows** installers are not code-signed yet, and memory on WebView2 has not been measured.
+- **Linux rendering.** Oxitune turns off WebKitGTK's DMA-BUF renderer, which made every window
+  flicker on older GPUs. On a recent GPU, `WEBKIT_DISABLE_DMABUF_RENDERER=0` turns it back on.
 
 ## Development
 

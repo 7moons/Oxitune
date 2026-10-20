@@ -83,8 +83,26 @@ fn install_crypto_provider_for_tests() {
 /// Passed by the login item (tauri-plugin-autostart).
 const AUTOSTART_ARG: &str = "--autostart";
 
+/// WebKitGTK settings Oxitune turns on unless the user set them: the
+/// DMA-BUF renderer made every window flicker on older GPUs (Intel Haswell
+/// on KDE Wayland), and the path without it is fast enough for a player.
+/// `WEBKIT_DISABLE_DMABUF_RENDERER=0` opts back in.
+#[cfg(any(target_os = "linux", test))]
+const WEBKIT_DEFAULTS: &[(&str, &str)] = &[("WEBKIT_DISABLE_DMABUF_RENDERER", "1")];
+
+/// The `WEBKIT_DEFAULTS` the environment doesn't set yet.
+#[cfg(any(target_os = "linux", test))]
+fn missing_webkit_defaults(get: impl Fn(&str) -> Option<String>) -> Vec<(&'static str, &'static str)> {
+    WEBKIT_DEFAULTS.iter().copied().filter(|(key, _)| get(key).is_none()).collect()
+}
+
 pub fn run() {
     let started = std::time::Instant::now();
+    // Before any thread or WebKit starts: the environment is read once.
+    #[cfg(target_os = "linux")]
+    for (key, value) in missing_webkit_defaults(|k| std::env::var(k).ok()) {
+        std::env::set_var(key, value);
+    }
     ensure_crypto_provider();
 
     let config_manager = ConfigManager::new();
@@ -526,4 +544,18 @@ pub fn run() {
                 app.state::<Arc<AppState>>().session.flush();
             }
         });
+}
+
+#[cfg(test)]
+mod webkit_env_tests {
+    use super::*;
+
+    // Regression: every window flickered on Intel Haswell (KDE Wayland)
+    // with WebKitGTK's DMA-BUF renderer.
+    #[test]
+    fn test_dmabuf_renderer_is_off_unless_the_user_chose() {
+        assert_eq!(missing_webkit_defaults(|_| None), vec![("WEBKIT_DISABLE_DMABUF_RENDERER", "1")]);
+        let chose = |k: &str| (k == "WEBKIT_DISABLE_DMABUF_RENDERER").then(|| "0".to_string());
+        assert!(missing_webkit_defaults(chose).is_empty(), "the user's own value wins");
+    }
 }
