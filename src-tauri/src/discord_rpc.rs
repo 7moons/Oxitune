@@ -159,6 +159,9 @@ impl DiscordRpcHandle {
     }
 }
 
+/// Where the presence's first button sends friends.
+pub const SITE_URL: &str = "https://oxitune.7moons.dev";
+
 /// Our own Discord application (Developer Portal → General Information →
 /// Application ID; public, not a secret). Its name is what friends see
 /// ("Listening to …"). Never borrow another project's application.
@@ -241,20 +244,12 @@ pub fn build_activity(
         }
     }
 
-    if let Some(vid) = track.video_id.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
-        let watch_url = if vid.starts_with("http://") || vid.starts_with("https://") {
-            vid.to_string()
-        } else {
-            format!("https://music.youtube.com/watch?v={vid}")
-        };
-        activity["buttons"] = json!([{ "label": "Listen on YouTube Music", "url": watch_url }]);
-    }
+    activity["buttons"] = json!([{ "label": "Get Oxitune", "url": SITE_URL }]);
 
     if let Some(invite) = invite {
         let listen_along = json!({ "label": "Listen along", "url": invite.url });
-        match activity["buttons"].as_array_mut() {
-            Some(buttons) => buttons.push(listen_along),
-            None => activity["buttons"] = json!([listen_along]),
+        if let Some(buttons) = activity["buttons"].as_array_mut() {
+            buttons.push(listen_along);
         }
         // Discord wants 1 <= current <= max; the host always counts.
         let max = invite.max_members.max(1);
@@ -774,7 +769,8 @@ mod tests {
         assert_eq!(act["timestamps"]["end"], 1_000_000 - 50 + 300);
         assert_eq!(act["assets"]["large_image"], "https://lh3.googleusercontent.com/img.jpg");
         assert_eq!(act["assets"]["large_text"], "Triptych");
-        assert_eq!(act["buttons"][0]["url"], "https://music.youtube.com/watch?v=id-Neon Runner");
+        assert_eq!(act["buttons"][0]["label"], "Get Oxitune");
+        assert_eq!(act["buttons"][0]["url"], "https://oxitune.7moons.dev");
 
         let paused = build_activity(&track("Neon Runner", false), None, 1_000_000_000).unwrap();
         assert_eq!(paused["state"], "Paused - Night Drive");
@@ -812,7 +808,9 @@ mod tests {
         no_id.video_id = None;
         let alone = crate::join_link::DiscordInvite { members: 0, ..invite };
         let act = build_activity(&no_id, Some(&alone), 0).unwrap();
-        assert_eq!(act["buttons"].as_array().unwrap().len(), 1);
+        // The site button doesn't depend on the song.
+        assert_eq!(act["buttons"][0]["url"], SITE_URL);
+        assert_eq!(act["buttons"][1]["label"], "Listen along");
         assert_eq!(act["party"]["size"], json!([1, 16]), "an empty member list still counts the host");
 
         assert!(build_activity(&track("Neon Runner", true), None, 0).unwrap().get("party").is_none());
