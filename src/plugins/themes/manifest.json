@@ -1,0 +1,18 @@
+{
+  "id": "app.oxitune.themes",
+  "name": "Theme Engine & Live CSS",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "description": "Switches YouTube Music\\",
+  "author": "Oxitune",
+  "matches": [
+    "https://music.youtube.com/*"
+  ],
+  "runAt": "document-idle",
+  "permissions": [
+    "page",
+    "ui",
+    "internal:config"
+  ],
+  "entry": "index.js"
+}

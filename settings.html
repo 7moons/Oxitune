@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title data-i18n="settings.windowTitle">Settings</title>
+    <link rel="stylesheet" href="./src/ui/styles.css" />
+  </head>
+  <body>
+    <div id="ambient-backdrop" aria-hidden="true">
+      <img id="ambient-cover" alt="" />
+      <div id="ambient-veil"></div>
+    </div>
+
+    <header class="titlebar" data-tauri-drag-region>
+      <div class="titlebar-title" data-tauri-drag-region>
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+        <span data-i18n="settings.windowTitle" data-tauri-drag-region>Settings</span>
+      </div>
+      <span id="save-status" class="hint" aria-live="polite"></span>
+      <div class="window-controls">
+        <button id="win-min-btn" class="icon-btn sm" data-i18n-label="window.minimize" aria-label="Minimize"><svg class="icon" viewBox="0 0 24 24"><path d="M6 19h12v2H6z"/></svg></button>
+        <button id="win-max-btn" class="icon-btn sm" data-i18n-label="window.maximize" aria-label="Maximize"><svg class="icon" viewBox="0 0 24 24"><path d="M18 4H6c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H6V6h12v12z"/></svg></button>
+        <button id="win-close-btn" class="icon-btn sm window-close" data-i18n-label="window.close" aria-label="Close"><svg class="icon" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></button>
+      </div>
+    </header>
+
+    <div class="settings-layout">
+      <nav class="settings-nav" id="settings-nav">
+        <button class="settings-nav-item is-active" data-section="sec-audio"><svg class="icon" viewBox="0 0 24 24"><path d="M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z"/></svg><span data-i18n="settings.nav.audio">Audio</span></button>
+        <button class="settings-nav-item" data-section="sec-appearance"><svg class="icon" viewBox="0 0 24 24"><path d="M12 3a9 9 0 0 0 0 18c.83 0 1.5-.67 1.5-1.5 0-.39-.15-.74-.39-1.01-.23-.26-.38-.61-.38-.99 0-.83.67-1.5 1.5-1.5H16c2.76 0 5-2.24 5-5 0-4.42-4.03-8-9-8zm-5.5 9c-.83 0-1.5-.67-1.5-1.5S5.67 9 6.5 9 8 9.67 8 10.5 7.33 12 6.5 12zm3-4C8.67 8 8 7.33 8 6.5S8.67 5 9.5 5s1.5.67 1.5 1.5S10.33 8 9.5 8zm5 0c-.83 0-1.5-.67-1.5-1.5S13.67 5 14.5 5s1.5.67 1.5 1.5S15.33 8 14.5 8zm3 4c-.83 0-1.5-.67-1.5-1.5S16.67 9 17.5 9s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/></svg><span data-i18n="settings.nav.appearance">Appearance</span></button>
+        <button class="settings-nav-item" data-section="sec-addons"><svg class="icon" viewBox="0 0 24 24"><path d="M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5a2.5 2.5 0 0 0-5 0V5H4c-1.1 0-1.99.9-1.99 2v3.8H3.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7 1.49 0 2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5a2.5 2.5 0 0 0 0-5z"/></svg><span data-i18n="settings.nav.addons">Add-ons</span></button>
+        <button class="settings-nav-item" data-section="sec-system"><svg class="icon" viewBox="0 0 24 24"><path d="M4 6h18V4H4c-1.1 0-2 .9-2 2v11H0v3h14v-3H4V6zm19 2h-6c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h6c.55 0 1-.45 1-1V9c0-.55-.45-1-1-1zm-1 9h-4v-7h4v7z"/></svg><span data-i18n="settings.nav.system">System</span></button>
+        <button class="settings-nav-item" data-section="sec-library"><svg class="icon" viewBox="0 0 24 24"><path d="M20 2H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 5h-3v5.5a2.5 2.5 0 1 1-2.5-2.5c.57 0 1.08.19 1.5.51V5h4v2zM4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6z"/></svg><span data-i18n="settings.nav.library">Music library</span></button>
+        <button class="settings-nav-item" data-section="sec-remote"><svg class="icon" viewBox="0 0 24 24"><path d="M17 1.01 7 1c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-1.99-2-1.99zM17 19H7V5h10v14z"/></svg><span data-i18n="settings.nav.remote">Phone remote</span></button>
+        <button class="settings-nav-item" data-section="sec-plugins"><svg class="icon" viewBox="0 0 24 24"><path d="M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5a2.5 2.5 0 0 0-5 0V5H4c-1.1 0-1.99.9-1.99 2v3.8H3.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7s2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5a2.5 2.5 0 0 0 0-5z"/></svg><span data-i18n="settings.nav.plugins">Plugins</span></button>
+        <button class="settings-nav-item" data-section="sec-about"><svg class="icon" viewBox="0 0 24 24"><path d="M11 7h2v2h-2zm0 4h2v6h-2zm1-9C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"/></svg><span data-i18n="settings.nav.about">About</span></button>
+      </nav>
+
+      <main class="settings-content" id="settings-content">
+        <section class="settings-section" id="sec-audio">
+          <h2 class="section-heading" data-i18n="settings.nav.audio">Audio</h2>
+
+          <div class="eq-panel">
+            <div class="eq-panel-head">
+              <div class="setting-text">
+                <span class="setting-title" data-i18n="settings.eq.title">Equalizer</span>
+                <span class="setting-desc" data-i18n="settings.eq.desc">10 bands, applied live</span>
+              </div>
+              <select id="eq_preset" class="select" data-i18n-label="settings.eq.preset">
+                <option value="flat" data-i18n="settings.eq.preset.flat">Flat</option>
+                <option value="bass_boost" data-i18n="settings.eq.preset.bass_boost">Bass boost</option>
+                <option value="bass_reducer" data-i18n="settings.eq.preset.bass_reducer">Bass reducer</option>
+                <option value="treble_boost" data-i18n="settings.eq.preset.treble_boost">Treble boost</option>
+                <option value="vocal_clarity" data-i18n="settings.eq.preset.vocal_clarity">Vocal clarity</option>
+                <option value="electronic" data-i18n="settings.eq.preset.electronic">Electronic</option>
+                <option value="rock" data-i18n="settings.eq.preset.rock">Rock</option>
+                <option value="classical" data-i18n="settings.eq.preset.classical">Classical</option>
+                <option value="pop" data-i18n="settings.eq.preset.pop">Pop</option>
+                <optgroup id="eq-user-presets" class="is-hidden"></optgroup>
+                <option value="custom" data-i18n="settings.eq.preset.custom">Custom</option>
+              </select>
+              <button id="eq-save-preset-btn" class="btn btn-tonal" data-i18n="settings.eq.save">Save as preset</button>
+              <button id="eq-delete-preset-btn" class="btn btn-tonal btn-danger is-hidden" data-i18n="settings.eq.delete">Delete preset</button>
+              <button id="eq-reset-btn" class="btn btn-tonal" data-i18n="settings.eq.reset">Reset</button>
+            </div>
+            <div class="eq-preamp">
+              <span class="field-label" data-i18n="settings.eq.preamp">Preamp</span>
+              <input type="range" id="preamp_gain" min="-24" max="24" step="0.5" value="0" class="range" />
+              <span id="preamp_val" class="setting-value">0.0 dB</span>
+            </div>
+            <div class="eq-faders" id="eq-faders-grid"></div>
+          </div>
+
+          <div class="setting-row stack">
+            <div class="setting-row-head">
+              <div class="setting-text">
+                <span class="setting-title" data-i18n="settings.crossfade.title">Crossfade</span>
+                <span class="setting-desc" data-i18n="settings.crossfade.desc">Blends the end of one song into the start of the next</span>
+              </div>
+              <span id="crossfade_val" class="setting-value">Off</span>
+            </div>
+            <input type="range" id="crossfade_seconds" min="0" max="12" step="0.5" value="0" class="range" />
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.skipSilence.title">Skip silence</span>
+              <span class="setting-desc" data-i18n="settings.skipSilence.desc">Skips silent intros and outros</span>
+            </div>
+            <label class="toggle"><input type="checkbox" id="skip_silence_enabled" /><span class="toggle-track"></span></label>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.normalize.title">Normalize volume</span>
+              <span class="setting-desc" data-i18n="settings.normalize.desc">Evens out loudness between songs</span>
+            </div>
+            <label class="toggle"><input type="checkbox" id="loudness_normalization" /><span class="toggle-track"></span></label>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.wheelVolume.title">Scroll to change volume over the player</span>
+              <span class="setting-desc" data-i18n="settings.wheelVolume.desc">Extends mouse wheel volume control from the bottom bar to the main player panel</span>
+            </div>
+            <label class="toggle"><input type="checkbox" id="wheel_volume_on_player_page" data-i18n-label="settings.wheelVolume.title" /><span class="toggle-track"></span></label>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.wheelVolumeStep.title">Volume change per scroll</span>
+              <span class="setting-desc" data-i18n="settings.wheelVolumeStep.desc">Percentage points per wheel step, including the bottom bar</span>
+            </div>
+            <input type="number" id="wheel_volume_step_points" class="input narrow" min="1" max="100" step="1" value="5" data-i18n-label="settings.wheelVolumeStep.label" />
+          </div>
+
+          <div class="setting-row stack">
+            <div class="setting-row-head">
+              <div class="setting-text">
+                <span class="setting-title" data-i18n="settings.speed.title">Playback speed</span>
+              </div>
+              <span id="speed_val" class="setting-value">1.00×</span>
+            </div>
+            <input type="range" id="playback_speed" min="0.5" max="2.0" step="0.05" value="1.0" class="range" />
+            <div class="chip-row">
+              <button class="chip speed-preset-btn" data-speed="0.8">0.8×</button>
+              <button class="chip speed-preset-btn" data-speed="1.0" data-i18n="settings.speed.normal">Normal</button>
+              <button class="chip speed-preset-btn" data-speed="1.25">1.25×</button>
+              <button class="chip speed-preset-btn" data-speed="1.5">1.5×</button>
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.pitch.title">Keep original pitch</span>
+              <span class="setting-desc" data-i18n="settings.pitch.desc">Voices don't sound higher or lower when you change speed</span>
+            </div>
+            <label class="toggle"><input type="checkbox" id="preserve_pitch" checked /><span class="toggle-track"></span></label>
+          </div>
+        </section>
+
+        <section class="settings-section" id="sec-appearance">
+          <h2 class="section-heading" data-i18n="settings.nav.appearance">Appearance</h2>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.ambient.title">Ambient mode</span>
+              <span class="setting-desc" data-i18n="settings.ambient.desc">Tints the app with colors from the current song's artwork</span>
+            </div>
+            <label class="toggle"><input type="checkbox" id="ambient_lighting_enabled" /><span class="toggle-track"></span></label>
+          </div>
+
+          <div class="setting-row stack">
+            <div class="setting-row-head">
+              <div class="setting-text">
+                <span class="setting-title" data-i18n="settings.intensity.title">Ambient intensity</span>
+              </div>
+              <span id="ambient_intensity_val" class="setting-value">60%</span>
+            </div>
+            <input type="range" id="ambient_intensity" min="0.1" max="1.0" step="0.05" value="0.6" class="range" />
+          </div>
+
+          <div class="setting-row stack">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.css.title">Custom CSS</span>
+              <span class="setting-desc" data-i18n="settings.css.desc">Applied to YouTube Music as you type</span>
+            </div>
+            <textarea id="custom_css" class="textarea" spellcheck="false" placeholder="ytmusic-nav-bar { … }"></textarea>
+          </div>
+        </section>
+
+        <section class="settings-section" id="sec-addons">
+          <h2 class="section-heading" data-i18n="settings.nav.addons">Add-ons</h2>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.lyrics.title">Timed lyrics</span>
+              <span class="setting-desc" data-i18n="settings.lyrics.desc">Adds lyrics that follow the song to the Lyrics tab</span>
+            </div>
+            <label class="toggle"><input type="checkbox" id="lyrics_enabled" /><span class="toggle-track"></span></label>
+          </div>
+
+          <div class="setting-row stack">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.lyricsSrc.title">Lyrics sources</span>
+              <span class="setting-desc" data-i18n="settings.lyricsSrc.desc">Checked in this order. Timed lyrics from any source win over text-only ones.</span>
+            </div>
+            <div id="lyrics-providers-list" class="shortcut-list"></div>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.lyricsTheme.title">Lyrics look</span>
+              <span class="setting-desc" data-i18n="settings.lyricsTheme.desc">How the lyrics are set in the Lyrics tab and in full screen</span>
+            </div>
+            <select id="lyrics_theme" class="select" data-i18n-label="settings.lyricsTheme.title">
+              <option value="classic" data-i18n="settings.lyricsTheme.classic">Classic</option>
+              <option value="spotlight" data-i18n="settings.lyricsTheme.spotlight">Spotlight: large and bold</option>
+              <option value="centered" data-i18n="settings.lyricsTheme.centered">Centered</option>
+              <option value="accent" data-i18n="settings.lyricsTheme.accent">Cover color</option>
+              <option value="compact" data-i18n="settings.lyricsTheme.compact">Compact: more lines at once</option>
+              <option value="karaoke" data-i18n="settings.lyricsTheme.karaoke">Karaoke: centered capitals in the cover color</option>
+            </select>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.lyricsEffects.title">Lyrics effects</span>
+              <span class="setting-desc" data-i18n="settings.lyricsEffects.desc">The line being sung stands out and the others are softly blurred. Turn off if lyrics scroll unevenly</span>
+            </div>
+            <label class="toggle"><input type="checkbox" id="lyrics_effects" /><span class="toggle-track"></span></label>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.lyricsAutoOpen.title">Open the Lyrics tab by itself</span>
+              <span class="setting-desc" data-i18n="settings.lyricsAutoOpen.desc">Switches to the Lyrics tab when a song that has lyrics starts</span>
+            </div>
+            <label class="toggle"><input type="checkbox" id="lyrics_auto_open" /><span class="toggle-track"></span></label>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.lyricsTranslate.title">Translate lyrics</span>
+              <span class="setting-desc" data-i18n="settings.lyricsTranslate.desc">Shows a translation under each line. The lyrics are sent to Google Translate</span>
+            </div>
+            <label class="toggle"><input type="checkbox" id="lyrics_translate_enabled" /><span class="toggle-track"></span></label>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.lyricsLang.title">Translate into</span>
+              <span class="setting-desc" data-i18n="settings.lyricsLang.desc">Lines already in this language are left as they are</span>
+            </div>
+            <select id="lyrics_translate_lang" class="select" data-i18n-label="settings.lyricsLang.title"></select>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.lyricsRomanize.title">Romanize lyrics</span>
+              <span class="setting-desc" data-i18n="settings.lyricsRomanize.desc">Shows lyrics written in other scripts (Japanese, Korean, Cyrillic\u2026) in Latin letters too. The lyrics are sent to Google Translate</span>
+            </div>
+            <label class="toggle"><input type="checkbox" id="lyrics_romanize_enabled" /><span class="toggle-track"></span></label>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.lyricsCache.title">Saved lyrics</span>
+              <span class="setting-desc" data-i18n="settings.lyricsCache.desc">Lyrics are kept for 30 days. Clearing them makes every song look its lyrics up again.</span>
+            </div>
+            <div class="form-actions">
+              <button id="lyrics-cache-browse-btn" class="btn btn-tonal" data-i18n="settings.lyricsCache.browse">Browse</button>
+              <button id="lyrics-cache-clear-btn" class="btn btn-tonal" data-i18n="settings.lyricsCache.action">Clear</button>
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.notifications.title">Song notifications</span>
+              <span class="setting-desc" data-i18n="settings.notifications.desc">Shows a desktop notification when the song changes</span>
+            </div>
+            <label class="toggle"><input type="checkbox" id="notifications_enabled" /><span class="toggle-track"></span></label>
+          </div>
+        </section>
+
+        <section class="settings-section" id="sec-system">
+          <h2 class="section-heading" data-i18n="settings.nav.system">System</h2>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.discord.title">Show on Discord</span>
+              <span class="setting-desc" data-i18n="settings.discord.desc">Shows what you're listening to in your Discord status</span>
+            </div>
+            <label class="toggle"><input type="checkbox" id="discord_rpc_enabled" /><span class="toggle-track"></span></label>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.discordPause.title">Hide from Discord when paused</span>
+              <span class="setting-desc" data-i18n="settings.discordPause.desc">Clears your status after the song stays paused this long</span>
+            </div>
+            <select id="discord_clear_after_pause_min" class="select" data-i18n-label="settings.discordPause.title">
+              <option value="1" data-i18n="settings.discordPause.1">After 1 minute</option>
+              <option value="5" data-i18n="settings.discordPause.5">After 5 minutes</option>
+              <option value="15" data-i18n="settings.discordPause.15">After 15 minutes</option>
+              <option value="0" data-i18n="settings.discordPause.never">Never</option>
+            </select>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.mpris.title">Media keys & system controls</span>
+              <span class="setting-desc" data-i18n="settings.mpris.desc">Control playback from your keyboard and desktop</span>
+            </div>
+            <label class="toggle"><input type="checkbox" id="mpris_enabled" /><span class="toggle-track"></span></label>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.tray.title">Keep playing when closed</span>
+              <span class="setting-desc" data-i18n="settings.tray.desc">Closing the window hides it to the system tray</span>
+            </div>
+            <label class="toggle"><input type="checkbox" id="close_to_tray" /><span class="toggle-track"></span></label>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.autostart.title">Start with the system</span>
+              <span class="setting-desc" data-i18n="settings.autostart.desc">Opens Oxitune in the tray when you sign in</span>
+            </div>
+            <label class="toggle"><input type="checkbox" id="autostart" /><span class="toggle-track"></span></label>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.sleep.title">Stay awake while playing</span>
+              <span class="setting-desc" data-i18n="settings.sleep.desc">Keeps the computer from going to sleep during playback</span>
+            </div>
+            <label class="toggle"><input type="checkbox" id="inhibit_sleep" /><span class="toggle-track"></span></label>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.lock.title">Pause when screen locks</span>
+              <span class="setting-desc" data-i18n="settings.lock.desc">Minimizing the window doesn't pause playback</span>
+            </div>
+            <label class="toggle"><input type="checkbox" id="pause_on_lock" /><span class="toggle-track"></span></label>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.resume.title">Resume where you left off</span>
+              <span class="setting-desc" data-i18n="settings.resume.desc">Opens the last song at the same moment when the app starts</span>
+            </div>
+            <label class="toggle"><input type="checkbox" id="resume_on_launch" /><span class="toggle-track"></span></label>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.resumeAutoplay.title">Start playing right away</span>
+              <span class="setting-desc" data-i18n="settings.resumeAutoplay.desc">Otherwise the resumed song waits paused</span>
+            </div>
+            <label class="toggle"><input type="checkbox" id="resume_autoplay" /><span class="toggle-track"></span></label>
+          </div>
+
+          <div class="setting-row stack">
+            <div class="setting-row-head">
+              <div class="setting-text">
+                <span class="setting-title" data-i18n="settings.shortcuts.title">Keyboard shortcuts</span>
+                <span class="setting-desc" data-i18n="settings.shortcuts.desc">Work everywhere, even when the window is hidden. Click a shortcut and press the new keys; Esc cancels.</span>
+              </div>
+              <button id="shortcuts-reset-btn" class="btn btn-tonal" data-i18n="settings.shortcuts.reset">Restore defaults</button>
+            </div>
+            <div id="shortcuts-list" class="shortcut-list"></div>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.backup.title">Settings backup</span>
+              <span class="setting-desc" data-i18n="settings.backup.desc">All settings, your equalizer presets and shortcuts in one file</span>
+            </div>
+            <div class="form-actions">
+              <button id="export-settings-btn" class="btn btn-tonal" data-i18n="settings.backup.export">Export</button>
+              <button id="import-settings-btn" class="btn btn-tonal" data-i18n="settings.backup.import">Import</button>
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.logs.title">App logs</span>
+              <span class="setting-desc" data-i18n="settings.logs.desc">Useful when something doesn't work: attach the newest file to your report</span>
+            </div>
+            <button id="open-logs-btn" class="btn btn-tonal" data-i18n="settings.logs.open">Open folder</button>
+          </div>
+        </section>
+
+        <section class="settings-section" id="sec-library">
+          <h2 class="section-heading" data-i18n="settings.nav.library">Music library</h2>
+
+          <div class="setting-row stack">
+            <label class="field">
+              <span class="setting-title" data-i18n="settings.localDir.title">Local music folder</span>
+              <input type="text" id="local_music_dir" class="input" placeholder="~/Music" spellcheck="false" />
+              <span class="setting-desc" data-i18n="settings.localDir.desc">MP3, FLAC, M4A, OGG, Opus and WAV files</span>
+            </label>
+          </div>
+        </section>
+
+        <section class="settings-section" id="sec-remote">
+          <h2 class="section-heading" data-i18n="settings.nav.remote">Phone remote</h2>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.remote.title">Phone remote</span>
+              <span class="setting-desc" data-i18n="settings.remote.desc">Control playback from a phone on the same Wi-Fi. Takes effect after restarting the app.</span>
+            </div>
+            <label class="toggle"><input type="checkbox" id="remote_enabled" /><span class="toggle-track"></span></label>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.port.title">Port</span>
+              <span class="setting-desc" data-i18n="settings.port.desc">Takes effect after restarting the app</span>
+            </div>
+            <input type="number" id="remote_port" class="input narrow" min="1024" max="65535" value="9863" />
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.remoteBind.title">Listen on</span>
+              <span class="setting-desc" data-i18n="settings.remoteBind.desc">Which network the phone remote is reachable from. Takes effect after restarting the app</span>
+            </div>
+            <select id="remote_bind" class="select" data-i18n-label="settings.remoteBind.title">
+              <option value="lan" data-i18n="settings.remoteBind.lan">Home network only</option>
+              <option value="all" data-i18n="settings.remoteBind.all">All networks (VPN too)</option>
+            </select>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.remoteRevoke.title">Revoke paired phones</span>
+              <span class="setting-desc" data-i18n="settings.remoteRevoke.desc">Disconnects every phone; they need to scan the QR code again</span>
+            </div>
+            <button id="remote-revoke-btn" class="btn btn-tonal" data-i18n="settings.remoteRevoke.action">Revoke</button>
+          </div>
+
+          <div class="setting-row stack">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.remotePair.title">Pair a phone</span>
+              <span class="setting-desc" data-i18n="settings.remotePair.desc">Scan with your phone’s camera. Your phone must be on the same Wi-Fi.</span>
+            </div>
+            <div id="remote-qr" class="remote-qr" data-i18n="settings.remotePair.unavailable">The remote isn’t running. Turn it on above and restart Oxitune.</div>
+            <div id="remote-url" class="setting-desc remote-url"></div>
+          </div>
+        </section>
+
+        <section class="settings-section" id="sec-plugins">
+          <h2 class="section-heading" data-i18n="settings.nav.plugins">Plugins</h2>
+
+          <div id="plugins-restart" class="setting-row is-hidden">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="plugins.restart.title">Restart to apply</span>
+              <span class="setting-desc" data-i18n="plugins.restart.desc">New and updated plugins load when Oxitune starts. Your song picks up where it was.</span>
+            </div>
+            <button id="plugins-restart-btn" class="btn btn-filled" data-i18n="plugins.restart.action">Restart now</button>
+          </div>
+
+          <h3 class="subsection-heading" data-i18n="plugins.installed">Installed</h3>
+          <div id="plugins-installed" class="plugin-list"></div>
+          <p id="plugins-installed-empty" class="setting-desc" data-i18n="plugins.none">No plugins installed yet. Add a registry below to find some.</p>
+
+          <div id="plugins-media" class="setting-row is-hidden">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="plugins.media.title">Folder for saved songs</span>
+              <span class="setting-desc mono" id="plugins-media-dir"></span>
+              <span class="setting-desc" data-i18n="plugins.media.desc">Plugins that save songs put them only here.</span>
+            </div>
+            <button id="plugins-media-open" class="btn btn-tonal" data-i18n="plugins.media.open">Open</button>
+            <button id="plugins-media-pick" class="btn btn-tonal" data-i18n="plugins.media.pick">Change</button>
+          </div>
+          <div id="plugins-tools" class="setting-row is-hidden">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="plugins.tools.title">yt-dlp and ffmpeg</span>
+              <span class="setting-desc" id="plugins-tools-status"></span>
+              <span class="setting-desc" data-i18n="plugins.tools.desc">Downloaded from their official GitHub releases and checked against the published checksums. Oxitune updates its yt-dlp weekly.</span>
+            </div>
+            <button id="plugins-tools-install" class="btn btn-tonal" data-i18n="plugins.tools.install">Install</button>
+          </div>
+
+          <h3 class="subsection-heading" data-i18n="plugins.available">Available</h3>
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-desc" data-i18n="plugins.available.desc">Plugins offered by your registries. Every list is checked against the registry's signature.</span>
+            </div>
+            <button id="plugins-browse-btn" class="btn btn-tonal" data-i18n="plugins.browse">Show</button>
+          </div>
+          <div id="plugins-available" class="plugin-list"></div>
+
+          <h3 class="subsection-heading" data-i18n="plugins.registries">Registries</h3>
+          <p class="setting-desc" data-i18n="plugins.registries.desc">The official registry is built in. Add other registries only if you trust them: their plugins run inside YouTube Music.</p>
+          <div id="plugins-registries" class="plugin-list"></div>
+          <button id="registry-restore-btn" class="btn btn-tonal is-hidden" data-i18n="plugins.registry.restoreOfficial">Bring back the official registry</button>
+          <div class="setting-row stack">
+            <label class="field">
+              <span class="setting-title" data-i18n="plugins.registry.url">Registry address (index.json)</span>
+              <input type="url" id="registry-url" class="input" placeholder="https://example.com/oxitune-plugins/index.json" spellcheck="false" />
+            </label>
+            <label class="field">
+              <span class="setting-title" data-i18n="plugins.registry.key">Public key (minisign)</span>
+              <input type="text" id="registry-key" class="input mono" placeholder="RW…" spellcheck="false" />
+            </label>
+            <button id="registry-add-btn" class="btn btn-tonal" data-i18n="plugins.registry.add">Add registry</button>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="plugins.updates.title">Check for plugin updates</span>
+              <span class="setting-desc" data-i18n="plugins.updates.desc">Updates that ask for no new permissions install on their own</span>
+            </div>
+            <select id="plugins-update-interval" class="select" data-i18n-label="plugins.updates.title">
+              <option value="0" data-i18n="plugins.updates.off">Never</option>
+              <option value="6" data-i18n="plugins.updates.6h">Every 6 hours</option>
+              <option value="12" data-i18n="plugins.updates.12h">Every 12 hours</option>
+              <option value="24" data-i18n="plugins.updates.24h">Once a day</option>
+            </select>
+          </div>
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-desc" data-i18n="plugins.updates.nowDesc">Look for updates right away</span>
+            </div>
+            <button id="plugins-check-btn" class="btn btn-tonal" data-i18n="plugins.updates.now">Check now</button>
+          </div>
+
+          <h3 class="subsection-heading" data-i18n="plugins.dev.title">Developer</h3>
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="plugins.dev.load">Load a plugin from a folder</span>
+              <span class="setting-desc" data-i18n="plugins.dev.desc">For plugin authors. Nothing checks this code: only load folders you wrote or reviewed.</span>
+            </div>
+            <button id="plugins-dev-btn" class="btn btn-tonal" data-i18n="plugins.dev.pick">Choose folder</button>
+          </div>
+        </section>
+
+        <section class="settings-section" id="sec-about">
+          <h2 class="section-heading" data-i18n="settings.nav.about">About</h2>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title">Oxitune</span>
+              <span class="setting-desc" id="app-version-desc">—</span>
+            </div>
+            <button id="check-update-btn" class="btn btn-tonal" data-i18n="settings.update.check">Check for updates</button>
+          </div>
+
+          <div id="update-available-card" class="setting-row is-hidden">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="settings.update.available">Update available</span>
+              <span class="setting-desc" id="update-available-desc"></span>
+            </div>
+            <button id="install-update-btn" class="btn btn-filled" data-i18n="settings.update.install">Update and restart</button>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="./src/ui/settings.ts"></script>
+  </body>
+</html>

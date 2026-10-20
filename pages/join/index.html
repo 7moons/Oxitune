@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <meta name="referrer" content="no-referrer">
+  <title>Listen along · Oxitune</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #030303;
+      --surface: #212121;
+      --text: #fff;
+      --text-2: rgba(255, 255, 255, 0.7);
+      --text-3: rgba(255, 255, 255, 0.5);
+      --outline: rgba(255, 255, 255, 0.1);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px 16px;
+      background: var(--bg);
+      color: var(--text);
+      font: 400 14px/20px Roboto, "Noto Sans", Arial, sans-serif;
+    }
+    main {
+      width: 100%;
+      max-width: 400px;
+      padding: 32px 24px;
+      border-radius: 12px;
+      background: var(--surface);
+      text-align: center;
+    }
+    .logo {
+      width: 56px;
+      height: 56px;
+      margin: 0 auto 16px;
+      border-radius: 50%;
+      background: #f03;
+      display: grid;
+      place-items: center;
+    }
+    h1 { margin: 0 0 8px; font-size: 24px; line-height: 32px; font-weight: 700; }
+    p { margin: 0 0 24px; color: var(--text-2); }
+    .code {
+      display: block;
+      margin: 0 0 24px;
+      padding: 12px;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.1);
+      font: 500 20px/28px "Roboto Mono", ui-monospace, monospace;
+      letter-spacing: 0.08em;
+      user-select: all;
+      overflow-wrap: anywhere;
+    }
+    .actions { display: flex; flex-direction: column; gap: 12px; }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      height: 36px;
+      padding: 0 16px;
+      border-radius: 18px;
+      border: 0;
+      font: 500 14px/36px Roboto, Arial, sans-serif;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .btn-filled { background: var(--text); color: #030303; }
+    .btn-tonal { background: rgba(255, 255, 255, 0.1); color: var(--text); }
+    .btn:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+    .hint { margin: 24px 0 0; font-size: 12px; line-height: 16px; color: var(--text-3); }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="logo" aria-hidden="true">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="#fff"><path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z"/></svg>
+    </div>
+
+    <section id="ok" hidden>
+      <h1 data-t="title">Listen along</h1>
+      <p data-t="body">Someone invited you to a Listen Together session in Oxitune.</p>
+      <code class="code" id="code"></code>
+      <div class="actions">
+        <a class="btn btn-filled" id="open" href="#" data-t="open">Open in Oxitune</a>
+        <button class="btn btn-tonal" id="copy" type="button" data-t="copy">Copy code</button>
+      </div>
+      <p class="hint" data-t="hint">If nothing opens, open Oxitune, go to Listen Together, choose “Join with a code” and paste the code.</p>
+    </section>
+
+    <section id="bad" hidden>
+      <h1 data-t="badTitle">This invite doesn’t work</h1>
+      <p data-t="badBody">The link is missing its session code. Ask for a new invite.</p>
+    </section>
+  </main>
+
+  <script>
+    (function () {
+      var PL = {
+        title: 'Słuchaj razem',
+        body: 'Ktoś zaprasza Cię do wspólnego słuchania w Oxitune.',
+        open: 'Otwórz w Oxitune',
+        copy: 'Kopiuj kod',
+        copied: 'Skopiowano',
+        hint: 'Jeśli nic się nie otworzy, uruchom Oxitune, wejdź w Słuchaj razem, wybierz „Dołącz z kodem” i wklej kod.',
+        badTitle: 'To zaproszenie nie działa',
+        badBody: 'W linku brakuje kodu sesji. Poproś o nowe zaproszenie.'
+      };
+      var pl = /^pl\b/i.test(navigator.language || '');
+      if (pl) {
+        document.documentElement.lang = 'pl';
+        document.title = PL.title + ' · Oxitune';
+        document.querySelectorAll('[data-t]').forEach(function (el) {
+          var text = PL[el.getAttribute('data-t')];
+          if (text) el.textContent = text;
+        });
+      }
+
+      // The code lives after '#', so it never reaches this server.
+      var code = '';
+      try {
+        code = decodeURIComponent(location.hash.slice(1)).trim().toUpperCase();
+      } catch (e) {
+        code = '';
+      }
+      if (!/^OXI-[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{26}$/.test(code)) {
+        document.getElementById('bad').hidden = false;
+        return;
+      }
+
+      var deepLink = 'oxitune://join/' + code;
+      document.getElementById('code').textContent = code;
+      document.getElementById('open').href = deepLink;
+      document.getElementById('ok').hidden = false;
+
+      var copyBtn = document.getElementById('copy');
+      copyBtn.addEventListener('click', function () {
+        if (!navigator.clipboard) return;
+        navigator.clipboard.writeText(code).then(function () {
+          copyBtn.textContent = pl ? PL.copied : 'Copied';
+        });
+      });
+
+      location.href = deepLink;
+    })();
+  </script>
+</body>
+</html>

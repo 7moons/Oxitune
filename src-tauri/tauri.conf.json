@@ -1,0 +1,77 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Oxitune",
+  "version": "0.4.0",
+  "identifier": "app.oxitune.desktop",
+  "build": {
+    "beforeDevCommand": "bun run dev",
+    "devUrl": "http://127.0.0.1:24681",
+    "beforeBuildCommand": "bun run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [],
+    "security": {
+      "csp": {
+        "default-src": "'self'",
+        "script-src": "'self'",
+        "style-src": "'self' 'unsafe-inline'",
+        "img-src": "'self' https: data: blob: asset: http://asset.localhost",
+        "media-src": "'self' blob: asset: http://asset.localhost",
+        "font-src": "'self' data:",
+        "connect-src": "'self' ipc: http://ipc.localhost",
+        "object-src": "'none'",
+        "base-uri": "'none'",
+        "form-action": "'none'",
+        "frame-ancestors": "'none'"
+      },
+      "assetProtocol": {
+        "enable": true,
+        "scope": []
+      },
+      "devCsp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "createUpdaterArtifacts": true,
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico",
+      "icons/icon.png"
+    ],
+    "publisher": "7moons",
+    "copyright": "Copyright © 2026 7moons. GPL-3.0-only.",
+    "category": "Music",
+    "shortDescription": "Desktop client for YouTube Music",
+    "longDescription": "Oxitune is a lightweight desktop client for YouTube Music with media keys, Discord status, synced lyrics, an equalizer, a phone remote and Listen Together sessions.",
+    "homepage": "https://github.com/7moons/Oxitune",
+    "license": "GPL-3.0-only",
+    "licenseFile": "../LICENSE",
+    "windows": {
+      "wix": {
+        "upgradeCode": "b00285c4-0204-55da-8204-442bb35073b6"
+      }
+    }
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": [
+          "oxitune"
+        ]
+      }
+    },
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEE3MjFFMUJGNzBDMzQ1OTEKUldTUlJjTnd2K0VocDJobjF2ZVNhTTVleCs3TEZDenc5NGhjM2V5VHhGdUh6VStCOWtTR0lacEcK",
+      "endpoints": [
+        "https://7moons.github.io/Oxitune/updates/latest.json"
+      ]
+    }
+  },
+  "mainBinaryName": "oxitune"
+}

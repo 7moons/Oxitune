@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-oxitune-subscribe"
+description = "Enables the oxitune_subscribe command without any pre-configured scope."
+commands.allow = ["oxitune_subscribe"]
+
+[[permission]]
+identifier = "deny-oxitune-subscribe"
+description = "Denies the oxitune_subscribe command without any pre-configured scope."
+commands.deny = ["oxitune_subscribe"]

@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oxitune.local/schemas/lyrics_v1.json",
+  "title": "CurrentLyrics",
+  "description": "Lyrics of the song playing now. Payload of the `lyrics-changed` event (sent to every window on a song change, when lyrics load, on an offset change and on a pick) and the result of `get_current_lyrics`. Produced by `CurrentLyrics` in src-tauri/src/lyrics/mod.rs.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["video_id", "provider", "synced", "plain", "offset_secs", "source_url"],
+  "properties": {
+    "video_id": {
+      "type": ["string", "null"],
+      "description": "YouTube video id of the song these lyrics belong to; null when unknown."
+    },
+    "provider": {
+      "type": ["string", "null"],
+      "enum": ["local", "lrcred", "lrclib", "unison", "musixmatch", "netease", "ytm", "genius", null],
+      "description": "Where the lyrics came from; null while loading or when none were found."
+    },
+    "synced": {
+      "type": "array",
+      "description": "Timed lines sorted by `t`; empty when only plain text (or nothing) is available.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["t", "text"],
+        "properties": {
+          "t": { "type": "number", "minimum": 0, "description": "Line start, seconds from the start of the song." },
+          "text": { "type": "string" },
+          "words": {
+            "type": "array",
+            "description": "Word-by-word timing when the provider has it. Concatenating `text` of all words gives the line text (spaces stay on the preceding word).",
+            "items": { "$ref": "#/$defs/Word" }
+          },
+          "end": { "type": "number", "minimum": 0, "description": "When the line stops being sung, when the provider says. Absent otherwise: the line lasts until the next one." },
+          "alt": { "type": "boolean", "description": "True for lines sung by the song's second voice (a duet), shown on the other side. Absent means false." },
+          "bg": {
+            "type": "object",
+            "description": "Background vocals sung under the line.",
+            "additionalProperties": false,
+            "required": ["text"],
+            "properties": {
+              "text": { "type": "string" },
+              "words": {
+            "type": "array",
+            "description": "Word-by-word timing when the provider has it. Concatenating `text` of all words gives the line text (spaces stay on the preceding word).",
+            "items": { "$ref": "#/$defs/Word" }
+          }
+            }
+          }
+        }
+      }
+    },
+    "plain": {
+      "type": ["string", "null"],
+      "description": "Untimed lyrics, lines separated by \\n. Present alongside `synced` for most providers."
+    },
+    "offset_secs": {
+      "type": "number",
+      "minimum": -60,
+      "maximum": 60,
+      "description": "User's timing correction for this song. Positive = lyrics run ahead: a line is active once `position + offset_secs >= t`."
+    },
+    "source_url": {
+      "type": ["string", "null"],
+      "description": "Page of these lyrics on the provider's site, when it has one."
+    }
+  },
+  "$defs": {
+    "Word": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t", "text"],
+      "properties": {
+        "t": { "type": "number", "minimum": 0, "description": "Word start, seconds from the start of the song." },
+        "text": { "type": "string" },
+        "end": { "type": "number", "minimum": 0, "description": "When the word stops being sung, when the provider says." }
+      }
+    }
+  }
+}

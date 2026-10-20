@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "local-library",
+  "description": "Local music library window (local page).",
+  "windows": ["local"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "allow-minimize-window",
+    "allow-toggle-maximize-window",
+    "allow-close-window",
+    "allow-get-current-track",
+    "allow-scan-local-music"
+  ]
+}

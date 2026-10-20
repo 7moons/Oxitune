@@ -1,0 +1,580 @@
+/**
+ * The shared building blocks for every piece of UI Oxitune injects into
+ * YouTube Music: icon buttons, menus, toasts, dialogs, tooltips and chips.
+ *
+ * Everything is sized and colored after YTM's own components (Roboto 14px,
+ * 40px round icon buttons, #212121 menus, bottom-left toasts), and colors
+ * resolve through YTM's own `--yt-sys-color-baseline--*` custom properties
+ * first. theme_engine overrides those same properties for the Ambient/Base
+ * looks, so our components follow whichever theme is active for free,
+ * exactly like YTM's native menus and dialogs do.
+ *
+ * All styling lives in one injected stylesheet (never inline style writes
+ * on YTM's elements), and every builder uses plain DOM
+ * APIs because YTM's Trusted Types policy blocks innerHTML.
+ */
+import { createEl, createSvg } from '../../utils/dom';
+
+const STYLE_ID = 'oxitune-kit-styles';
+
+export const KIT_CSS = `
+  :root {
+    --oxitune-font: Roboto, "Noto Naskh Arabic UI", Arial, sans-serif;
+    --oxitune-font-display: "YouTube Sans", Roboto, Arial, sans-serif;
+    --oxitune-text: var(--yt-sys-color-baseline--text-primary, #fff);
+    --oxitune-text-secondary: var(--yt-sys-color-baseline--text-secondary, rgba(255, 255, 255, 0.7));
+    --oxitune-text-disabled: rgba(255, 255, 255, 0.5);
+    --oxitune-surface: var(--yt-sys-color-baseline--menu-background, #212121);
+    --oxitune-hover: rgba(255, 255, 255, 0.1);
+    --oxitune-pressed: rgba(255, 255, 255, 0.2);
+    --oxitune-divider: rgba(255, 255, 255, 0.1);
+    --oxitune-accent-color: var(--oxitune-accent, var(--yt-sys-color-baseline--call-to-action, #fff));
+    --oxitune-player-bar-height: 72px;
+  }
+
+  .oxitune-icon-btn {
+    all: unset;
+    box-sizing: border-box;
+    width: 40px;
+    height: 40px;
+    flex: 0 0 40px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    color: var(--oxitune-text);
+    cursor: pointer;
+    position: relative;
+    transition: background-color 0.1s linear;
+  }
+  .oxitune-icon-btn:hover { background: var(--oxitune-hover); }
+  .oxitune-icon-btn:active { background: var(--oxitune-pressed); }
+  .oxitune-icon-btn:focus-visible { outline: 2px solid var(--oxitune-text); outline-offset: -2px; }
+  .oxitune-icon-btn[aria-disabled="true"] { color: var(--oxitune-text-disabled); cursor: default; background: none; }
+  .oxitune-icon-btn svg { width: 24px; height: 24px; pointer-events: none; }
+  .oxitune-icon-btn.oxitune-icon-btn--muted { color: var(--oxitune-text-secondary); }
+  .oxitune-icon-btn.oxitune-icon-btn--muted:hover { color: var(--oxitune-text); }
+
+  /* Circular progress drawn around an icon button. */
+  .oxitune-progress-ring {
+    position: absolute;
+    inset: 2px;
+    width: calc(100% - 4px) !important;
+    height: calc(100% - 4px) !important;
+    transform: rotate(-90deg);
+    pointer-events: none;
+  }
+  .oxitune-progress-ring circle { fill: none; stroke-width: 2.5; }
+  .oxitune-progress-ring .oxitune-progress-track { stroke: var(--oxitune-divider); }
+  .oxitune-progress-ring .oxitune-progress-value {
+    stroke: var(--oxitune-accent-color);
+    stroke-linecap: round;
+    transition: stroke-dashoffset 0.3s ease;
+  }
+
+  .oxitune-menu {
+    position: fixed;
+    z-index: 2202;
+    min-width: 240px;
+    max-width: 320px;
+    padding: 8px 0;
+    box-sizing: border-box;
+    background: var(--oxitune-surface);
+    border-radius: 12px;
+    box-shadow: 0 4px 32px rgba(0, 0, 0, 0.4);
+    font-family: var(--oxitune-font);
+    color: var(--oxitune-text);
+    opacity: 0;
+    transform: translateY(-4px);
+    pointer-events: none;
+    transition: opacity 0.12s ease, transform 0.12s ease;
+  }
+  .oxitune-menu.oxitune-open { opacity: 1; transform: none; pointer-events: auto; }
+  .oxitune-menu-item {
+    all: unset;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    width: 100%;
+    min-height: 40px;
+    padding: 0 16px 0 12px;
+    font: 400 14px/20px var(--oxitune-font);
+    color: var(--oxitune-text);
+    cursor: pointer;
+  }
+  .oxitune-menu-item:hover, .oxitune-menu-item:focus-visible { background: var(--oxitune-hover); }
+  .oxitune-menu-item svg { width: 24px; height: 24px; flex: 0 0 24px; }
+  .oxitune-menu-item-text { flex: 1; display: flex; flex-direction: column; padding: 8px 0; }
+  .oxitune-menu-item-sub { font-size: 12px; line-height: 16px; color: var(--oxitune-text-secondary); }
+  .oxitune-menu-item-hint { font-size: 12px; color: var(--oxitune-text-secondary); }
+  .oxitune-menu-divider { height: 1px; margin: 8px 0; background: var(--oxitune-divider); }
+
+  .oxitune-chip {
+    all: unset;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 32px;
+    padding: 0 12px;
+    border-radius: 8px;
+    background: var(--oxitune-hover);
+    font: 500 14px/20px var(--oxitune-font);
+    color: var(--oxitune-text);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background-color 0.1s linear;
+  }
+  .oxitune-chip:hover { background: var(--oxitune-pressed); }
+  .oxitune-chip:focus-visible { outline: 2px solid var(--oxitune-text); outline-offset: 2px; }
+  .oxitune-chip svg { width: 18px; height: 18px; }
+  .oxitune-chip-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--oxitune-accent-color);
+  }
+
+  .oxitune-button {
+    all: unset;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 36px;
+    padding: 0 16px;
+    border-radius: 18px;
+    font: 500 14px/36px var(--oxitune-font);
+    color: var(--oxitune-text);
+    cursor: pointer;
+    transition: background-color 0.1s linear;
+  }
+  .oxitune-button:hover { background: var(--oxitune-hover); }
+  .oxitune-button:focus-visible { outline: 2px solid var(--oxitune-text); outline-offset: 2px; }
+  .oxitune-button--filled { background: var(--oxitune-text); color: #0f0f0f; }
+  .oxitune-button--filled:hover { background: rgba(255, 255, 255, 0.85); }
+
+  #oxitune-toast-host {
+    position: fixed;
+    left: 24px;
+    bottom: calc(var(--oxitune-player-bar-height) + 16px);
+    z-index: 2202;
+    pointer-events: none;
+  }
+  .oxitune-toast {
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    min-width: 288px;
+    max-width: 568px;
+    min-height: 48px;
+    padding: 8px 8px 8px 16px;
+    background: var(--oxitune-surface);
+    border-radius: 8px;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+    font: 400 14px/20px var(--oxitune-font);
+    color: var(--oxitune-text);
+    pointer-events: auto;
+    animation: oxitune-toast-in 0.2s ease-out;
+  }
+  .oxitune-toast.oxitune-leaving { animation: oxitune-toast-out 0.15s ease-in forwards; }
+  .oxitune-toast-text { flex: 1; padding: 6px 8px 6px 0; }
+  .oxitune-toast .oxitune-button { color: var(--oxitune-accent-color); }
+  @keyframes oxitune-toast-in { from { opacity: 0; transform: translateY(16px); } }
+  @keyframes oxitune-toast-out { to { opacity: 0; transform: translateY(16px); } }
+
+  .oxitune-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 2203;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.6);
+    animation: oxitune-fade-in 0.15s ease-out;
+  }
+  .oxitune-dialog {
+    box-sizing: border-box;
+    width: min(400px, calc(100vw - 48px));
+    padding: 24px;
+    background: var(--oxitune-surface);
+    border-radius: 12px;
+    box-shadow: 0 8px 48px rgba(0, 0, 0, 0.5);
+    font-family: var(--oxitune-font);
+    color: var(--oxitune-text);
+  }
+  .oxitune-dialog-title { margin: 0 0 8px; font: 700 20px/28px var(--oxitune-font-display); }
+  .oxitune-dialog-body { font-size: 14px; line-height: 20px; color: var(--oxitune-text-secondary); }
+  .oxitune-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 24px; }
+  @keyframes oxitune-fade-in { from { opacity: 0; } }
+
+  #oxitune-tooltip {
+    position: fixed;
+    z-index: 2204;
+    padding: 6px 8px;
+    border-radius: 4px;
+    background: rgba(97, 97, 97, 0.92);
+    font: 400 12px/16px var(--oxitune-font);
+    color: #fff;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.1s linear;
+  }
+  #oxitune-tooltip.oxitune-open { opacity: 1; }
+
+  #oxitune-volume-indicator {
+    position: fixed;
+    z-index: 2201;
+    visibility: hidden;
+    opacity: 0;
+    box-sizing: border-box;
+    min-width: 58px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--oxitune-surface) 82%, transparent);
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25);
+    color: var(--oxitune-text);
+    font: 700 24px/28px var(--oxitune-font-display);
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+    pointer-events: none;
+    transition: opacity 0.35s ease, visibility 0s linear 0.35s;
+  }
+  #oxitune-volume-indicator.oxitune-visible {
+    visibility: visible;
+    opacity: 1;
+    transition: opacity 0.12s ease, visibility 0s;
+  }
+
+  #oxitune-reaction-host {
+    position: fixed;
+    right: 24px;
+    bottom: calc(var(--oxitune-player-bar-height) + 16px);
+    z-index: 2202;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 8px;
+    pointer-events: none;
+  }
+  .oxitune-reaction {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 36px;
+    padding: 0 14px 0 8px;
+    border-radius: 18px;
+    background: var(--oxitune-surface);
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+    font: 500 14px/20px var(--oxitune-font);
+    color: var(--oxitune-text);
+    animation: oxitune-reaction 3s ease-out forwards;
+  }
+  .oxitune-reaction-emoji { font-size: 22px; line-height: 1; }
+  @keyframes oxitune-reaction {
+    0% { opacity: 0; transform: translateY(12px) scale(0.9); }
+    10%, 75% { opacity: 1; transform: none; }
+    100% { opacity: 0; transform: translateY(-24px); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .oxitune-menu, .oxitune-toast, .oxitune-toast.oxitune-leaving, .oxitune-scrim, .oxitune-reaction { transition: none; animation: none; }
+    #oxitune-volume-indicator { transition: none; }
+  }
+`;
+
+export function ensureKitStyles(): void {
+  if (document.getElementById(STYLE_ID)) return;
+  const style = document.createElement('style');
+  style.id = STYLE_ID;
+  style.textContent = KIT_CSS;
+  (document.head || document.documentElement).appendChild(style);
+  installTooltips();
+}
+
+/** Material icon paths (24x24), the same icon family YTM uses. */
+export const ICONS = {
+  apps: 'M4 8h4V4H4v4zm6 12h4v-4h-4v4zm-6 0h4v-4H4v4zm0-6h4v-4H4v4zm6 0h4v-4h-4v4zm6-10v4h4V4h-4zm-6 4h4V4h-4v4zm6 6h4v-4h-4v4zm0 6h4v-4h-4v4z',
+  tune: 'M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z',
+  folderMusic: 'M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm-2 5h-3v5.5a2.5 2.5 0 1 1-2.5-2.5c.57 0 1.08.19 1.5.51V9h4v2z',
+  group: 'M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z',
+  phone: 'M17 1.01 7 1c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-1.99-2-1.99zM17 19H7V5h10v14z',
+  miniPlayer: 'M19 11h-8v6h8v-6zm4 8V4.98C23 3.88 22.1 3 21 3H3c-1.1 0-2 .88-2 1.98V19c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2zm-2 .02H3V4.97h18v14.05z',
+  check: 'M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z',
+  close: 'M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z',
+  fullscreen: 'M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z',
+  translate: 'm12.87 15.07-2.54-2.51.03-.03A17.52 17.52 0 0 0 14.07 6H17V4h-7V2H8v2H1v1.99h11.17C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02L4 19l5-5 3.11 3.11.76-2.04zM18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2l-4.5-12zm-2.62 7 1.62-4.33L19.12 17h-3.24z',
+  romanize: 'M9 4v3h5v12h3V7h5V4H9zm-6 8h3v7h3v-7h3V9H3v3z',
+  remove: 'M19 13H5v-2h14v2z',
+  add: 'M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z',
+  swap: 'M6.99 11 3 15l3.99 4v-3H14v-2H6.99v-3zM21 9l-3.99-4v3H10v2h7.01v3L21 9z',
+  refresh: 'M17.65 6.35A7.96 7.96 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z',
+  play: 'M8 5v14l11-7z',
+  pause: 'M6 19h4V5H6v14zm8-14v14h4V5h-4z',
+  skipNext: 'M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z',
+  skipPrevious: 'M6 6h2v12H6zm3.5 6 8.5 6V6z',
+  sync: 'M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0 0 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 0 0 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z',
+  pip: 'M19 11h-8v6h8v-6zm4 8V4.98C23 3.88 22.1 3 21 3H3c-1.1 0-2 .88-2 1.98V19c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2zm-2 .02H3V4.97h18v14.05z'
+} as const;
+
+export function icon(path: string, size = 24): SVGSVGElement {
+  return createSvg(path, size, size);
+}
+
+/** Round 40px icon button, like the ones in YTM's player and nav bars. */
+export function createIconButton(opts: { id?: string; label: string; iconPath: string; muted?: boolean }): HTMLButtonElement {
+  const btn = createEl('button', {
+    id: opts.id,
+    className: `oxitune-icon-btn${opts.muted ? ' oxitune-icon-btn--muted' : ''}`
+  });
+  btn.type = 'button';
+  btn.setAttribute('aria-label', opts.label);
+  btn.dataset.oxituneTooltip = opts.label;
+  btn.appendChild(icon(opts.iconPath));
+  return btn;
+}
+
+export function setIconButtonIcon(btn: HTMLElement, iconPath: string): void {
+  btn.querySelector('svg:not(.oxitune-progress-ring)')?.replaceWith(icon(iconPath));
+}
+
+/** Progress ring on an icon button; `null` removes it. `fraction` in 0..1. */
+export function setButtonProgress(btn: HTMLElement, fraction: number | null): void {
+  let ring = btn.querySelector<SVGSVGElement>('svg.oxitune-progress-ring');
+  if (fraction === null) {
+    ring?.remove();
+    return;
+  }
+  const r = 17;
+  const circumference = 2 * Math.PI * r;
+  if (!ring) {
+    const ns = 'http://www.w3.org/2000/svg';
+    ring = document.createElementNS(ns, 'svg');
+    ring.setAttribute('class', 'oxitune-progress-ring');
+    ring.setAttribute('viewBox', '0 0 36 36');
+    for (const cls of ['oxitune-progress-track', 'oxitune-progress-value']) {
+      const c = document.createElementNS(ns, 'circle');
+      c.setAttribute('class', cls);
+      c.setAttribute('cx', '18');
+      c.setAttribute('cy', '18');
+      c.setAttribute('r', String(r));
+      c.setAttribute('stroke-dasharray', String(circumference));
+      ring.appendChild(c);
+    }
+    btn.appendChild(ring);
+  }
+  const clamped = Math.max(0, Math.min(1, fraction));
+  ring.querySelector('.oxitune-progress-value')?.setAttribute('stroke-dashoffset', String(circumference * (1 - clamped)));
+}
+
+// ---------------------------------------------------------------------
+// Tooltips: one shared element, driven by `data-oxitune-tooltip` through
+// delegated listeners, so no component has to wire its own.
+// ---------------------------------------------------------------------
+
+let tooltipsInstalled = false;
+function installTooltips(): void {
+  if (tooltipsInstalled) return;
+  tooltipsInstalled = true;
+
+  let tip: HTMLElement | null = null;
+  let showTimer: ReturnType<typeof setTimeout> | null = null;
+  let anchor: HTMLElement | null = null;
+
+  const hide = () => {
+    if (showTimer !== null) clearTimeout(showTimer);
+    showTimer = null;
+    anchor = null;
+    tip?.classList.remove('oxitune-open');
+  };
+
+  const show = (target: HTMLElement) => {
+    const text = target.dataset.oxituneTooltip;
+    if (!text) return;
+    if (!tip) {
+      tip = createEl('div', { id: 'oxitune-tooltip' });
+      tip.setAttribute('role', 'tooltip');
+      document.body.appendChild(tip);
+    }
+    tip.textContent = text;
+    const rect = target.getBoundingClientRect();
+    const tipRect = tip.getBoundingClientRect();
+    const below = rect.bottom + 8 + tipRect.height < window.innerHeight;
+    const top = below ? rect.bottom + 8 : rect.top - 8 - tipRect.height;
+    const left = Math.max(8, Math.min(window.innerWidth - tipRect.width - 8, rect.left + rect.width / 2 - tipRect.width / 2));
+    tip.style.top = `${top}px`;
+    tip.style.left = `${left}px`;
+    tip.classList.add('oxitune-open');
+  };
+
+  const onEnter = (e: Event) => {
+    const target = (e.target as Element | null)?.closest?.<HTMLElement>('[data-oxitune-tooltip]');
+    if (!target || target === anchor) return;
+    hide();
+    anchor = target;
+    showTimer = setTimeout(() => show(target), 250);
+  };
+  const onLeave = (e: Event) => {
+    const related = (e as MouseEvent).relatedTarget as Node | null;
+    if (anchor && related && anchor.contains(related)) return;
+    hide();
+  };
+
+  document.addEventListener('mouseover', onEnter, true);
+  document.addEventListener('mouseout', onLeave, true);
+  document.addEventListener('focusin', onEnter, true);
+  document.addEventListener('focusout', hide, true);
+  document.addEventListener('mousedown', hide, true);
+}
+
+// ---------------------------------------------------------------------
+// Toasts: YTM shows one at a time, bottom-left above the player bar.
+// Reusing an `id` updates the visible toast in place (progress)
+// instead of stacking a new one.
+// ---------------------------------------------------------------------
+
+export interface ToastOptions {
+  id?: string;
+  durationMs?: number;
+  action?: { label: string; onClick: () => void };
+}
+
+let toastTimer: ReturnType<typeof setTimeout> | null = null;
+
+export function showToast(message: string, opts: ToastOptions = {}): void {
+  ensureKitStyles();
+  let host = document.getElementById('oxitune-toast-host');
+  if (!host) {
+    host = createEl('div', { id: 'oxitune-toast-host' });
+    host.setAttribute('role', 'status');
+    host.setAttribute('aria-live', 'polite');
+    document.body.appendChild(host);
+  }
+
+  const current = host.querySelector<HTMLElement>('.oxitune-toast');
+  // A toast already animating out is on a removal timer; never reuse it.
+  const reuse =
+    current && opts.id && current.dataset.toastId === opts.id && !current.classList.contains('oxitune-leaving');
+  const toast = reuse ? current : createEl('div', { className: 'oxitune-toast' });
+  if (opts.id) toast.dataset.toastId = opts.id;
+
+  const text = createEl('span', { className: 'oxitune-toast-text', text: message });
+  const children: Node[] = [text];
+  if (opts.action) {
+    const { label, onClick } = opts.action;
+    const btn = createEl('button', { className: 'oxitune-button', text: label });
+    btn.type = 'button';
+    btn.addEventListener('click', () => {
+      dismissToast();
+      onClick();
+    });
+    children.push(btn);
+  }
+  toast.replaceChildren(...children);
+  if (!reuse) host.replaceChildren(toast);
+
+  if (toastTimer !== null) clearTimeout(toastTimer);
+  toastTimer = null;
+  const duration = opts.durationMs ?? 4000;
+  if (duration > 0) toastTimer = setTimeout(dismissToast, duration);
+}
+
+const MAX_REACTIONS_SHOWN = 5;
+const REACTION_SHOWN_MS = 3000;
+
+/** A listening-session reaction: a small bubble above the player bar's
+ * right end that floats up and fades, so a burst of them doesn't queue up
+ * behind toasts. */
+export function showReaction(emoji: string, from: string): void {
+  ensureKitStyles();
+  let host = document.getElementById('oxitune-reaction-host');
+  if (!host) {
+    host = createEl('div', { id: 'oxitune-reaction-host' });
+    host.setAttribute('aria-live', 'polite');
+    document.body.appendChild(host);
+  }
+  const bubble = createEl('div', { className: 'oxitune-reaction' });
+  bubble.append(createEl('span', { className: 'oxitune-reaction-emoji', text: emoji }), createEl('span', { text: from }));
+  host.appendChild(bubble);
+  while (host.children.length > MAX_REACTIONS_SHOWN) host.firstElementChild?.remove();
+  setTimeout(() => bubble.remove(), REACTION_SHOWN_MS);
+}
+
+export function dismissToast(): void {
+  if (toastTimer !== null) clearTimeout(toastTimer);
+  toastTimer = null;
+  const toast = document.querySelector<HTMLElement>('#oxitune-toast-host .oxitune-toast');
+  if (!toast) return;
+  toast.classList.add('oxitune-leaving');
+  setTimeout(() => toast.remove(), 150);
+}
+
+// ---------------------------------------------------------------------
+// Dialog: rebuilt on every open and removed from the DOM on close, never
+// hidden and reused — a lingering full-viewport overlay is exactly the
+// kind of element that can end up silently eating clicks.
+// ---------------------------------------------------------------------
+
+export interface DialogHandle {
+  close: () => void;
+  body: HTMLElement;
+}
+
+export function openDialog(opts: {
+  id: string;
+  title: string;
+  body?: Node[];
+  actions: { label: string; filled?: boolean; onClick?: (close: () => void) => void }[];
+}): DialogHandle {
+  ensureKitStyles();
+  document.getElementById(opts.id)?.remove();
+
+  const scrim = createEl('div', { id: opts.id, className: 'oxitune-scrim' });
+  const dialog = createEl('div', { className: 'oxitune-dialog' });
+  dialog.setAttribute('role', 'dialog');
+  dialog.setAttribute('aria-modal', 'true');
+  const titleId = `${opts.id}-title`;
+  dialog.setAttribute('aria-labelledby', titleId);
+
+  const title = createEl('h2', { id: titleId, className: 'oxitune-dialog-title', text: opts.title });
+  const body = createEl('div', { className: 'oxitune-dialog-body' });
+  if (opts.body) body.append(...opts.body);
+
+  const previouslyFocused = document.activeElement as HTMLElement | null;
+  const close = () => {
+    document.removeEventListener('keydown', onKeydown, true);
+    scrim.remove();
+    previouslyFocused?.focus?.();
+  };
+  const onKeydown = (e: KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      e.stopPropagation();
+      close();
+    }
+  };
+  document.addEventListener('keydown', onKeydown, true);
+  scrim.addEventListener('click', (e) => {
+    if (e.target === scrim) close();
+  });
+
+  const actions = createEl('div', { className: 'oxitune-dialog-actions' });
+  for (const action of opts.actions) {
+    const btn = createEl('button', {
+      className: `oxitune-button${action.filled ? ' oxitune-button--filled' : ''}`,
+      text: action.label
+    });
+    btn.type = 'button';
+    btn.addEventListener('click', () => (action.onClick ? action.onClick(close) : close()));
+    actions.appendChild(btn);
+  }
+
+  dialog.append(title, body, actions);
+  scrim.appendChild(dialog);
+  document.body.appendChild(scrim);
+  actions.querySelector<HTMLElement>('button')?.focus();
+
+  return { close, body };
+}

@@ -1,0 +1,1 @@
+{"format":1,"name":"Test registry","plugins":[{"id":"app.oxitune.example-theme","name":"Example theme","version":"1.0.0","apiVersion":1,"description":"test","author":"Oxitune","permissions":["ui"],"url":"https://example.com/app.oxitune.example-theme-1.0.0.tar.gz","sha256":"7f0e2b3d5ee0d989aae193bdf4f60fe567bf97e5404772ab3a94870d44a74337"}]}

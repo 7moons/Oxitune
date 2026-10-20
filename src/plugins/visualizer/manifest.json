@@ -1,0 +1,17 @@
+{
+  "id": "app.oxitune.scrollbars",
+  "name": "Sleek Scrollbars",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "description": "Applies subtle, low-contrast scrollbar colors",
+  "author": "Oxitune",
+  "matches": [
+    "https://music.youtube.com/*"
+  ],
+  "runAt": "document-idle",
+  "permissions": [
+    "page",
+    "ui"
+  ],
+  "entry": "index.js"
+}

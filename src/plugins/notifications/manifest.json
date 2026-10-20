@@ -1,0 +1,18 @@
+{
+  "id": "app.oxitune.notifications",
+  "name": "Track Change Notifications",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "description": "Displays native desktop notifications when songs change",
+  "author": "Oxitune",
+  "matches": [
+    "https://music.youtube.com/*"
+  ],
+  "runAt": "document-idle",
+  "permissions": [
+    "player:read",
+    "internal:config",
+    "internal:notify"
+  ],
+  "entry": "index.js"
+}

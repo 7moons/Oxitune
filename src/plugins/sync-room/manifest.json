@@ -1,0 +1,20 @@
+{
+  "id": "app.oxitune.listen-together",
+  "name": "P2P Room Sync",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "description": "Listen together with friends in real-time synchronized listening rooms",
+  "author": "Oxitune",
+  "matches": [
+    "https://music.youtube.com/*"
+  ],
+  "runAt": "document-idle",
+  "permissions": [
+    "player:read",
+    "player:control",
+    "page",
+    "ui",
+    "internal:sync"
+  ],
+  "entry": "index.js"
+}

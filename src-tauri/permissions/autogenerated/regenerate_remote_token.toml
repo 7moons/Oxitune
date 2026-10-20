@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-regenerate-remote-token"
+description = "Enables the regenerate_remote_token command without any pre-configured scope."
+commands.allow = ["regenerate_remote_token"]
+
+[[permission]]
+identifier = "deny-regenerate-remote-token"
+description = "Denies the regenerate_remote_token command without any pre-configured scope."
+commands.deny = ["regenerate_remote_token"]

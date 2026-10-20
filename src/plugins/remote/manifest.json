@@ -1,0 +1,19 @@
+{
+  "id": "app.oxitune.remote",
+  "name": "Mobile Web Remote",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "description": "Control playback from phone or tablet over Wi-Fi with QR code pairing",
+  "author": "Oxitune",
+  "matches": [
+    "https://music.youtube.com/*"
+  ],
+  "runAt": "document-idle",
+  "permissions": [
+    "player:read",
+    "player:control",
+    "page",
+    "internal:remote"
+  ],
+  "entry": "index.js"
+}

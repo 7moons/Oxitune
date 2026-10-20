@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "miniplayer",
+  "description": "Mini player window (local page).",
+  "windows": ["miniplayer"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "allow-minimize-window",
+    "allow-toggle-maximize-window",
+    "allow-close-window",
+    "allow-get-current-track",
+    "core:window:allow-set-always-on-top",
+    "allow-get-current-lyrics"
+  ]
+}

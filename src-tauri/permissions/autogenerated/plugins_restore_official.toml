@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-plugins-restore-official"
+description = "Enables the plugins_restore_official command without any pre-configured scope."
+commands.allow = ["plugins_restore_official"]
+
+[[permission]]
+identifier = "deny-plugins-restore-official"
+description = "Denies the plugins_restore_official command without any pre-configured scope."
+commands.deny = ["plugins_restore_official"]

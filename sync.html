@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title data-i18n="sync.windowTitle">Listen together</title>
+    <link rel="stylesheet" href="./src/ui/styles.css" />
+  </head>
+  <body>
+    <div id="ambient-backdrop" aria-hidden="true">
+      <img id="ambient-cover" alt="" />
+      <div id="ambient-veil"></div>
+    </div>
+
+    <header class="titlebar" data-tauri-drag-region>
+      <div class="titlebar-title" data-tauri-drag-region>
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
+        <span data-i18n="sync.windowTitle" data-tauri-drag-region>Listen together</span>
+      </div>
+      <div class="window-controls">
+        <button id="win-min-btn" class="icon-btn sm" data-i18n-label="window.minimize" aria-label="Minimize"><svg class="icon" viewBox="0 0 24 24"><path d="M6 19h12v2H6z"/></svg></button>
+        <button id="win-max-btn" class="icon-btn sm" data-i18n-label="window.maximize" aria-label="Maximize"><svg class="icon" viewBox="0 0 24 24"><path d="M18 4H6c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H6V6h12v12z"/></svg></button>
+        <button id="win-close-btn" class="icon-btn sm window-close" data-i18n-label="window.close" aria-label="Close"><svg class="icon" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></button>
+      </div>
+    </header>
+
+    <main class="page">
+      <!-- Not in a room -->
+      <div id="setup-view" class="page-inner">
+        <div>
+          <h1 class="page-title" data-i18n="sync.setup.title">Listen together</h1>
+          <p class="page-lead" data-i18n="sync.setup.lead">Play the same music at the same time as your friends, wherever they are.</p>
+        </div>
+
+        <div class="chip-row" role="tablist">
+          <button id="tab-host" class="chip is-selected" role="tab" aria-selected="true" data-i18n="sync.tab.host">Start a session</button>
+          <button id="tab-guest" class="chip" role="tab" aria-selected="false" data-i18n="sync.tab.guest">Join with a code</button>
+        </div>
+
+        <div id="panel-host" class="form" role="tabpanel">
+          <label class="field">
+            <span class="field-label" data-i18n="sync.field.name">Your name</span>
+            <input type="text" id="host-nickname" class="input" maxlength="32" autocomplete="off" />
+          </label>
+          <div class="form-actions">
+            <button id="create-room-btn" class="btn btn-filled"><span id="create-room-btn-label" data-i18n="sync.create">Start session</span></button>
+            <span id="host-status-hint" class="hint is-hidden"></span>
+          </div>
+          <div id="host-error" class="form-error is-hidden" role="alert"></div>
+        </div>
+
+        <div id="panel-guest" class="form is-hidden" role="tabpanel">
+          <label class="field">
+            <span class="field-label" data-i18n="sync.field.code">Session code</span>
+            <input type="text" id="join-code" class="input mono" placeholder="OXI-XXXXXXXXXXXXXXXXXXXXXXXXXX" autocomplete="off" spellcheck="false" />
+          </label>
+          <label class="field">
+            <span class="field-label" data-i18n="sync.field.name">Your name</span>
+            <input type="text" id="guest-nickname" class="input" maxlength="32" autocomplete="off" />
+          </label>
+          <div class="form-actions">
+            <button id="join-room-btn" class="btn btn-filled"><span id="join-room-btn-label" data-i18n="sync.join">Join</span></button>
+            <span id="guest-status-hint" class="hint is-hidden"></span>
+          </div>
+          <div id="guest-error" class="form-error is-hidden" role="alert"></div>
+        </div>
+
+        <div class="connection-test">
+          <div class="form-actions">
+            <button id="test-connection-btn" class="btn btn-tonal"><span id="test-connection-label" data-i18n="sync.test">Check connection</span></button>
+          </div>
+          <div id="test-results" class="test-results is-hidden" aria-live="polite"></div>
+        </div>
+      </div>
+
+      <!-- In a room -->
+      <div id="active-room-view" class="page-inner is-hidden">
+        <div>
+          <h1 class="page-title" data-i18n="sync.active.title">Listening together</h1>
+          <div class="status-line"><span id="sync-status-dot" class="status-dot"></span><span id="sync-status-label" data-i18n="sync.active.status">In sync</span></div>
+        </div>
+
+        <div class="room-code-card">
+          <div class="setting-text">
+            <span class="hint" data-i18n="sync.active.codeLabel">Share this code to invite friends</span>
+            <span class="room-code" id="room-code-display">OXI-</span>
+          </div>
+          <button id="copy-code-btn" class="icon-btn" data-i18n-label="sync.copy" aria-label="Copy code"><svg class="icon" viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg></button>
+        </div>
+
+        <div class="react-row">
+          <div id="reaction-chips" class="chip-row" role="group" data-i18n-label="sync.react.group"></div>
+          <button id="vote-skip-btn" class="btn btn-tonal"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg><span id="vote-skip-label" data-i18n="sync.vote">Vote to skip</span></button>
+        </div>
+
+        <div id="pending-section" class="is-hidden">
+          <div class="list-heading">
+            <span data-i18n="sync.pending.title">Waiting to join</span>
+          </div>
+          <div class="member-list" id="pending-list"></div>
+        </div>
+
+        <div>
+          <div class="list-heading">
+            <span data-i18n="sync.queue.title">Shared queue</span>
+            <span id="queue-count" class="hint"></span>
+          </div>
+          <p id="queue-how" class="hint queue-how" data-i18n="sync.queue.how">In YouTube Music, open a song’s ⋮ menu and pick “Add to queue” or “Play next”.</p>
+          <p id="queue-listener-hint" class="hint queue-how is-hidden" data-i18n="sync.queue.listenerHint">Listeners can’t add songs, but they can vote to skip.</p>
+          <div class="member-list" id="queue-list"></div>
+        </div>
+
+        <div>
+          <div class="list-heading">
+            <span data-i18n="sync.active.listeners">Listeners</span>
+            <span id="member-count" class="hint"></span>
+          </div>
+          <div class="member-list" id="members-list"></div>
+        </div>
+
+        <div id="host-settings" class="is-hidden">
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="sync.defaultRole">New people join as</span>
+              <span class="setting-desc" data-i18n="sync.defaultRole.desc">DJs can skip, pause and pick songs. Listeners only listen.</span>
+            </div>
+            <select id="default-role" class="select" data-i18n-label="sync.defaultRole">
+              <option value="dj" data-i18n="sync.role.dj">DJ</option>
+              <option value="listener" data-i18n="sync.role.listener">Listener</option>
+            </select>
+          </div>
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="sync.approval">Ask before letting people in</span>
+              <span class="setting-desc" data-i18n="sync.approval.desc">New people wait until you let them in.</span>
+            </div>
+            <label class="toggle"><input type="checkbox" id="require-approval" data-i18n-label="sync.approval" /><span class="toggle-track"></span></label>
+          </div>
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-title" data-i18n="sync.discordInvite">Invite from Discord</span>
+              <span class="setting-desc" data-i18n="sync.discordInvite.desc">Adds a “Listen along” button to your Discord status. Anyone who sees it can ask to join, so asking before letting people in turns on too.</span>
+            </div>
+            <label class="toggle"><input type="checkbox" id="discord-invite" data-i18n-label="sync.discordInvite" /><span class="toggle-track"></span></label>
+          </div>
+        </div>
+
+        <div id="banned-section" class="is-hidden">
+          <div class="list-heading">
+            <span data-i18n="sync.banned.title">Removed</span>
+          </div>
+          <div class="member-list" id="banned-list"></div>
+        </div>
+
+        <div>
+          <div class="form-actions">
+            <button id="leave-room-btn" class="btn btn-tonal btn-danger" data-i18n="sync.leave">Leave session</button>
+            <button id="end-room-btn" class="btn btn-tonal btn-danger is-hidden" data-i18n="sync.end">End for everyone</button>
+          </div>
+          <p id="leave-host-hint" class="hint is-hidden" data-i18n="sync.leave.hostHint">If you leave, the next person in line hosts the session.</p>
+        </div>
+        <div id="leave-room-error" class="form-error is-hidden" role="alert"></div>
+      </div>
+    </main>
+
+    <script type="module" src="./src/ui/sync.ts"></script>
+  </body>
+</html>

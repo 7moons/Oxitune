@@ -1,0 +1,96 @@
+[package]
+name = "oxitune"
+version = "0.4.0"
+description = "Oxitune - desktop client for YouTube Music, powered by Tauri v2"
+authors = ["7moons"]
+license = "GPL-3.0-only"
+edition = "2021"
+
+[lib]
+name = "oxitune_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.0.0", features = [] }
+
+[dependencies]
+# Lyrics providers (all platforms) and the Linux screen-lock D-Bus stream.
+futures-util = "0.3"
+tauri = { version = "2.0.0", features = ["tray-icon", "image-ico", "image-png", "protocol-asset"] }
+tauri-plugin-global-shortcut = "2.0.0"
+tauri-plugin-notification = "2.0.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.38", features = ["full"] }
+parking_lot = "0.12"
+souvlaki = "0.7"
+reqwest = { version = "0.12", features = ["json"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+dirs = "5.0"
+url = "2.5"
+log = "0.4"
+walkdir = "2.5"
+id3 = "1.16"
+local-ip-address = "0.6"
+qrcode = "0.14"
+rand = "0.9"
+rumqttc = { version = "0.25.1", default-features = false, features = ["use-rustls"] }
+lofty = "0.25.1"
+tauri-plugin-updater = "2.0.0"
+tauri-plugin-single-instance = { version = "2.0.0", features = ["deep-link"] }
+tauri-plugin-deep-link = "2"
+# Log files in ~/.oxitune/logs (a release build has no console to log to).
+tauri-plugin-log = "2"
+# Settings: open the logs folder, pick files for settings backup.
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+rustls = { version = "0.23", features = ["ring"] }
+# Listen Together end-to-end encryption (src/sync_crypto.rs). Both were
+# already in the tree via rustls and tauri.
+ring = "0.17"
+base64 = "0.22"
+# Phone remote server (src/remote_server.rs): routing, WebSocket, request
+# limits, and the phone app embedded from dist-remote/.
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "ws", "query"] }
+tower = { version = "0.5", features = ["limit"] }
+tower-http = { version = "0.6", features = ["limit", "timeout"] }
+rust-embed = { version = "8", features = ["mime-guess"] }
+tauri-plugin-window-state = "2"
+tauri-plugin-autostart = "2"
+semver = "1"
+# TTML lyrics (src/lyrics/ttml.rs): read-only XML tree, pure Rust, no deps.
+roxmltree = "0.20"
+tar = "0.4"
+flate2 = "1"
+minisign-verify = "0.2"
+# Installing yt-dlp/ffmpeg for media:save: ffmpeg ships as .zip (Windows,
+# zip is already here via the updater; deflate via the flate2 we have) and
+# .tar.xz (Linux; lzma-rs is pure Rust, two tiny deps).
+zip = { version = "4.6", default-features = false, features = ["deflate-flate2"] }
+lzma-rs = "0.3"
+
+# Screen-lock detection (src/screen_lock.rs). zbus is already in the tree via
+# notify-rust with its default async-io backend; keeping that backend (rather
+# than enabling zbus's `tokio` feature, which would switch every zbus user in
+# the process over to requiring a tokio reactor) adds no new runtime.
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = { version = "5", default-features = false, features = ["async-io"] }
+
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.38"
+windows = { version = "0.61", features = ["Win32_System_Com", "Win32_System_Power", "Win32_System_RemoteDesktop", "Win32_Foundation", "Win32_Globalization", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi"] }
+
+[dev-dependencies]
+# The mock runtime, to test the IPC permissions (acl_tests.rs).
+tauri = { version = "2.0.0", features = ["test"] }
+ctor = "0.4"
+tempfile = "3.10"
+tokio-tungstenite = "0.29"
+
+# Smaller, faster release binary. panic stays
+# "unwind": a panic in one background task must not take the player down.
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

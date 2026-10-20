@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-leave-sync-room"
+description = "Enables the leave_sync_room command without any pre-configured scope."
+commands.allow = ["leave_sync_room"]
+
+[[permission]]
+identifier = "deny-leave-sync-room"
+description = "Denies the leave_sync_room command without any pre-configured scope."
+commands.deny = ["leave_sync_room"]

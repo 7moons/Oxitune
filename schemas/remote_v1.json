@@ -1,0 +1,274 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oxitune.local/schemas/remote_v1.json",
+  "title": "Oxitune phone remote protocol, version 1",
+  "description": "JSON text frames on the phone remote's /ws WebSocket. Mirrored by src-tauri/src/remote_server/protocol.rs and src/remote/protocol.ts; both are tested against this file. A breaking change is a new file (remote_v2.json) and a bump of PROTOCOL_VERSION.",
+  "$defs": {
+    "RequestId": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+    "VideoId": { "type": "string", "pattern": "^[A-Za-z0-9_-]{11}$" },
+    "Track": {
+      "type": "object",
+      "required": ["title", "artist", "duration_secs"],
+      "additionalProperties": false,
+      "properties": {
+        "title": { "type": "string" },
+        "artist": { "type": "string" },
+        "album": { "type": ["string", "null"] },
+        "cover_url": { "type": ["string", "null"] },
+        "duration_secs": { "type": "number", "minimum": 0 },
+        "video_id": { "type": ["string", "null"] }
+      }
+    },
+    "Accent": {
+      "type": "object",
+      "required": ["primary", "secondary", "accent"],
+      "additionalProperties": false,
+      "properties": {
+        "primary": { "type": "string" },
+        "secondary": { "type": "string" },
+        "accent": { "type": "string" }
+      }
+    },
+    "QueueEntry": {
+      "type": "object",
+      "required": ["id", "video_id", "title", "artist"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "description": "Opaque; sent back in queue actions." },
+        "video_id": { "type": "string" },
+        "title": { "type": "string" },
+        "artist": { "type": "string" },
+        "thumbnail": { "type": ["string", "null"] },
+        "current": { "type": "boolean" }
+      }
+    },
+    "RoomMember": {
+      "type": "object",
+      "required": ["id", "nickname", "role", "is_host"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "nickname": { "type": "string" },
+        "role": { "enum": ["host", "moderator", "dj", "listener"] },
+        "is_host": { "type": "boolean" }
+      }
+    },
+    "Room": {
+      "type": "object",
+      "required": ["is_host", "me", "members", "skip_votes", "votes_needed"],
+      "additionalProperties": false,
+      "properties": {
+        "is_host": { "type": "boolean" },
+        "me": { "type": "string" },
+        "members": { "type": "array", "items": { "$ref": "#/$defs/RoomMember" } },
+        "skip_votes": { "type": "array", "items": { "type": "string" } },
+        "votes_needed": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "SearchResult": {
+      "type": "object",
+      "required": ["video_id", "title", "subtitle"],
+      "additionalProperties": false,
+      "properties": {
+        "video_id": { "type": "string" },
+        "title": { "type": "string" },
+        "subtitle": { "type": "string" },
+        "thumbnail": { "type": ["string", "null"] }
+      }
+    },
+
+    "ServerMsg": {
+      "description": "Desktop to phone.",
+      "oneOf": [
+        { "$ref": "#/$defs/HelloMsg" },
+        { "$ref": "#/$defs/StateMsg" },
+        { "$ref": "#/$defs/QueueMsg" },
+        { "$ref": "#/$defs/LyricsMsg" },
+        { "$ref": "#/$defs/RoomMsg" },
+        { "$ref": "#/$defs/ReactionMsg" },
+        { "$ref": "#/$defs/SearchResultsMsg" },
+        { "$ref": "#/$defs/ResultMsg" }
+      ]
+    },
+    "HelloMsg": {
+      "type": "object",
+      "required": ["type", "version"],
+      "additionalProperties": false,
+      "properties": { "type": { "const": "hello" }, "version": { "const": 1 } }
+    },
+    "StateMsg": {
+      "type": "object",
+      "required": ["type", "track", "playing", "position_secs", "sampled_at_ms", "server_time_ms", "volume", "muted", "like", "shuffle", "repeat", "accent"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "state" },
+        "track": { "oneOf": [{ "$ref": "#/$defs/Track" }, { "type": "null" }] },
+        "playing": { "type": "boolean" },
+        "position_secs": { "type": "number", "minimum": 0, "description": "Position at sampled_at_ms." },
+        "sampled_at_ms": { "type": "integer", "description": "Desktop clock (Unix ms) when the position was read." },
+        "server_time_ms": { "type": "integer", "description": "Desktop clock when this message was sent. The phone never compares it with its own clock." },
+        "volume": { "type": "number", "minimum": 0, "maximum": 1 },
+        "muted": { "type": "boolean" },
+        "like": { "enum": ["like", "dislike", "none"] },
+        "shuffle": { "type": "boolean" },
+        "repeat": { "enum": ["none", "all", "one"] },
+        "accent": { "oneOf": [{ "$ref": "#/$defs/Accent" }, { "type": "null" }] }
+      }
+    },
+    "QueueMsg": {
+      "type": "object",
+      "required": ["type", "items", "shared"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "queue" },
+        "items": { "type": "array", "items": { "$ref": "#/$defs/QueueEntry" } },
+        "shared": { "type": "boolean", "description": "The Listen Together room's shared queue rather than YTM's own." }
+      }
+    },
+    "LyricsMsg": {
+      "type": "object",
+      "required": ["type", "lyrics"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "lyrics" },
+        "lyrics": {
+          "description": "The lyrics feature's lyrics-changed payload ({ video_id, provider, synced: [{ t, text, words? }], plain, offset_secs, source_url }), passed through; null when there are none.",
+          "type": ["object", "null"]
+        }
+      }
+    },
+    "RoomMsg": {
+      "type": "object",
+      "required": ["type", "room"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "room" },
+        "room": { "oneOf": [{ "$ref": "#/$defs/Room" }, { "type": "null" }] }
+      }
+    },
+    "ReactionMsg": {
+      "type": "object",
+      "required": ["type", "from", "emoji"],
+      "additionalProperties": false,
+      "properties": { "type": { "const": "reaction" }, "from": { "type": "string" }, "emoji": { "type": "string" } }
+    },
+    "SearchResultsMsg": {
+      "type": "object",
+      "required": ["type", "id", "results"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "search_results" },
+        "id": { "$ref": "#/$defs/RequestId" },
+        "results": { "type": "array", "items": { "$ref": "#/$defs/SearchResult" } }
+      }
+    },
+    "ResultMsg": {
+      "type": "object",
+      "required": ["type", "id", "ok"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "result" },
+        "id": { "$ref": "#/$defs/RequestId" },
+        "ok": { "type": "boolean" },
+        "error": { "type": "string", "description": "An i18n key (remote.error.*) or a plain message." }
+      }
+    },
+
+    "ClientMsg": {
+      "description": "Phone to desktop. An id, where allowed, gets a result (or search_results) back.",
+      "oneOf": [
+        { "$ref": "#/$defs/CmdMsg" },
+        { "$ref": "#/$defs/SeekMsg" },
+        { "$ref": "#/$defs/VolumeMsg" },
+        { "$ref": "#/$defs/QueueJumpMsg" },
+        { "$ref": "#/$defs/QueueMoveMsg" },
+        { "$ref": "#/$defs/QueueRemoveMsg" },
+        { "$ref": "#/$defs/SearchMsg" },
+        { "$ref": "#/$defs/PlayMsg" },
+        { "$ref": "#/$defs/EnqueueMsg" },
+        { "$ref": "#/$defs/ReactMsg" },
+        { "$ref": "#/$defs/VoteSkipMsg" }
+      ]
+    },
+    "CmdMsg": {
+      "type": "object",
+      "required": ["type", "command"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "cmd" },
+        "id": { "$ref": "#/$defs/RequestId" },
+        "command": { "enum": ["play_pause", "next", "previous", "like", "dislike", "mute", "shuffle", "repeat"] }
+      }
+    },
+    "SeekMsg": {
+      "type": "object",
+      "required": ["type", "position_secs"],
+      "additionalProperties": false,
+      "properties": { "type": { "const": "seek" }, "id": { "$ref": "#/$defs/RequestId" }, "position_secs": { "type": "number", "minimum": 0 } }
+    },
+    "VolumeMsg": {
+      "type": "object",
+      "required": ["type", "volume"],
+      "additionalProperties": false,
+      "properties": { "type": { "const": "volume" }, "id": { "$ref": "#/$defs/RequestId" }, "volume": { "type": "number", "minimum": 0, "maximum": 1 } }
+    },
+    "QueueJumpMsg": {
+      "type": "object",
+      "required": ["type", "item_id"],
+      "additionalProperties": false,
+      "properties": { "type": { "const": "queue_jump" }, "id": { "$ref": "#/$defs/RequestId" }, "item_id": { "type": "string" } }
+    },
+    "QueueMoveMsg": {
+      "type": "object",
+      "required": ["type", "item_id", "to_index"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "queue_move" },
+        "id": { "$ref": "#/$defs/RequestId" },
+        "item_id": { "type": "string" },
+        "to_index": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "QueueRemoveMsg": {
+      "type": "object",
+      "required": ["type", "item_id"],
+      "additionalProperties": false,
+      "properties": { "type": { "const": "queue_remove" }, "id": { "$ref": "#/$defs/RequestId" }, "item_id": { "type": "string" } }
+    },
+    "SearchMsg": {
+      "type": "object",
+      "required": ["type", "id", "query"],
+      "additionalProperties": false,
+      "properties": { "type": { "const": "search" }, "id": { "$ref": "#/$defs/RequestId" }, "query": { "type": "string", "maxLength": 200 } }
+    },
+    "PlayMsg": {
+      "type": "object",
+      "required": ["type", "video_id"],
+      "additionalProperties": false,
+      "properties": { "type": { "const": "play" }, "id": { "$ref": "#/$defs/RequestId" }, "video_id": { "$ref": "#/$defs/VideoId" } }
+    },
+    "EnqueueMsg": {
+      "type": "object",
+      "required": ["type", "video_id"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "enqueue" },
+        "id": { "$ref": "#/$defs/RequestId" },
+        "video_id": { "$ref": "#/$defs/VideoId" },
+        "next": { "type": "boolean", "description": "Play next instead of adding to the end." }
+      }
+    },
+    "ReactMsg": {
+      "type": "object",
+      "required": ["type", "emoji"],
+      "additionalProperties": false,
+      "properties": { "type": { "const": "react" }, "id": { "$ref": "#/$defs/RequestId" }, "emoji": { "type": "string", "maxLength": 8 } }
+    },
+    "VoteSkipMsg": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": { "type": { "const": "vote_skip" }, "id": { "$ref": "#/$defs/RequestId" } }
+    }
+  }
+}

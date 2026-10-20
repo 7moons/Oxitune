@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-remove-lyrics-cache-entry"
+description = "Enables the remove_lyrics_cache_entry command without any pre-configured scope."
+commands.allow = ["remove_lyrics_cache_entry"]
+
+[[permission]]
+identifier = "deny-remove-lyrics-cache-entry"
+description = "Denies the remove_lyrics_cache_entry command without any pre-configured scope."
+commands.deny = ["remove_lyrics_cache_entry"]

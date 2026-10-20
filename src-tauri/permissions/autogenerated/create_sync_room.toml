@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-create-sync-room"
+description = "Enables the create_sync_room command without any pre-configured scope."
+commands.allow = ["create_sync_room"]
+
+[[permission]]
+identifier = "deny-create-sync-room"
+description = "Denies the create_sync_room command without any pre-configured scope."
+commands.deny = ["create_sync_room"]

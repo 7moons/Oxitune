@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-unban-sync-member"
+description = "Enables the unban_sync_member command without any pre-configured scope."
+commands.allow = ["unban_sync_member"]
+
+[[permission]]
+identifier = "deny-unban-sync-member"
+description = "Denies the unban_sync_member command without any pre-configured scope."
+commands.deny = ["unban_sync_member"]

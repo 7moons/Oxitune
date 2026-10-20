@@ -1,0 +1,21 @@
+{
+  "id": "app.oxitune.lyrics",
+  "name": "Native Synced Lyrics",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "description": "Synchronized lyrics from several providers in the native Lyrics tab and in full screen: word by word, with translation, romanization and seek-on-click",
+  "author": "Oxitune",
+  "matches": [
+    "https://music.youtube.com/*"
+  ],
+  "runAt": "document-idle",
+  "permissions": [
+    "player:read",
+    "player:control",
+    "page",
+    "ui",
+    "internal:config",
+    "internal:lyrics"
+  ],
+  "entry": "index.js"
+}

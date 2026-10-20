@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title data-i18n="mini.windowTitle">Mini player</title>
+    <link rel="stylesheet" href="./src/ui/styles.css" />
+  </head>
+  <body class="mini-player-body">
+    <img id="mini-cover" class="mini-cover" alt="" />
+    <div class="mini-scrim" aria-hidden="true" data-tauri-drag-region></div>
+
+    <div class="mini-topbar" data-tauri-drag-region>
+      <button id="lyrics-btn" class="icon-btn sm" data-i18n-label="mini.lyrics" aria-label="Lyrics" aria-pressed="false"><svg class="icon" viewBox="0 0 24 24"><path d="M3 5h12v2H3zm0 4h12v2H3zm0 4h8v2H3zm14-8h4v2h-2v8.5a2.5 2.5 0 1 1-2-2.45z"/></svg></button>
+      <button id="pin-btn" class="icon-btn sm is-active" data-i18n-label="mini.pin" aria-label="Keep on top" aria-pressed="true"><svg class="icon" viewBox="0 0 24 24"><path d="M16 9V4h1c.55 0 1-.45 1-1s-.45-1-1-1H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3z"/></svg></button>
+      <button id="win-min-btn" class="icon-btn sm" data-i18n-label="window.minimize" aria-label="Minimize"><svg class="icon" viewBox="0 0 24 24"><path d="M6 19h12v2H6z"/></svg></button>
+      <button id="win-close-btn" class="icon-btn sm window-close" data-i18n-label="window.close" aria-label="Close"><svg class="icon" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></button>
+    </div>
+
+    <div id="mini-lyrics" class="mini-lyrics is-hidden" aria-live="polite">
+      <div id="mini-lyrics-current" class="mini-lyrics-current"></div>
+      <div id="mini-lyrics-next" class="mini-lyrics-next"></div>
+    </div>
+
+    <div class="mini-dock">
+      <div class="mini-meta" data-tauri-drag-region>
+        <div id="mini-title" class="mini-title" data-i18n="mini.nothingPlaying">Nothing playing</div>
+        <div id="mini-artist" class="mini-artist">YouTube Music</div>
+      </div>
+
+      <div class="mini-scrub-row">
+        <span id="current-time" class="player-time">0:00</span>
+        <div id="progress-track" class="player-progress" role="slider" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" data-i18n-label="local.seek" aria-label="Seek">
+          <div id="progress-fill" class="player-progress-fill"></div>
+        </div>
+        <span id="duration-time" class="player-time">0:00</span>
+      </div>
+
+      <div class="mini-transport">
+        <button id="prev-btn" class="icon-btn" data-i18n-label="player.previous" aria-label="Previous"><svg class="icon" viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg></button>
+        <button id="play-pause-btn" class="icon-btn play-btn" data-i18n-label="player.play" aria-label="Play">
+          <svg id="play-icon" class="icon" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+          <svg id="pause-icon" class="icon is-hidden" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+        </button>
+        <button id="next-btn" class="icon-btn" data-i18n-label="player.next" aria-label="Next"><svg class="icon" viewBox="0 0 24 24"><path d="m6 18 8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg></button>
+      </div>
+    </div>
+    <script type="module" src="./src/ui/miniplayer.ts"></script>
+  </body>
+</html>

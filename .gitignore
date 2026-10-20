@@ -1,0 +1,20 @@
+# Dependencies
+node_modules/
+dist/
+dist-remote/
+dist-preload/
+
+# Tauri & Rust
+src-tauri/target/
+*.log
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
