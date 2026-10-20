@@ -6,7 +6,7 @@ import { rangeFillPercent } from '../ui/range';
 import { estimatePosition } from '../ui/format';
 
 const root = join(import.meta.dir, '..', '..');
-const PAGES = ['settings.html', 'sync.html', 'local.html', 'miniplayer.html'];
+const PAGES = ['settings.html', 'sync.html', 'local.html', 'miniplayer.html', 'welcome.html'];
 
 describe('companion window translations', () => {
   test('every data-i18n key in the HTML exists in every locale', () => {

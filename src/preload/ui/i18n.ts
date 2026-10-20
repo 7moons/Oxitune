@@ -80,7 +80,16 @@ const en = {
   windowMinimize: 'Minimize',
   windowMaximize: 'Maximize',
   windowRestore: 'Restore down',
-  windowClose: 'Close'
+  windowClose: 'Close',
+  tipMenuTitle: 'Everything Oxitune adds',
+  tipMenuBody: 'This button opens Settings and the equalizer, the mini player, local music, Listen together and the phone remote.',
+  tipPlayerTitle: 'Volume and lyrics',
+  tipPlayerBody: 'Scroll over the player bar to change the volume. While a song plays, its synced lyrics are in the Lyrics tab.',
+  tipShortcutsTitle: 'Shortcuts',
+  tipShortcutsBody: 'Ctrl+, or F2 opens Settings. Media keys and your global shortcuts work even when Oxitune is in the background.',
+  tipNext: 'Next',
+  tipDone: 'Got it',
+  tipSkip: 'Skip tips'
 };
 
 type Strings = typeof en;
@@ -167,7 +176,16 @@ const pl: Strings = {
   windowMinimize: 'Minimalizuj',
   windowMaximize: 'Maksymalizuj',
   windowRestore: 'Przywróć w dół',
-  windowClose: 'Zamknij'
+  windowClose: 'Zamknij',
+  tipMenuTitle: 'Wszystko, co dodaje Oxitune',
+  tipMenuBody: 'Ten przycisk otwiera Ustawienia i korektor, miniodtwarzacz, muzykę lokalną, Słuchaj razem i pilota w telefonie.',
+  tipPlayerTitle: 'Głośność i teksty',
+  tipPlayerBody: 'Przewiń kółkiem nad paskiem odtwarzacza, żeby zmienić głośność. Gdy gra utwór, jego tekst z synchronizacją jest w karcie Tekst.',
+  tipShortcutsTitle: 'Skróty',
+  tipShortcutsBody: 'Ctrl+, lub F2 otwiera Ustawienia. Klawisze multimedialne i Twoje skróty globalne działają też, gdy Oxitune jest w tle.',
+  tipNext: 'Dalej',
+  tipDone: 'Rozumiem',
+  tipSkip: 'Pomiń wskazówki'
 };
 
 const LOCALES: Record<string, Strings> = { en, pl };

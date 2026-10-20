@@ -125,6 +125,23 @@ fn test_companion_windows_get_only_their_own_commands() {
 }
 
 #[test]
+fn test_welcome_window_reaches_only_the_settings_it_asks_about() {
+    let app = app();
+    let welcome = local_window(&app, "welcome");
+    for cmd in ["get_config", "save_config", "finish_onboarding", "close_window"] {
+        assert_eq!(acl(&welcome, LOCAL, cmd), Ok(()), "{cmd}");
+    }
+    for cmd in ["oxitune_bridge", "import_settings", "plugins_install", "get_remote_info", "create_sync_room", "install_update"] {
+        assert!(acl(&welcome, LOCAL, cmd).is_err(), "welcome must not reach {cmd}");
+    }
+    let settings = local_window(&app, "settings");
+    assert_eq!(acl(&settings, LOCAL, "open_welcome_window"), Ok(()), "Run setup again");
+    assert!(acl(&settings, LOCAL, "finish_onboarding").is_err());
+    let main = window(&app, "main", YTM);
+    assert!(acl(&main, YTM, "finish_onboarding").is_err(), "the page can't mark it done");
+}
+
+#[test]
 fn test_a_remote_page_in_a_companion_window_gets_nothing() {
     let app = app();
     let settings = local_window(&app, "settings");

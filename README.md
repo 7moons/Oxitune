@@ -90,6 +90,7 @@ To build it yourself, see [Development](#development).
 | | Everyday | Tray menu, configurable global shortcuts, notifications, scroll-wheel volume |
 | | Behaviour | Sleep inhibition while playing, pause on screen lock, resume the last song, optional autostart |
 | | Robustness | Single instance, an offline screen that retries by itself, crash reports in the logs folder |
+| | First launch | A short welcome that sets up the essentials and says what goes online, then tips in YouTube Music; again anytime from Settings → About |
 | **Lyrics** | Sources | Local `.lrc` and tags, lrc.red, LRCLIB, YouTube Music, Genius; Unison, Musixmatch and NetEase optional |
 | | Display | Word-by-word highlighting, duet voices, background vocals, six looks, a fullscreen view |
 | | Control | Per-song timing offsets, a "wrong lyrics?" picker, seek by clicking a line |

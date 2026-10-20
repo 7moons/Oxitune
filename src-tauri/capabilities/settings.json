@@ -12,6 +12,7 @@
     "allow-get-current-track",
     "allow-get-config",
     "allow-save-config",
+    "allow-open-welcome-window",
     "allow-set-shortcut",
     "allow-reset-shortcuts",
     "allow-open-logs-folder",

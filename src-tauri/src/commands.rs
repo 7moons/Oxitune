@@ -57,8 +57,43 @@ pub fn get_config(state: State<'_, Arc<AppState>>) -> AppConfig {
 
 #[tauri::command]
 pub fn save_config(app_handle: AppHandle, state: State<'_, Arc<AppState>>, config: AppConfig) -> Result<(), String> {
+    let config = keep_onboarding_done(&state.config_manager.load(), config);
     state.config_manager.save(&config)?;
     apply_autostart(&app_handle, config.autostart);
+    Ok(())
+}
+
+/// A window that loaded the config before the welcome window was finished
+/// (Settings left open) must not bring the welcome window back by saving.
+pub fn keep_onboarding_done(current: &AppConfig, mut next: AppConfig) -> AppConfig {
+    next.onboarding_done |= current.onboarding_done;
+    next
+}
+
+/// The welcome window is done (finished, skipped or closed): it no longer
+/// opens at launch, the player window (hidden behind it on first launch)
+/// shows up, and the page shows its tips (`onboarding-finished`, also after
+/// "Run setup again"). With `open_settings`, Settings opens over the player.
+#[tauri::command]
+pub fn finish_onboarding(app_handle: AppHandle, state: State<'_, Arc<AppState>>, open_settings: bool) -> Result<(), String> {
+    let mut config = state.config_manager.load();
+    if !config.onboarding_done {
+        config.onboarding_done = true;
+        state.config_manager.save(&config)?;
+        let _ = app_handle.emit("config-updated", &config);
+    }
+    let _ = app_handle.emit("onboarding-finished", ());
+    crate::tray::show_main_window(&app_handle);
+    if open_settings {
+        crate::windows::show(&app_handle, "settings");
+    }
+    Ok(())
+}
+
+/// Settings → About → "Run setup again".
+#[tauri::command]
+pub fn open_welcome_window(app_handle: AppHandle) -> Result<(), String> {
+    crate::windows::show(&app_handle, crate::windows::WELCOME);
     Ok(())
 }
 
@@ -149,10 +184,11 @@ pub struct ImportedSettings {
 }
 
 /// A backup file is input from possibly someone else: everything is
-/// sanitized, and three things are never taken from it: folders (the
+/// sanitized, and four things are never taken from it: folders (the
 /// library path stays this computer's), whether the phone remote is on
-/// and where it listens (a file must not open a port), and custom CSS
-/// (returned separately for the user to confirm).
+/// and where it listens (a file must not open a port), custom CSS
+/// (returned separately for the user to confirm), and whether this
+/// computer has seen the welcome window.
 pub fn merge_imported(current: &AppConfig, imported: AppConfig) -> ImportedSettings {
     let css = imported.custom_css.trim().to_string();
     let custom_css = (!css.is_empty() && imported.custom_css != current.custom_css).then_some(imported.custom_css.clone());
@@ -161,6 +197,7 @@ pub fn merge_imported(current: &AppConfig, imported: AppConfig) -> ImportedSetti
         remote_enabled: current.remote_enabled,
         remote_bind: current.remote_bind.clone(),
         custom_css: current.custom_css.clone(),
+        onboarding_done: current.onboarding_done,
         ..imported
     };
     ImportedSettings { config, custom_css }
@@ -769,6 +806,20 @@ mod tests {
 
         let same_css = merge_imported(&current, AppConfig { custom_css: "a{}".into(), ..AppConfig::default() });
         assert!(same_css.custom_css.is_none(), "nothing to confirm when the CSS is unchanged");
+    }
+
+    #[test]
+    fn test_onboarding_done_is_never_undone_by_a_save_or_an_import() {
+        let done = AppConfig { onboarding_done: true, ..AppConfig::default() };
+        let stale = AppConfig { onboarding_done: false, crossfade_seconds: 3.0, ..AppConfig::default() };
+        let saved = keep_onboarding_done(&done, stale.clone());
+        assert!(saved.onboarding_done, "Settings opened before the welcome window finished");
+        assert_eq!(saved.crossfade_seconds, 3.0, "the rest of the save goes through");
+        assert!(!keep_onboarding_done(&AppConfig::default(), stale.clone()).onboarding_done);
+
+        assert!(merge_imported(&done, stale).config.onboarding_done, "a backup from another computer");
+        let fresh = AppConfig::default();
+        assert!(!merge_imported(&fresh, done).config.onboarding_done, "nor skips it here");
     }
 
     #[test]

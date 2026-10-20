@@ -44,6 +44,8 @@ pub const PAGE_EVENTS: &[&str] = &[
     "set-loudness-normalization",
     "set-playback-rate",
     "set-preserves-pitch",
+    // The welcome window was finished: the page shows its tips.
+    "onboarding-finished",
     // Lyrics, Listen Together, phone remote.
     "lyrics-changed",
     "sync-room-updated",
@@ -90,6 +92,8 @@ pub const PAGE_CONFIG_KEYS: &[&str] = &[
     "ambient_intensity",
     "inhibit_sleep",
     "pause_on_lock",
+    // The welcome window is done: the page shows its one-time tips.
+    "onboarding_done",
 ];
 
 /// Keeps only `PAGE_CONFIG_KEYS` of a (possibly partial) config object.

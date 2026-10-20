@@ -387,6 +387,12 @@
           "markdownDescription": "Enables the export_settings command without any pre-configured scope."
         },
         {
+          "description": "Enables the finish_onboarding command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-finish-onboarding",
+          "markdownDescription": "Enables the finish_onboarding command without any pre-configured scope."
+        },
+        {
           "description": "Enables the get_app_version command without any pre-configured scope.",
           "type": "string",
           "const": "allow-get-app-version",
@@ -475,6 +481,12 @@
           "type": "string",
           "const": "allow-open-logs-folder",
           "markdownDescription": "Enables the open_logs_folder command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open_welcome_window command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-welcome-window",
+          "markdownDescription": "Enables the open_welcome_window command without any pre-configured scope."
         },
         {
           "description": "Enables the oxitune_bridge command without any pre-configured scope.",
@@ -759,6 +771,12 @@
           "markdownDescription": "Denies the export_settings command without any pre-configured scope."
         },
         {
+          "description": "Denies the finish_onboarding command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-finish-onboarding",
+          "markdownDescription": "Denies the finish_onboarding command without any pre-configured scope."
+        },
+        {
           "description": "Denies the get_app_version command without any pre-configured scope.",
           "type": "string",
           "const": "deny-get-app-version",
@@ -847,6 +865,12 @@
           "type": "string",
           "const": "deny-open-logs-folder",
           "markdownDescription": "Denies the open_logs_folder command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_welcome_window command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-welcome-window",
+          "markdownDescription": "Denies the open_welcome_window command without any pre-configured scope."
         },
         {
           "description": "Denies the oxitune_bridge command without any pre-configured scope.",

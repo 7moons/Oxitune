@@ -11,6 +11,8 @@ const APP_COMMANDS: &[&str] = &[
     // Companion windows.
     "get_config",
     "save_config",
+    "finish_onboarding",
+    "open_welcome_window",
     "get_current_track",
     "get_current_lyrics",
     "clear_lyrics_cache",

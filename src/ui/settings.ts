@@ -760,6 +760,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
   $('check-update-btn')?.addEventListener('click', () => checkForUpdates(true));
   $('install-update-btn')?.addEventListener('click', installUpdate);
+  $('rerun-welcome-btn')?.addEventListener('click', () => {
+    window.__TAURI__?.core.invoke('open_welcome_window').catch((e: unknown) => {
+      console.error('[Oxitune] open_welcome_window failed:', e);
+      showToast(tr('common.unknownError'));
+    });
+  });
 
   // Any edit anywhere in the settings persists (debounced).
   const content = $('settings-content');

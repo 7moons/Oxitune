@@ -22,7 +22,7 @@ export function onBeforeClose(hook: () => Promise<void> | void): void {
   beforeCloseHooks.push(hook);
 }
 
-async function closeWindow(): Promise<void> {
+export async function closeWindow(): Promise<void> {
   for (const hook of beforeCloseHooks) {
     try {
       await hook();

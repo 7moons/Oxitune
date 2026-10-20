@@ -28,6 +28,7 @@ import { mountWindowControls } from './ui/windowControls';
 import { installPlayerBarEdges, syncPlayerBarEdges } from './ui/playerBarEdges';
 import { ICONS, showToast } from './ui/kit';
 import { t } from './ui/i18n';
+import { maybeStartTips, startTips } from './ui/tips';
 import { invokeBackend, pageEvents } from './bridgeClient';
 
 
@@ -336,9 +337,14 @@ async function initOxitune() {
         configLoaded = true;
         clearInterval(retry);
         applyConfig(loaded);
+        maybeStartTips(config);
       });
     }, CONFIG_RETRY_MS);
+  } else {
+    maybeStartTips(config);
   }
+  // The welcome window was just finished (first launch or "Run setup again").
+  listenEvent('onboarding-finished', () => startTips(true));
 
   // Keyboard shortcut: Ctrl+, or F2 opens settings
   window.addEventListener('keydown', (e) => {

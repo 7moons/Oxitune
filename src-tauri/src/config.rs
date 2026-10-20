@@ -77,6 +77,10 @@ pub struct AppConfig {
     /// an accelerator string; empty = no shortcut.
     #[serde(default = "crate::shortcuts::default_shortcuts")]
     pub shortcuts: BTreeMap<String, String>,
+    /// The welcome window was finished or closed (`windows::WELCOME`); until
+    /// then it opens on every launch.
+    #[serde(default)]
+    pub onboarding_done: bool,
 }
 
 fn default_true() -> bool {
@@ -180,6 +184,7 @@ impl Default for AppConfig {
             resume_autoplay: false,
             equalizer_custom_presets: Vec::new(),
             shortcuts: crate::shortcuts::default_shortcuts(),
+            onboarding_done: false,
         }
     }
 }
@@ -337,6 +342,17 @@ impl ConfigManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_configs_without_onboarding_open_the_welcome_window() {
+        assert!(!AppConfig::default().onboarding_done);
+        let mut value = serde_json::to_value(AppConfig { onboarding_done: true, ..AppConfig::default() }).unwrap();
+        let done: AppConfig = serde_json::from_value(value.clone()).unwrap();
+        assert!(done.onboarding_done);
+        value.as_object_mut().unwrap().remove("onboarding_done");
+        let old: AppConfig = serde_json::from_value(value).unwrap();
+        assert!(!old.onboarding_done, "a config saved before the welcome window existed");
+    }
 
     #[test]
     fn test_lyrics_translation_language_is_a_language_tag() {

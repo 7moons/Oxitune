@@ -20,6 +20,9 @@ pub struct WindowSpec {
     pub destroy_on_close: bool,
 }
 
+/// The first-launch welcome window (`welcome.html`).
+pub const WELCOME: &str = "welcome";
+
 pub const COMPANIONS: &[WindowSpec] = &[
     WindowSpec {
         label: "miniplayer",
@@ -56,6 +59,15 @@ pub const COMPANIONS: &[WindowSpec] = &[
         min_size: (480.0, 380.0),
         always_on_top: false,
         destroy_on_close: false,
+    },
+    WindowSpec {
+        label: WELCOME,
+        title: "Welcome to Oxitune",
+        page: "welcome.html",
+        size: (640.0, 600.0),
+        min_size: (520.0, 520.0),
+        always_on_top: false,
+        destroy_on_close: true,
     },
 ];
 
@@ -186,6 +198,7 @@ mod tests {
         assert!(spec("local").unwrap().destroy_on_close);
         assert!(!spec("miniplayer").unwrap().destroy_on_close);
         assert!(!spec("sync").unwrap().destroy_on_close, "keeps room prompts while hidden");
+        assert!(spec(WELCOME).unwrap().destroy_on_close, "shown once");
         assert!(spec("main").is_none());
     }
 }

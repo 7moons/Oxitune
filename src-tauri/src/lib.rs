@@ -170,6 +170,8 @@ pub fn run() {
     let remote_bind = initial_config.remote_bind.clone();
     let initial_shortcuts = initial_config.shortcuts.clone();
     let initial_autostart = initial_config.autostart;
+    let onboarding_done = initial_config.onboarding_done;
+    let autostart_launch = std::env::args().any(|a| a == AUTOSTART_ARG);
 
     tauri::Builder::default()
         // Must be the first plugin: a second launch (even while this one sits
@@ -320,8 +322,10 @@ pub fn run() {
             // margin and got visibly clipped on their left edge.
             .min_inner_size(700.0, 500.0)
             .resizable(true)
-            // A login-item launch starts in the tray.
-            .visible(!std::env::args().any(|a| a == AUTOSTART_ARG))
+            // A login-item launch starts in the tray. On first launch the
+            // welcome window comes first and YouTube Music loads behind it,
+            // shown when the welcome window is done (finish_onboarding).
+            .visible(!autostart_launch && onboarding_done)
             // YTM's nav bar is the title bar: the injected page adds the window
             // buttons and drags the window from it (src/preload/ui/windowControls.ts,
             // through the page bridge's window_* commands).
@@ -385,6 +389,14 @@ pub fn run() {
             let mpris_manager = MprisManager::new(handle.clone(), &main_win);
             *app_state_for_setup.mpris.lock() = Some(mpris_manager);
 
+            // First launch: the welcome window. Without it (it failed to
+            // open) the player must not stay hidden.
+            if !onboarding_done && !autostart_launch && windows::ensure(&handle, windows::WELCOME, None).is_some() {
+                windows::show(&handle, windows::WELCOME);
+            } else if !autostart_launch {
+                tray::show_main_window(&handle);
+            }
+
             // Silent background update check, delayed so it never competes with
             // startup work for network/CPU. Surfaces a system notification when a
             // newer signed release is published; the user installs it from
@@ -410,6 +422,14 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            // However the welcome window went away, the player shows up.
+            if matches!(event, WindowEvent::Destroyed) && window.label() == windows::WELCOME {
+                if let Some(main) = window.app_handle().get_webview_window("main") {
+                    if !main.is_visible().unwrap_or(true) {
+                        tray::show_main_window(window.app_handle());
+                    }
+                }
+            }
             if let WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == "main" {
                     let state = window.state::<Arc<AppState>>();
@@ -439,6 +459,8 @@ pub fn run() {
             commands::retry_connection,
             commands::get_config,
             commands::save_config,
+            commands::finish_onboarding,
+            commands::open_welcome_window,
             commands::get_current_track,
             lyrics::commands::get_current_lyrics,
             lyrics::commands::clear_lyrics_cache,

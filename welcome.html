@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title data-i18n="welcome.windowTitle">Welcome to Oxitune</title>
+    <link rel="stylesheet" href="./src/ui/styles.css" />
+  </head>
+  <body>
+    <header class="titlebar" data-tauri-drag-region>
+      <div class="titlebar-title" data-tauri-drag-region>
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z"/></svg>
+        <span data-i18n="welcome.windowTitle" data-tauri-drag-region>Welcome to Oxitune</span>
+      </div>
+      <div class="window-controls">
+        <button id="win-min-btn" class="icon-btn sm" data-i18n-label="window.minimize" aria-label="Minimize"><svg class="icon" viewBox="0 0 24 24"><path d="M6 19h12v2H6z"/></svg></button>
+        <button id="win-close-btn" class="icon-btn sm window-close" data-i18n-label="window.close" aria-label="Close"><svg class="icon" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></button>
+      </div>
+    </header>
+
+    <main class="page welcome-page">
+      <section class="page-inner welcome-step" data-step="intro">
+        <div>
+          <h1 class="page-title" data-i18n="welcome.intro.title">Welcome to Oxitune</h1>
+          <p class="page-lead" data-i18n="welcome.intro.lead">YouTube Music on your desktop, with media keys, synced lyrics, an equalizer, Listen Together and more. A few choices first; you can change all of them later in Settings.</p>
+        </div>
+        <ul class="welcome-list">
+          <li>
+            <span class="setting-title" data-i18n="welcome.intro.signInTitle">Sign in afterwards</span>
+            <span class="setting-desc" data-i18n="welcome.intro.signInDesc">YouTube Music opens when you finish here. You sign in on Google's own page: Oxitune's code runs only on music.youtube.com and never sees your password.</span>
+          </li>
+          <li>
+            <span class="setting-title" data-i18n="welcome.intro.yoursTitle">Your account, your library</span>
+            <span class="setting-desc" data-i18n="welcome.intro.yoursDesc">It is the real YouTube Music: your playlists, likes and recommendations, exactly as on the web.</span>
+          </li>
+        </ul>
+      </section>
+
+      <section class="page-inner welcome-step is-hidden" data-step="desktop">
+        <div>
+          <h1 class="page-title" data-i18n="welcome.desktop.title">On your desktop</h1>
+          <p class="page-lead" data-i18n="welcome.desktop.lead">How Oxitune fits in next to your other apps.</p>
+        </div>
+        <div class="setting-row">
+          <div class="setting-text">
+            <span class="setting-title" data-i18n="settings.discord.title">Show on Discord</span>
+            <span class="setting-desc" data-i18n="settings.discord.desc">Shows what you're listening to in your Discord status</span>
+          </div>
+          <label class="toggle"><input type="checkbox" id="discord_rpc_enabled" /><span class="toggle-track"></span></label>
+        </div>
+        <div class="setting-row">
+          <div class="setting-text">
+            <span class="setting-title" data-i18n="settings.autostart.title">Start with the system</span>
+            <span class="setting-desc" data-i18n="settings.autostart.desc">Opens Oxitune in the tray when you sign in</span>
+          </div>
+          <label class="toggle"><input type="checkbox" id="autostart" /><span class="toggle-track"></span></label>
+        </div>
+        <div class="setting-row">
+          <div class="setting-text">
+            <span class="setting-title" data-i18n="settings.tray.title">Keep playing when closed</span>
+            <span class="setting-desc" data-i18n="settings.tray.desc">Closing the window hides it to the system tray</span>
+          </div>
+          <label class="toggle"><input type="checkbox" id="close_to_tray" /><span class="toggle-track"></span></label>
+        </div>
+        <div class="setting-row">
+          <div class="setting-text">
+            <span class="setting-title" data-i18n="settings.notifications.title">Song notifications</span>
+            <span class="setting-desc" data-i18n="settings.notifications.desc">Shows a desktop notification when the song changes</span>
+          </div>
+          <label class="toggle"><input type="checkbox" id="notifications_enabled" /><span class="toggle-track"></span></label>
+        </div>
+        <div class="setting-row">
+          <div class="setting-text">
+            <span class="setting-title" data-i18n="settings.lock.title">Pause when the screen locks</span>
+            <span class="setting-desc" data-i18n="settings.lock.desc">Minimizing the window doesn't pause playback</span>
+          </div>
+          <label class="toggle"><input type="checkbox" id="pause_on_lock" /><span class="toggle-track"></span></label>
+        </div>
+      </section>
+
+      <section class="page-inner welcome-step is-hidden" data-step="sound">
+        <div>
+          <h1 class="page-title" data-i18n="welcome.sound.title">Lyrics and sound</h1>
+          <p class="page-lead" data-i18n="welcome.sound.lead">The equalizer, crossfade and speed are in Settings whenever you want them.</p>
+        </div>
+        <div class="setting-row">
+          <div class="setting-text">
+            <span class="setting-title" data-i18n="settings.lyrics.title">Timed lyrics</span>
+            <span class="setting-desc" data-i18n="settings.lyrics.desc">Adds lyrics that follow the song to the Lyrics tab</span>
+          </div>
+          <label class="toggle"><input type="checkbox" id="lyrics_enabled" /><span class="toggle-track"></span></label>
+        </div>
+        <div class="setting-row">
+          <div class="setting-text">
+            <span class="setting-title" data-i18n="settings.lyricsAutoOpen.title">Open the Lyrics tab by itself</span>
+            <span class="setting-desc" data-i18n="settings.lyricsAutoOpen.desc">Switches to the Lyrics tab when a song that has lyrics starts</span>
+          </div>
+          <label class="toggle"><input type="checkbox" id="lyrics_auto_open" /><span class="toggle-track"></span></label>
+        </div>
+        <div class="setting-row">
+          <div class="setting-text">
+            <span class="setting-title" data-i18n="settings.ambient.title">Ambient mode</span>
+            <span class="setting-desc" data-i18n="settings.ambient.desc">Tints the app with colors from the current song's artwork</span>
+          </div>
+          <label class="toggle"><input type="checkbox" id="ambient_lighting_enabled" /><span class="toggle-track"></span></label>
+        </div>
+        <div class="setting-row">
+          <div class="setting-text">
+            <span class="setting-title" data-i18n="settings.normalize.title">Normalize volume</span>
+            <span class="setting-desc" data-i18n="settings.normalize.desc">Evens out loudness between songs</span>
+          </div>
+          <label class="toggle"><input type="checkbox" id="loudness_normalization" /><span class="toggle-track"></span></label>
+        </div>
+      </section>
+
+      <section class="page-inner welcome-step is-hidden" data-step="network">
+        <div>
+          <h1 class="page-title" data-i18n="welcome.network.title">What goes online</h1>
+          <p class="page-lead" data-i18n="welcome.network.lead">Besides YouTube Music itself, Oxitune connects only for these:</p>
+        </div>
+        <ul class="welcome-list">
+          <li>
+            <span class="setting-title" data-i18n="welcome.network.lyricsTitle">Lyrics</span>
+            <span class="setting-desc" data-i18n="welcome.network.lyricsDesc">The song's title, artist, length and video id go to the lyrics providers you have on (Settings → Add-ons)</span>
+          </li>
+          <li>
+            <span class="setting-title" data-i18n="welcome.network.togetherTitle">Listen Together</span>
+            <span class="setting-desc" data-i18n="welcome.network.togetherDesc">Only while you are in a session, end-to-end encrypted, through public brokers that see neither the songs nor the people</span>
+          </li>
+          <li>
+            <span class="setting-title" data-i18n="welcome.network.updatesTitle">Updates and plugins</span>
+            <span class="setting-desc" data-i18n="welcome.network.updatesDesc">A check for new signed versions and plugin updates, on GitHub</span>
+          </li>
+        </ul>
+        <div class="setting-row">
+          <div class="setting-text">
+            <span class="setting-title" data-i18n="settings.lyricsTranslate.title">Translate lyrics</span>
+            <span class="setting-desc" data-i18n="settings.lyricsTranslate.desc">Shows a translation under each line. The lyrics are sent to Google Translate</span>
+          </div>
+          <label class="toggle"><input type="checkbox" id="lyrics_translate_enabled" /><span class="toggle-track"></span></label>
+        </div>
+        <div class="setting-row">
+          <div class="setting-text">
+            <span class="setting-title" data-i18n="settings.lyricsRomanize.title">Romanize lyrics</span>
+            <span class="setting-desc" data-i18n="settings.lyricsRomanize.desc">Shows lyrics written in other scripts (Japanese, Korean, Cyrillic…) in Latin letters too. The lyrics are sent to Google Translate</span>
+          </div>
+          <label class="toggle"><input type="checkbox" id="lyrics_romanize_enabled" /><span class="toggle-track"></span></label>
+        </div>
+        <div class="setting-row">
+          <div class="setting-text">
+            <span class="setting-title" data-i18n="welcome.network.remoteTitle">Phone remote</span>
+            <span class="setting-desc" data-i18n="settings.remote.desc">Control playback from a phone on the same Wi-Fi. Takes effect after restarting the app.</span>
+          </div>
+          <label class="toggle"><input type="checkbox" id="remote_enabled" /><span class="toggle-track"></span></label>
+        </div>
+      </section>
+
+      <section class="page-inner welcome-step is-hidden" data-step="done">
+        <div>
+          <h1 class="page-title" data-i18n="welcome.done.title">You're all set</h1>
+          <p class="page-lead" data-i18n="welcome.done.lead">YouTube Music opens next. A few tips there show where Oxitune's features live.</p>
+        </div>
+        <ul class="welcome-list">
+          <li>
+            <span class="setting-title" data-i18n="welcome.done.menuTitle">The Oxitune menu</span>
+            <span class="setting-desc" data-i18n="welcome.done.menuDesc">The round button in YouTube Music's top bar: Settings and the equalizer, the mini player, local music, Listen Together and the phone remote</span>
+          </li>
+          <li>
+            <span class="setting-title" data-i18n="welcome.done.settingsTitle">Settings anytime</span>
+            <span class="setting-desc" data-i18n="welcome.done.settingsDesc">Ctrl+, or F2 in YouTube Music, or the tray menu</span>
+          </li>
+        </ul>
+      </section>
+    </main>
+
+    <footer class="welcome-footer">
+      <button id="welcome-back" class="btn" data-i18n="welcome.back">Back</button>
+      <div id="welcome-dots" class="welcome-dots" aria-hidden="true"></div>
+      <button id="welcome-skip" class="btn" data-i18n="welcome.skip">Skip</button>
+      <button id="welcome-settings" class="btn btn-tonal is-hidden" data-i18n="welcome.openSettings">Open Settings</button>
+      <button id="welcome-next" class="btn btn-filled" data-i18n="welcome.next">Next</button>
+      <button id="welcome-finish" class="btn btn-filled is-hidden" data-i18n="welcome.finish">Start listening</button>
+    </footer>
+
+    <script type="module" src="./src/ui/welcome.ts"></script>
+  </body>
+</html>
