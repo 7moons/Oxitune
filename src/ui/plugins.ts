@@ -9,7 +9,7 @@
  */
 import { createEl } from '../utils/dom';
 import { openDialog, showToast } from '../preload/ui/kit';
-import { companionLocale, isI18nKey, tr } from './i18n';
+import { companionLocale, I18nKey, isI18nKey, tr } from './i18n';
 import type { LocalizedText, PluginManifest, SettingSpec } from '../plugins/types';
 
 interface IndexEntry {
@@ -205,7 +205,7 @@ function installedCard(plugin: PluginInfo, refresh: () => void): HTMLElement {
     const row = createEl('div', { className: 'setting-row' });
     row.append(createEl('span', { className: 'setting-desc', text: tr('plugins.pendingUpdate', { version: pending.version }) }));
     const review = createEl('button', { className: 'btn btn-tonal', text: tr('plugins.review') });
-    review.addEventListener('click', () => void install(plugin.installed.registry!, pending, refresh));
+    review.addEventListener('click', () => void install(plugin.installed.registry!, pending, refresh, review, true));
     row.append(review);
     card.append(row);
   }
@@ -232,13 +232,48 @@ function installedCard(plugin: PluginInfo, refresh: () => void): HTMLElement {
   return card;
 }
 
-async function install(registry: string, entry: IndexEntry, refresh: () => void): Promise<void> {
+export type InstallPhase = 'idle' | 'busy' | 'done';
+
+/** What an install or update button says. Once done it stays disabled and
+ * says a restart is needed: the plugin loads only when Oxitune starts, so
+ * an unchanged "Install" looked like nothing happened. */
+export function installButtonLabel(phase: InstallPhase, update: boolean): I18nKey {
+  if (phase === 'busy') return update ? 'plugins.updating' : 'plugins.installing';
+  if (phase === 'done') return update ? 'plugins.updatedRestart' : 'plugins.installedRestart';
+  return update ? 'plugins.update' : 'plugins.install';
+}
+
+function setInstallButton(button: HTMLButtonElement, phase: InstallPhase, update: boolean): void {
+  button.disabled = phase !== 'idle';
+  const text = document.createElement('span');
+  text.textContent = tr(installButtonLabel(phase, update));
+  if (phase === 'busy') {
+    const spinner = document.createElement('span');
+    spinner.className = 'spinner';
+    button.replaceChildren(spinner, text);
+  } else {
+    button.replaceChildren(text);
+  }
+}
+
+/** Plugin ids being installed: a second click (or a re-rendered button)
+ * can't start the same install twice. */
+const installing = new Set<string>();
+
+async function install(registry: string, entry: IndexEntry, refresh: () => void, button?: HTMLButtonElement, update = false): Promise<void> {
+  if (installing.has(entry.id)) return;
   if (!(await askConsent(entry.name, entry.permissions))) return;
+  installing.add(entry.id);
+  if (button) setInstallButton(button, 'busy', update);
   try {
     const manifest = (await invoke('plugins_install', { registry, id: entry.id, accepted: entry.permissions })) as PluginManifest;
+    if (button) setInstallButton(button, 'done', update);
     showToast(tr('plugins.installedToast', { name: manifest.name }));
   } catch (e) {
+    if (button) setInstallButton(button, 'idle', update);
     showToast(errorText(e), { durationMs: 8000 });
+  } finally {
+    installing.delete(entry.id);
   }
   refresh();
 }
@@ -257,8 +292,10 @@ async function showAvailable(refresh: () => void): Promise<void> {
       text.append(createEl('span', { className: 'setting-title', text: `${a.entry.name} ${a.entry.version}` }));
       text.append(createEl('span', { className: 'setting-desc', text: `${a.entry.description} · ${a.entry.author} · ${a.registryName || a.registry}` }));
       row.append(text);
-      const button = createEl('button', { className: 'btn btn-filled', text: a.installedVersion ? tr('plugins.update') : tr('plugins.install') });
-      button.addEventListener('click', () => void install(a.registry, a.entry, refresh));
+      const update = !!a.installedVersion;
+      const button = createEl('button', { className: 'btn btn-filled' });
+      setInstallButton(button, 'idle', update);
+      button.addEventListener('click', () => void install(a.registry, a.entry, refresh, button, update));
       row.append(button);
       box.append(row);
     }

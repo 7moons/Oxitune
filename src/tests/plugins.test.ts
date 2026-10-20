@@ -275,3 +275,23 @@ describe('built-in plugin manifests', () => {
     }
   });
 });
+
+describe('install button in Settings → Plugins', () => {
+  // Regression: after installing, the button still said "Install", so people
+  // clicked it again thinking nothing happened.
+  test('says it is working, then that a restart is needed', async () => {
+    const { installButtonLabel } = await import('../ui/plugins');
+    const { COMPANION_LOCALES } = await import('../ui/i18n');
+    expect(installButtonLabel('idle', false)).toBe('plugins.install');
+    expect(installButtonLabel('busy', false)).toBe('plugins.installing');
+    expect(installButtonLabel('done', false)).toBe('plugins.installedRestart');
+    expect(installButtonLabel('idle', true)).toBe('plugins.update');
+    expect(installButtonLabel('busy', true)).toBe('plugins.updating');
+    expect(installButtonLabel('done', true)).toBe('plugins.updatedRestart');
+    expect(COMPANION_LOCALES.en['plugins.installedRestart']).toContain('restart');
+    expect(COMPANION_LOCALES.pl['plugins.installedRestart']).toContain('uruchom ponownie');
+    for (const phase of ['idle', 'busy', 'done'] as const) {
+      expect(installButtonLabel(phase, false)).not.toBe(phase === 'idle' ? 'plugins.update' : 'plugins.install');
+    }
+  });
+});
