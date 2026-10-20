@@ -877,7 +877,8 @@ mod tests {
         assert!(!is_ready_frame(OP_FRAME, &json!({ "evt": "ERROR" })));
     }
 
-    #[tokio::test]
+    // Paused clock: the rate window is measured in tokio time, not wall time.
+    #[tokio::test(start_paused = true)]
     async fn test_burst_of_updates_respects_rate_limit_and_ends_on_the_last_song() {
         let rec = Recorder::default();
         let (tx, _task) = spawn_loop(&rec);

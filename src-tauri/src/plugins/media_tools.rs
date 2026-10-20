@@ -457,7 +457,8 @@ pub fn extract_ffmpeg(archive: &Path, kind: ArchiveKind, out: &Path) -> Result<(
                 if !entry.is_file() {
                     continue;
                 }
-                let path = PathBuf::from(entry.name().replace('\\', "/"));
+                let name = entry.name().map_err(|_| "plugins.error.toolsArchive".to_string())?;
+                let path = PathBuf::from(name.replace('\\', "/"));
                 let (name, parent_is_bin) = split_bin(&path);
                 take(&name, parent_is_bin, &mut entry)?;
             }

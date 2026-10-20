@@ -36,7 +36,8 @@ qrcode = "0.14"
 rand = "0.9"
 rumqttc = { version = "0.25.1", default-features = false, features = ["use-rustls"] }
 lofty = "0.25.1"
-tauri-plugin-updater = "2.0.0"
+# Updates are plain installers (createUpdaterArtifacts: true), never archives.
+tauri-plugin-updater = { version = "2.0.0", default-features = false, features = ["rustls-tls"] }
 tauri-plugin-single-instance = { version = "2.0.0", features = ["deep-link"] }
 tauri-plugin-deep-link = "2"
 # Log files in ~/.oxitune/logs (a release build has no console to log to).
@@ -66,7 +67,7 @@ minisign-verify = "0.2"
 # Installing yt-dlp/ffmpeg for media:save: ffmpeg ships as .zip (Windows,
 # zip is already here via the updater; deflate via the flate2 we have) and
 # .tar.xz (Linux; lzma-rs is pure Rust, two tiny deps).
-zip = { version = "4.6", default-features = false, features = ["deflate-flate2"] }
+zip = { version = "9.0", default-features = false, features = ["deflate-flate2"] }
 lzma-rs = "0.3"
 
 # Screen-lock detection (src/screen_lock.rs). zbus is already in the tree via
@@ -86,6 +87,8 @@ tauri = { version = "2.0.0", features = ["test"] }
 ctor = "0.4"
 tempfile = "3.10"
 tokio-tungstenite = "0.29"
+# Paused clock for timing tests.
+tokio = { version = "1.38", features = ["test-util"] }
 
 # Smaller, faster release binary. panic stays
 # "unwind": a panic in one background task must not take the player down.
