@@ -32,9 +32,13 @@ const START_SLACK_SECS = 0.75;
 export const SEEK_LEAD_SECS = 0.3;
 /** Close enough to swap without an audible jump. */
 export const SYNC_TOLERANCE_SECS = 0.12;
-const MAX_RESEEKS = 2;
+const MAX_RESEEKS = 3;
+/** Ticks in a row the main player must really be playing before the swap. */
+export const STEADY_TICKS = 2;
+/** More than this between two ticks is a seek landing, not playback. */
+const MAX_TICK_ADVANCE_SECS = 1.5;
 /** The hand-over is forced after this long, in sync or not. */
-export const HANDOFF_TIMEOUT_MS = 6000;
+export const HANDOFF_TIMEOUT_MS = 8000;
 /** A song that started with no details arriving is an ad or the wrong
  * song: give up on the overlap after this long. */
 export const CONFIRM_TIMEOUT_MS = 4000;
@@ -71,6 +75,9 @@ export interface MainPlayerState {
   seeking: boolean;
   /** `HTMLMediaElement.readyState`. */
   readyState: number;
+  /** The element's own `currentTime`: it only moves while sound really
+   * comes out, unlike the player's reported position. */
+  mediaTime: number;
   volume: number;
   muted: boolean;
 }
@@ -117,6 +124,8 @@ export class OverlapController {
   private handoffAtMs = 0;
   private reseeks = 0;
   private lead = SEEK_LEAD_SECS;
+  private lastMediaTime = -1;
+  private steadyTicks = 0;
   private overlayPaused = false;
 
   constructor(
@@ -307,6 +316,8 @@ export class OverlapController {
     // it nears its own end; that is a different attempt.
     this.handoffAtMs = this.deps.now();
     this.reseeks = 0;
+    this.steadyTicks = 0;
+    this.lastMediaTime = -1;
     this.lead = SEEK_LEAD_SECS;
     overlay.setLevel(1, 0.1);
     this.deps.seekMain(overlay.currentTime() + this.lead);
@@ -333,13 +344,24 @@ export class OverlapController {
       this.finish('forced');
       return;
     }
-    if (main.seeking || main.readyState < 3) return;
+    // The player reports the position it was sent to the moment it is
+    // asked, long before it has loaded that part of the song. Swapping on
+    // that left a gap: the second player faded away while this one was
+    // still buffering. Only the media clock moving, tick after tick, says
+    // sound is really coming out.
+    const moved = this.lastMediaTime < 0 ? 0 : main.mediaTime - this.lastMediaTime;
+    this.lastMediaTime = main.mediaTime;
+    const playing = !main.seeking && main.readyState >= 3 && moved > 0.02 && moved < MAX_TICK_ADVANCE_SECS;
+    this.steadyTicks = playing ? this.steadyTicks + 1 : 0;
+    if (this.steadyTicks < STEADY_TICKS) return;
 
     const ahead = positionSecs - overlay.currentTime();
     if (Math.abs(ahead) <= SYNC_TOLERANCE_SECS) {
       this.finish(`in sync (${(ahead * 1000).toFixed(0)}ms)`);
     } else if (this.reseeks < MAX_RESEEKS) {
       this.reseeks++;
+      this.steadyTicks = 0;
+      this.deps.log(`overlap: the player landed ${(ahead * 1000).toFixed(0)}ms off, correcting`);
       // The last seek landed `ahead` off: aim that much the other way.
       this.lead = Math.max(0, Math.min(2, this.lead - ahead));
       this.deps.seekMain(overlay.currentTime() + this.lead);

@@ -89,7 +89,7 @@ function setup(opts: { next?: string | null; resolve?: (id: string) => Promise<s
   const logs: string[] = [];
   const env = {
     now: 0,
-    main: { paused: false, seeking: false, readyState: 4, volume: 0.8, muted: false } as MainPlayerState,
+    main: { paused: false, seeking: false, readyState: 4, mediaTime: 0, volume: 0.8, muted: false } as MainPlayerState,
     ad: false,
     repeatOne: false,
     room: false,
@@ -140,6 +140,19 @@ async function untilOverlapping(s: ReturnType<typeof setup>, a = track('aaaaaaaa
   return a;
 }
 
+/** `n` ticks of real playback during a hand-over: the media clock, the
+ * reported position and the second player all move a quarter second each. */
+function playTicks(s: ReturnType<typeof setup>, b: TrackInfo, n: number, position: number): number {
+  for (let i = 0; i < n; i++) {
+    s.env.main.mediaTime += 0.25;
+    s.overlays[0].time += 0.25;
+    s.env.now += 250;
+    position += 0.25;
+    s.c.onTick(position, b);
+  }
+  return position;
+}
+
 describe('overlapLevel', () => {
   test('is the equal-power partner of the fade-out', () => {
     expect(overlapLevel(0)).toBe(0);
@@ -183,10 +196,12 @@ describe('OverlapController', () => {
     s.c.onTick(0.1, b);
     expect(s.c.getPhase()).toBe('handoff');
 
-    // Landed next to the second player: swap.
+    // Landed next to the second player and really playing: swap.
     s.env.main.seeking = false;
     overlay.time = 5.6;
-    s.c.onTick(5.65, b);
+    playTicks(s, b, 1, 5.65);
+    expect(s.c.getPhase()).toBe('handoff'); // one moving tick is not yet steady
+    playTicks(s, b, 1, 5.9);
     expect(s.c.getPhase()).toBe('idle');
     expect(s.fade.releases).toBe(1);
     expect(overlay.disposedWith).toBeGreaterThan(0);
@@ -202,14 +217,43 @@ describe('OverlapController', () => {
     s.c.onTrackChange(b);
 
     overlay.time = 6;
-    s.c.onTick(5.5, b); // half a second behind
+    let pos = playTicks(s, b, 3, 5.5); // playing, half a second behind
     expect(s.seeks.length).toBe(2);
-    expect(s.seeks[1]).toBeCloseTo(6 + SEEK_LEAD_SECS + 0.5, 6);
-    overlay.time = 7;
-    s.c.onTick(6.5, b);
+    expect(s.seeks[1]).toBeCloseTo(overlay.time + SEEK_LEAD_SECS + 0.5, 6);
+    pos = playTicks(s, b, 2, pos); // the correction landed just as far off
     expect(s.seeks.length).toBe(3);
-    overlay.time = 8;
-    s.c.onTick(7.5, b); // no more corrections: take over anyway
+    pos = playTicks(s, b, 2, pos);
+    expect(s.seeks.length).toBe(4);
+    playTicks(s, b, 2, pos); // no more corrections: take over anyway
+    expect(s.c.getPhase()).toBe('idle');
+    expect(s.fade.releases).toBe(1);
+  });
+
+  // Regression: the player reports the position it was sent to at once,
+  // while it is still loading that part of the song. Swapping on that left
+  // a silent gap between the songs.
+  test('waits for the main player to really play, however long it buffers', async () => {
+    const s = setup();
+    await untilOverlapping(s);
+    const overlay = s.overlays[0];
+    overlay.time = 5;
+    s.fade.held = true;
+    const b = track('next0000001', 180);
+    s.c.onTrackChange(b);
+
+    // "I'm at 5.3s" says the player, not seeking, ready... and not moving.
+    for (let i = 0; i < 12; i++) {
+      overlay.time += 0.25;
+      s.env.now += 250;
+      s.c.onTick(overlay.time + 0.05, b);
+    }
+    expect(s.c.getPhase()).toBe('handoff');
+    expect(overlay.disposedWith).toBeNull();
+    expect(s.fade.releases).toBe(0);
+    expect(overlay.level).toBe(1);
+
+    // Buffered: the media clock moves, two ticks in a row.
+    playTicks(s, b, 2, overlay.time + 0.05);
     expect(s.c.getPhase()).toBe('idle');
     expect(s.fade.releases).toBe(1);
   });

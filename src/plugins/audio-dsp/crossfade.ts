@@ -10,7 +10,7 @@ export const MAX_FADE_IN_SECS = 2;
  * joins the ~4 ticks a second into one continuous curve. */
 export const FADE_RAMP_SECS = 0.3;
 /** The longest a held song stays silent, whatever the overlap does. */
-export const MAX_HOLD_MS = 8000;
+export const MAX_HOLD_MS = 10000;
 /** How fast a held song comes up when it takes over. */
 export const HOLD_RELEASE_SECS = 0.25;
 /** A position at or below this, right after the end of a song, is a restart

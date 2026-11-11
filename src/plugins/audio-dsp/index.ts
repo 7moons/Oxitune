@@ -65,7 +65,9 @@ export const AudioDspPlugin: OxitunePlugin = {
         seekMain: (secs) => PlayerBridge.seekTo(secs),
         mainState: () => {
           const v = ctx.getVideoElement();
-          return v ? { paused: v.paused, seeking: v.seeking, readyState: v.readyState, volume: v.volume, muted: v.muted } : null;
+          return v
+            ? { paused: v.paused, seeking: v.seeking, readyState: v.readyState, mediaTime: v.currentTime, volume: v.volume, muted: v.muted }
+            : null;
         },
         playerDuration: () => PlayerBridge.getMoviePlayer()?.getDuration?.(),
         isAd: () => {
