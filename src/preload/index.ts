@@ -1,6 +1,7 @@
 import { PlayerObserver } from './observer';
 import { PlayerBridge } from './bridge';
 import { startResume } from './resume';
+import { startKeepAlive } from './keepAlive';
 import { HostContext, PluginRegistry } from '../plugins/registry';
 import {
   ExternalPlugin,
@@ -372,6 +373,7 @@ if (isTopLevelYTMFrame) {
   // Before the installed plugins' own init scripts run (they follow this one).
   installPluginHost();
   startResume();
+  startKeepAlive();
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => initOxitune());
   } else {

@@ -128,6 +128,11 @@ export const VolumePlugin: OxitunePlugin = {
         indicator.textContent = `${volume}%`;
         indicator.setAttribute('aria-label', t().volumeLevel(volume));
       }
+      // Placing the badge measures half the player page (computed styles up
+      // every ancestor). Nobody sees a hidden badge, so that is only worth
+      // doing when it is up or about to be; it used to run twice a second
+      // and on every scroll event for the whole session.
+      if (!changed && !indicator.classList.contains('oxitune-visible')) return;
       if (!placeIndicator()) {
         hideIndicator();
         return;

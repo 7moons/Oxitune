@@ -160,9 +160,10 @@ export const AudioDspPlugin: OxitunePlugin = {
   },
 
   onTick(currentTimeSecs: number, ctx: PluginContext) {
-    // Both move the player (early skip, silence jumps); a guest follows the host instead.
-    if (isSyncGuest()) return;
+    // Crossfade only changes the level, so a room guest fades too.
     if (crossfadeRef) crossfadeRef.onTick(currentTimeSecs, ctx.track);
+    // Skip-silence moves the player; a guest follows the host instead.
+    if (isSyncGuest()) return;
     if (skipSilenceRef) skipSilenceRef.onTick(currentTimeSecs, ctx.track, ctx.getVideoElement());
   },
 

@@ -138,6 +138,9 @@ pub struct PluginManager {
     state: Mutex<PluginState>,
     /// Something changed that the page only picks up on reload.
     reload_needed: std::sync::atomic::AtomicBool,
+    /// Held across a storage read-modify-write: two plugin writes at once
+    /// each read the old file and the later save dropped the other's key.
+    storage_lock: Mutex<()>,
     pub media: std::sync::Arc<media_save::MediaJobs>,
     /// yt-dlp and ffmpeg we installed (`~/.oxitune/tools`).
     pub tools: std::sync::Arc<media_tools::Tools>,
@@ -155,6 +158,7 @@ impl PluginManager {
             root,
             state: Mutex::new(state),
             reload_needed: Default::default(),
+            storage_lock: Mutex::new(()),
             media: Default::default(),
             tools: std::sync::Arc::new(media_tools::Tools::new(tools_dir)),
         }
@@ -362,6 +366,7 @@ impl PluginManager {
         if key.is_empty() || key.len() > 200 {
             return Err("plugins.error.badKey".into());
         }
+        let _writing = self.storage_lock.lock();
         let mut data = self.read_storage(id);
         match value {
             Some(v) => data.insert(key.to_string(), v),
@@ -771,6 +776,22 @@ mod tests {
         assert_eq!(m.storage_set("com.example.theme", "big", Some(huge.into())).unwrap_err(), "plugins.error.storageFull");
         m.storage_set("com.example.theme", "k", None).unwrap();
         assert!(m.storage_get("com.example.theme", "k").unwrap().is_null());
+    }
+
+    // Regression: storage_set read the file, changed one key and wrote it
+    // back with nothing held in between, so writes landing together lost keys.
+    #[test]
+    fn test_storage_writes_at_once_keep_every_key() {
+        let (_d, m) = manager();
+        with_installed(&m, &["ui"]);
+        m.update_state(|s| s.installed.get_mut("com.example.theme").unwrap().granted.push("storage".into()));
+        std::thread::scope(|scope| {
+            for i in 0..16 {
+                let m = &m;
+                scope.spawn(move || m.storage_set("com.example.theme", &format!("k{i}"), Some(i.into())).unwrap());
+            }
+        });
+        assert_eq!(m.storage_keys("com.example.theme").unwrap().len(), 16);
     }
 
     #[test]

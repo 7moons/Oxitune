@@ -2,11 +2,14 @@ import { AudioEngine } from './engine';
 import { PlayerBridge } from '../../preload/bridge';
 import { TrackInfo } from '../types';
 
+const repeatsOne = (): boolean => typeof document !== 'undefined' && PlayerBridge.getRepeatMode() === 'one';
+
 export class SkipSilenceController {
   private enabled = false;
   private silenceThresholdDb = -50;
   private consecutiveSilentTicks = 0;
   private checkedIntro = false;
+  private outroSkipped = false;
 
   public setEnabled(enabled: boolean): void {
     this.enabled = enabled;
@@ -17,6 +20,7 @@ export class SkipSilenceController {
   }
 
   public onTrackChange(): void {
+    this.outroSkipped = false;
     this.checkedIntro = false;
     this.consecutiveSilentTicks = 0;
   }
@@ -49,12 +53,17 @@ export class SkipSilenceController {
     }
 
     // 2. Skip outro silence (in last 10 seconds)
-    if (track.durationSecs > 15 && currentTimeSecs > track.durationSecs - 10) {
+    if (!this.outroSkipped && track.durationSecs > 15 && currentTimeSecs > track.durationSecs - 10) {
       if (powerDb < this.silenceThresholdDb) {
         this.consecutiveSilentTicks++;
         if (this.consecutiveSilentTicks >= 3) {
-          console.log(`[Oxitune Skip Silence] Outro silence detected (${powerDb.toFixed(1)} dB). Advancing to next track...`);
           this.consecutiveSilentTicks = 0;
+          // Once per song: the next one takes a moment to load, and counting
+          // on through that pressed "next" a second time (two songs skipped).
+          this.outroSkipped = true;
+          // "Next" on repeat-one leaves the song; let it loop instead.
+          if (repeatsOne()) return;
+          console.log(`[Oxitune Skip Silence] Outro silence detected (${powerDb.toFixed(1)} dB). Advancing to next track...`);
           PlayerBridge.next();
         }
       } else {

@@ -29,7 +29,9 @@ export const PowerPlugin: OxitunePlugin = {
       if (inhibited === inhibit) return;
       inhibited = inhibit;
       ctx.invoke('set_inhibit_sleep', { inhibit }).catch((e) => {
-        inhibited = !inhibit;
+        // Only undo our own request: a newer one may have replaced it while
+        // this was in flight, and flipping that back left the two out of step.
+        if (inhibited === inhibit) inhibited = !inhibit;
         console.error('[Oxitune Power] set_inhibit_sleep failed:', e);
       });
     };

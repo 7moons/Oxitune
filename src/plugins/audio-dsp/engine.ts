@@ -43,6 +43,7 @@ export class AudioEngine {
   // startup) are applied the moment it's built.
   private gains: number[] = EQ_FREQUENCIES.map(() => 0);
   private preampDb = 0;
+  private fadeTarget = 1;
 
   public isInitializedFor(video: HTMLVideoElement): boolean {
     return this.isInitialized && this.hookedVideo === video;
@@ -68,8 +69,22 @@ export class AudioEngine {
         return;
       }
 
+      // YTM swapped its <video>: the old context would otherwise stay open
+      // (and keep its audio thread) for the rest of the session.
+      if (this.audioCtx) {
+        const stale = this.audioCtx;
+        this.isInitialized = false;
+        try {
+          this.sourceNode?.disconnect();
+        } catch (_) {
+          // already disconnected
+        }
+        void stale.close().catch(() => undefined);
+      }
+
       this.audioCtx = new AudioCtxClass();
       this.hookedVideo = video;
+      this.fadeTarget = 1;
 
       // 1. Source node from video
       this.sourceNode = this.audioCtx.createMediaElementSource(video);
@@ -162,15 +177,15 @@ export class AudioEngine {
       lastNode.connect(this.preampNode);
       lastNode = this.preampNode;
 
-      // Route through Crossfade / Fade node
-      lastNode.connect(this.fadeNode);
-      lastNode = this.fadeNode;
-
-      // Route through Analyser
+      // Analyser before the fade: skip-silence must measure the song, not
+      // the fade. Measured after it, every faded-in intro read as silence
+      // and got fast-forwarded, and every fade-out as a silent outro.
       lastNode.connect(this.analyserNode);
+      lastNode = this.analyserNode;
 
-      // Route to destination (speakers)
-      this.analyserNode.connect(this.audioCtx.destination);
+      // Route through Crossfade / Fade node, then to the speakers
+      lastNode.connect(this.fadeNode);
+      this.fadeNode.connect(this.audioCtx.destination);
     } catch (e) {
       console.error('[Oxitune DSP] Graph rebuild error:', e);
     }
@@ -227,33 +242,31 @@ export class AudioEngine {
   }
 
   // Crossfade API
-  public fadeIn(durationSecs: number): void {
-    if (!this.fadeNode || !this.audioCtx || durationSecs <= 0) {
-      if (this.fadeNode && this.audioCtx) {
-        this.fadeNode.gain.setValueAtTime(1.0, this.audioCtx.currentTime);
-      }
-      return;
+  /** Moves the fade gain to `gain` (0..1) over `rampSecs`, from wherever it
+   * is now. The crossfade controller calls this on every tick with the level
+   * the song's position asks for, so the fade follows the song (pause, seek,
+   * buffering, speed) instead of a wall-clock ramp scheduled once. */
+  public setFadeGain(gain: number, rampSecs = 0): void {
+    const target = Math.max(0, Math.min(1, Number.isFinite(gain) ? gain : 1));
+    if (!this.fadeNode || !this.audioCtx) return;
+    // Unchanged for most of a song (1.0): don't rewrite the automation 4x/s.
+    if (target === this.fadeTarget) return;
+    this.fadeTarget = target;
+    const param = this.fadeNode.gain;
+    const now = this.audioCtx.currentTime;
+    const current = param.value;
+    param.cancelScheduledValues(now);
+    param.setValueAtTime(current, now);
+    if (rampSecs > 0) {
+      param.linearRampToValueAtTime(target, now + rampSecs);
+    } else {
+      param.setValueAtTime(target, now);
     }
-    const now = this.audioCtx.currentTime;
-    this.fadeNode.gain.cancelScheduledValues(now);
-    this.fadeNode.gain.setValueAtTime(0.001, now);
-    this.fadeNode.gain.linearRampToValueAtTime(1.0, now + durationSecs);
-  }
-
-  public fadeOut(durationSecs: number): void {
-    if (!this.fadeNode || !this.audioCtx || durationSecs <= 0) return;
-    const now = this.audioCtx.currentTime;
-    this.fadeNode.gain.cancelScheduledValues(now);
-    this.fadeNode.gain.setValueAtTime(this.fadeNode.gain.value, now);
-    this.fadeNode.gain.linearRampToValueAtTime(0.001, now + durationSecs);
   }
 
   public resetFade(): void {
-    if (this.fadeNode && this.audioCtx) {
-      const now = this.audioCtx.currentTime;
-      this.fadeNode.gain.cancelScheduledValues(now);
-      this.fadeNode.gain.setValueAtTime(1.0, now);
-    }
+    // A short ramp, not a jump: a step in gain is a click.
+    this.setFadeGain(1, 0.05);
   }
 
   // Silence Detection (RMS audio power in dB). `null` when there's no
