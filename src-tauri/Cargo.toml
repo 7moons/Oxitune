@@ -1,6 +1,6 @@
 [package]
 name = "oxitune"
-version = "0.4.0"
+version = "0.4.1"
 description = "Oxitune - desktop client for YouTube Music, powered by Tauri v2"
 authors = ["7moons"]
 license = "GPL-3.0-only"
