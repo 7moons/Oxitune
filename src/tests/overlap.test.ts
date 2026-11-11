@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import {
   CONFIRM_TIMEOUT_MS,
+  PAUSE_DEBOUNCE_MS,
   HANDOFF_TIMEOUT_MS,
   MainPlayerState,
   OverlapController,
@@ -89,7 +90,7 @@ function setup(opts: { next?: string | null; resolve?: (id: string) => Promise<s
   const logs: string[] = [];
   const env = {
     now: 0,
-    main: { paused: false, seeking: false, readyState: 4, mediaTime: 0, volume: 0.8, muted: false } as MainPlayerState,
+    main: { paused: false, userPaused: false, seeking: false, readyState: 4, mediaTime: 0, volume: 0.8, muted: false } as MainPlayerState,
     ad: false,
     repeatOne: false,
     room: false,
@@ -308,11 +309,46 @@ describe('OverlapController', () => {
     const s = setup();
     const a = await untilOverlapping(s);
     s.env.main.paused = true;
+    s.env.main.userPaused = true;
+    s.c.onTick(196, a);
+    expect(s.overlays[0].playing).toBe(true); // not on the first glimpse of it
+    s.env.now += PAUSE_DEBOUNCE_MS;
     s.c.onTick(196, a);
     expect(s.overlays[0].playing).toBe(false);
     s.env.main.paused = false;
+    s.env.main.userPaused = false;
     s.c.onTick(196, a);
     expect(s.overlays[0].playing).toBe(true);
+  });
+
+  // Regression: YTM's <video> reads "paused" for a moment while it changes
+  // songs and while it seeks. The second player was paused along with it,
+  // which cut a hole into the music exactly at the song change.
+  test('the song change and the hand-over seek never pause the second player', async () => {
+    const s = setup();
+    const a = await untilOverlapping(s);
+    const overlay = s.overlays[0];
+
+    // The old song ends: paused, but nobody paused it.
+    s.env.main.paused = true;
+    for (let i = 0; i < 8; i++) {
+      s.env.now += 250;
+      s.c.onTick(199.9, a);
+      expect(overlay.playing).toBe(true);
+    }
+    s.c.onTick(0.1, a); // the next song is loading
+    expect(overlay.playing).toBe(true);
+
+    overlay.time = 5;
+    s.fade.held = true;
+    const b = track('next0000001', 180);
+    s.c.onTrackChange(b);
+    for (let i = 0; i < 8; i++) {
+      s.env.now += 250;
+      s.c.onTick(5.3, b); // seeking: paused again, still nobody's doing
+      expect(overlay.playing).toBe(true);
+    }
+    expect(s.c.getPhase()).toBe('handoff');
   });
 
   test('seeking back out of the fade stops the overlap', async () => {
@@ -348,8 +384,9 @@ describe('OverlapController', () => {
     s.overlays[0].isReady = false;
     s.c.onTick(195.1, a);
     expect(s.c.getPhase()).toBe('ready');
-    s.c.onTick(196.5, a); // too far into the window to join
+    s.c.onTick(198.9, a); // the song is all but over: no overlap this time
     expect(s.c.getPhase()).toBe('idle');
+    expect(s.logs.some((l) => l.includes('not buffered in time'))).toBe(true);
 
     const s2 = setup();
     const a2 = await untilOverlapping(s2);
@@ -385,9 +422,29 @@ describe('OverlapController', () => {
     const s = setup();
     const a = track('aaaaaaaaaaa');
     s.c.onTrackChange(a);
-    s.c.onTick(194, a); // 6s left, the window is 5s
+    s.c.onTick(197, a); // 3s left
     await flush();
     expect(s.env.resolved).toEqual([]);
+  });
+
+  // Regression: the second player could only join on the first tick of the
+  // fade window; a lookup that came back a moment later (or a seek to near
+  // the end) meant no overlap at all, just the gap between the songs.
+  test('joins the fade late when the next song is ready late', async () => {
+    const s = setup();
+    const a = track('aaaaaaaaaaa');
+    s.c.onTrackChange(a);
+    s.c.onTick(193, a); // 7s left, the window is 5s: still looked up
+    await flush();
+    expect(s.env.resolved).toEqual(['next0000001']);
+    s.overlays[0].isReady = false;
+    s.c.onTick(195.5, a);
+    expect(s.c.getPhase()).toBe('ready');
+    s.overlays[0].isReady = true;
+    s.c.onTick(197, a); // 3s left
+    expect(s.c.getPhase()).toBe('overlapping');
+    s.c.onTick(197.5, a);
+    expect(s.overlays[0].level).toBeCloseTo(overlapLevel(0.5), 6);
   });
 
   test('a lookup that answers after the song changed is ignored', async () => {

@@ -65,8 +65,12 @@ export const AudioDspPlugin: OxitunePlugin = {
         seekMain: (secs) => PlayerBridge.seekTo(secs),
         mainState: () => {
           const v = ctx.getVideoElement();
+          // 2 = paused by the user; ended, buffering and unstarted are the
+          // player changing songs or seeking.
+          const state = PlayerBridge.getMoviePlayer()?.getPlayerState?.();
+          const userPaused = !!v && v.paused && (typeof state === 'number' ? state === 2 : !v.ended);
           return v
-            ? { paused: v.paused, seeking: v.seeking, readyState: v.readyState, mediaTime: v.currentTime, volume: v.volume, muted: v.muted }
+            ? { paused: v.paused, userPaused, seeking: v.seeking, readyState: v.readyState, mediaTime: v.currentTime, volume: v.volume, muted: v.muted }
             : null;
         },
         playerDuration: () => PlayerBridge.getMoviePlayer()?.getDuration?.(),

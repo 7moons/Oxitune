@@ -21,12 +21,16 @@ import { preciseDuration } from './crossfade';
  */
 
 /** How long before the end the next song's stream is looked up. */
-export const PREPARE_SECS = 30;
-/** The lookup and the first buffering need about this long. */
-const MIN_PREPARE_SECS = 2;
-/** The overlap only starts at the beginning of the fade window; joining it
- * late would bring the next song in at once, half loud. */
-const START_SLACK_SECS = 0.75;
+export const PREPARE_SECS = 45;
+/** With less of the song left than this there is no time to look the next
+ * one up and buffer it. */
+export const MIN_PREPARE_SECS = 4;
+/** The second player may join the fade late (a slow lookup, a seek to near
+ * the end), but not in the song's last moments. */
+export const MIN_START_SECS = 1.5;
+/** The song has to stay paused this long before the second player pauses
+ * with it. */
+export const PAUSE_DEBOUNCE_MS = 300;
 /** YTM's player is asked for a little ahead of the second player: a seek
  * takes a moment, and the second player keeps going meanwhile. */
 export const SEEK_LEAD_SECS = 0.3;
@@ -72,6 +76,12 @@ export interface FadeHold {
 
 export interface MainPlayerState {
   paused: boolean;
+  /**
+   * Paused because someone paused it. `paused` alone is also true for a
+   * moment whenever YTM changes songs or seeks; pausing the second player
+   * on that cut a hole into the music exactly at the song change.
+   */
+  userPaused: boolean;
   seeking: boolean;
   /** `HTMLMediaElement.readyState`. */
   readyState: number;
@@ -127,6 +137,7 @@ export class OverlapController {
   private lastMediaTime = -1;
   private steadyTicks = 0;
   private overlayPaused = false;
+  private pausedSinceMs: number | null = null;
 
   constructor(
     private readonly deps: OverlapDeps,
@@ -145,6 +156,23 @@ export class OverlapController {
 
   public getPhase(): Phase {
     return this.phase;
+  }
+
+  /** Keeps the second player paused exactly while the user has the song
+   * paused; returns whether that is now. */
+  private followPause(main: MainPlayerState, overlay: OverlayPlayer): boolean {
+    if (!main.userPaused) {
+      this.pausedSinceMs = null;
+    } else if (this.pausedSinceMs === null) {
+      this.pausedSinceMs = this.deps.now();
+    }
+    const paused = this.pausedSinceMs !== null && this.deps.now() - this.pausedSinceMs >= PAUSE_DEBOUNCE_MS;
+    if (paused !== this.overlayPaused) {
+      this.overlayPaused = paused;
+      if (paused) overlay.pause();
+      else overlay.play();
+    }
+    return paused;
   }
 
   private active(): boolean {
@@ -203,16 +231,21 @@ export class OverlapController {
 
     if (this.phase === 'ready') {
       const window = this.crossfadeSeconds;
-      if (remaining <= window && remaining >= window - START_SLACK_SECS && !main.paused && this.overlay?.ready()) {
+      if (remaining < MIN_START_SECS) {
+        this.deps.log('overlap: skipped (the next song was not buffered in time)');
+        this.abort('too late to start');
+      } else if (remaining <= window && !main.paused && this.overlay?.ready()) {
+        // Normally the first tick inside the window; later when the lookup
+        // or the buffering took longer. The level then comes up to where the
+        // fade already is instead of the overlap being dropped.
         this.fade.setHoldNext(true);
         this.overlay.setLevel(0);
         this.overlay.play();
         this.overlayPaused = false;
+        this.pausedSinceMs = null;
         this.wrappedAtMs = null;
         this.phase = 'overlapping';
         this.deps.log(`overlap: started ${remaining.toFixed(1)}s before the end`);
-      } else if (remaining < window - START_SLACK_SECS) {
-        this.abort('too late to start');
       }
       return;
     }
@@ -224,7 +257,7 @@ export class OverlapController {
 
   private maybePrepare(trackId: string | null, remaining: number): void {
     if (!trackId || trackId === this.attemptedFor) return;
-    if (remaining > PREPARE_SECS || remaining < this.crossfadeSeconds + MIN_PREPARE_SECS) return;
+    if (remaining > PREPARE_SECS || remaining < MIN_PREPARE_SECS) return;
     this.attemptedFor = trackId;
     // One line per song either way: an overlap that doesn't happen must say why.
     if (this.deps.repeatsOne() || this.deps.isAd()) {
@@ -278,11 +311,7 @@ export class OverlapController {
       return;
     }
     // Pausing the song pauses both.
-    if (main.paused !== this.overlayPaused) {
-      this.overlayPaused = main.paused;
-      if (main.paused) overlay.pause();
-      else overlay.play();
-    }
+    this.followPause(main, overlay);
 
     // The main player went from the end of the song to the start of
     // something: the next song (its details follow) or not.
@@ -330,12 +359,7 @@ export class OverlapController {
       this.finish('the second player is gone');
       return;
     }
-    if (main.paused !== this.overlayPaused) {
-      this.overlayPaused = main.paused;
-      if (main.paused) overlay.pause();
-      else overlay.play();
-    }
-    if (main.paused) {
+    if (this.followPause(main, overlay)) {
       // Paused mid hand-over: the clock for forcing it stops too.
       this.handoffAtMs = this.deps.now();
       return;
@@ -395,6 +419,7 @@ export class OverlapController {
     this.forId = null;
     this.wrappedAtMs = null;
     this.overlayPaused = false;
+    this.pausedSinceMs = null;
   }
 
   public destroy(): void {
