@@ -217,9 +217,17 @@ export class OverlapController {
     if (!trackId || trackId === this.attemptedFor) return;
     if (remaining > PREPARE_SECS || remaining < this.crossfadeSeconds + MIN_PREPARE_SECS) return;
     this.attemptedFor = trackId;
-    if (this.deps.repeatsOne() || this.deps.isAd()) return;
+    // One line per song either way: an overlap that doesn't happen must say why.
+    if (this.deps.repeatsOne() || this.deps.isAd()) {
+      this.deps.log('overlap: skipped (repeat-one or an ad)');
+      return;
+    }
     const nextId = this.deps.nextVideoId();
-    if (!nextId || nextId === trackId) return;
+    if (!nextId || nextId === trackId) {
+      this.deps.log('overlap: skipped (no next song in the queue)');
+      return;
+    }
+    this.deps.log(`overlap: looking up the next song ${remaining.toFixed(0)}s before the end`);
 
     const attempt = ++this.attempt;
     this.phase = 'resolving';

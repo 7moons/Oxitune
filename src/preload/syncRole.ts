@@ -29,9 +29,20 @@ export function setRoomNextOverride(override: (() => boolean) | null): void {
   roomNext = override;
 }
 
-/** In a Listen Together room, as its host or a guest. */
+/**
+ * In a Listen Together room, as its host or a guest. Set by the sync-room
+ * plugin with the room's state. Not derived from the "next" override above:
+ * that one is installed for the plugin's whole life, room or no room, and
+ * reading it as "in a room" kept the overlapping crossfade off for everyone.
+ */
+let inRoom = false;
+
+export function setInSyncRoom(value: boolean): void {
+  inRoom = value;
+}
+
 export function inSyncRoom(): boolean {
-  return guest || roomNext !== null;
+  return inRoom || guest;
 }
 
 export function takeRoomNext(): boolean {

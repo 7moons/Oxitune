@@ -4,7 +4,7 @@ import { PlayerBridge } from '../../preload/bridge';
 import { setSyncStatus } from '../../preload/ui/navMenu';
 import { showReaction, showToast } from '../../preload/ui/kit';
 import { t } from '../../preload/ui/i18n';
-import { setRoomNextOverride, setSyncGuest } from '../../preload/syncRole';
+import { setInSyncRoom, setRoomNextOverride, setSyncGuest } from '../../preload/syncRole';
 import { canControl, MemberRole, roleOf, votesNeeded } from '../../preload/syncRoles';
 import { hideQueuePanel, queueAddFromMenuData, showQueuePanel, syncQueuePanel } from './queuePanel';
 import { pageLog, playerSnapshot } from '../../preload/diagLog';
@@ -371,6 +371,7 @@ export class RoomSyncController {
     this.isHost = isHost;
     this.canControl = canControl;
     setSyncGuest(this.isGuest());
+    setInSyncRoom(inRoom);
     if (!roleChanged) return;
     this.pendingNav = null;
     this.lastBroadcast = null;

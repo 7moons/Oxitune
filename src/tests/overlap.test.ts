@@ -11,7 +11,8 @@ import {
 } from '../plugins/audio-dsp/overlap';
 import { CrossfadeController, MAX_HOLD_MS } from '../plugins/audio-dsp/crossfade';
 import { AudioEngine } from '../plugins/audio-dsp/engine';
-import { inSyncRoom, setRoomNextOverride, setSyncGuest } from '../preload/syncRole';
+import { inSyncRoom, setInSyncRoom, setRoomNextOverride, setSyncGuest } from '../preload/syncRole';
+import { RoomSyncController } from '../plugins/sync-room';
 import { TrackInfo } from '../plugins/types';
 import { DEFAULT_OVERLAP_SECS, reconcileOverlap } from '../ui/format';
 
@@ -479,16 +480,27 @@ describe('CrossfadeController hold (the main player waits for the hand-over)', (
 describe('inSyncRoom', () => {
   afterEach(() => {
     setSyncGuest(false);
+    setInSyncRoom(false);
     setRoomNextOverride(null);
   });
 
-  test('true for a guest and for a host, false alone', () => {
-    expect(inSyncRoom()).toBe(false);
-    setSyncGuest(true);
-    expect(inSyncRoom()).toBe(true);
-    setSyncGuest(false);
+  // Regression: the sync-room plugin installs its "next" override when it
+  // loads, room or no room. Reading that as "in a room" switched the
+  // overlapping crossfade off for everyone, always.
+  test('the "next" override alone is not a room', () => {
     setRoomNextOverride(() => false);
+    expect(inSyncRoom()).toBe(false);
+  });
+
+  test('follows the room state the sync plugin reports', () => {
+    const controller = new RoomSyncController();
+    expect(inSyncRoom()).toBe(false);
+    controller.setRoomState(true, true);
     expect(inSyncRoom()).toBe(true);
+    controller.setRoomState(true, false);
+    expect(inSyncRoom()).toBe(true);
+    controller.setRoomState(false, false);
+    expect(inSyncRoom()).toBe(false);
   });
 });
 
