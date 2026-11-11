@@ -13,6 +13,7 @@ import { CrossfadeController, MAX_HOLD_MS } from '../plugins/audio-dsp/crossfade
 import { AudioEngine } from '../plugins/audio-dsp/engine';
 import { inSyncRoom, setRoomNextOverride, setSyncGuest } from '../preload/syncRole';
 import { TrackInfo } from '../plugins/types';
+import { DEFAULT_OVERLAP_SECS, reconcileOverlap } from '../ui/format';
 
 const track = (videoId: string, durationSecs = 200, currentTimeSecs = 0): TrackInfo => ({
   title: `Song ${videoId}`,
@@ -488,5 +489,28 @@ describe('inSyncRoom', () => {
     setSyncGuest(false);
     setRoomNextOverride(() => false);
     expect(inSyncRoom()).toBe(true);
+  });
+});
+
+describe('reconcileOverlap (Settings)', () => {
+  // Regression: the overlap toggle saved as "on" next to a crossfade of 0,
+  // and nothing happened at all.
+  test('switching the overlap on with crossfade off gives it a length', () => {
+    expect(reconcileOverlap('overlap', true, 0)).toEqual({ overlap: true, seconds: DEFAULT_OVERLAP_SECS });
+    expect(reconcileOverlap('overlap', true, NaN)).toEqual({ overlap: true, seconds: DEFAULT_OVERLAP_SECS });
+  });
+
+  test('a crossfade already set is kept', () => {
+    expect(reconcileOverlap('overlap', true, 8)).toEqual({ overlap: true, seconds: 8 });
+    expect(reconcileOverlap('seconds', true, 2.5)).toEqual({ overlap: true, seconds: 2.5 });
+  });
+
+  test('turning crossfade off takes the overlap with it', () => {
+    expect(reconcileOverlap('seconds', true, 0)).toEqual({ overlap: false, seconds: 0 });
+  });
+
+  test('with the overlap off nothing is touched', () => {
+    expect(reconcileOverlap('overlap', false, 0)).toEqual({ overlap: false, seconds: 0 });
+    expect(reconcileOverlap('seconds', false, 6)).toEqual({ overlap: false, seconds: 6 });
   });
 });

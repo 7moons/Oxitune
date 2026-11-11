@@ -1,7 +1,7 @@
 import { EQ_FREQUENCIES, EQ_MAX_DB, EQ_PRESETS } from '../plugins/audio-dsp/presets';
 import { openDialog, showToast } from '../preload/ui/kit';
 import { initAmbientBackdrop } from './ambient';
-import { formatDb, formatCrossfade } from './format';
+import { formatDb, formatCrossfade, reconcileOverlap } from './format';
 import { COMPANION_LOCALES, I18nKey, tr } from './i18n';
 import { syncRange } from './range';
 import { acceleratorFromEvent, formatAccelerator, isMediaKey, SHORTCUT_ACTIONS, ShortcutAction } from './shortcuts';
@@ -914,6 +914,15 @@ document.addEventListener('DOMContentLoaded', () => {
   // The overlap is useless without yt-dlp: say so when it is switched on,
   // and offer to install it (that click is the consent to download it).
   $<HTMLInputElement>('crossfade_overlap')?.addEventListener('change', async (e) => {
+    // Overlapping needs a crossfade to happen in: give it one.
+    const slider = $<HTMLInputElement>('crossfade_seconds');
+    const before = parseFloat(slider?.value ?? '0') || 0;
+    const fixed = reconcileOverlap('overlap', (e.target as HTMLInputElement).checked, before);
+    if (fixed.seconds !== before) {
+      setCrossfade(fixed.seconds);
+      emitLiveEvent('set-crossfade-seconds', fixed.seconds);
+      scheduleSave();
+    }
     const invoke = window.__TAURI__?.core.invoke;
     if (!(e.target as HTMLInputElement).checked || !invoke) return;
     try {
@@ -982,6 +991,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const val = parseFloat((e.target as HTMLInputElement).value);
     setCrossfade(val);
     emitLiveEvent('set-crossfade-seconds', val);
+    // Crossfade off takes the overlap with it (it happens inside the crossfade).
+    const overlap = $<HTMLInputElement>('crossfade_overlap');
+    if (overlap && !reconcileOverlap('seconds', overlap.checked, val).overlap) overlap.checked = false;
   });
 
   $<HTMLInputElement>('playback_speed')?.addEventListener('input', (e) => {

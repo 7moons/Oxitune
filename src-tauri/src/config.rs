@@ -149,6 +149,8 @@ pub struct DeviceEqProfile {
     pub preamp: f64,
 }
 
+/// The crossfade length the overlap gets when crossfade itself is off.
+pub const DEFAULT_OVERLAP_SECS: f64 = 5.0;
 const EQ_BANDS: usize = 10;
 const MAX_DEVICE_PROFILES: usize = 16;
 const MAX_DEVICE_ID_CHARS: usize = 300;
@@ -247,6 +249,11 @@ impl AppConfig {
         self.wheel_volume_step = clamp(self.wheel_volume_step, 0.0, 1.0, 0.05);
         self.preamp_gain = clamp(self.preamp_gain, -24.0, 24.0, 0.0);
         self.crossfade_seconds = clamp(self.crossfade_seconds, 0.0, 30.0, 0.0);
+        // Overlapping happens inside the crossfade: "on" next to a crossfade
+        // of 0 did nothing at all, so it comes with a length.
+        if self.crossfade_overlap && self.crossfade_seconds <= 0.0 {
+            self.crossfade_seconds = DEFAULT_OVERLAP_SECS;
+        }
         self.playback_speed = clamp(self.playback_speed, 0.25, 4.0, 1.0);
         self.ambient_intensity = clamp(self.ambient_intensity, 0.0, 1.0, 0.6);
         self.discord_clear_after_pause_min = self.discord_clear_after_pause_min.min(24 * 60);
@@ -388,6 +395,26 @@ impl ConfigManager {
         // single atomic syscall on the filesystems this app ships on, so a
         // reader only ever observes the fully-old or fully-new file.
         crate::secure_fs::write_private(&self.config_path, json.as_bytes()).map_err(|e| e.to_string())
+    }
+}
+
+#[cfg(test)]
+mod overlap_tests {
+    use super::*;
+
+    // Regression: the overlap toggle saved as "on" next to a crossfade of 0,
+    // and nothing happened at all.
+    #[test]
+    fn test_overlap_on_comes_with_a_crossfade_length() {
+        let fixed = AppConfig { crossfade_overlap: true, crossfade_seconds: 0.0, ..AppConfig::default() }.sanitized();
+        assert_eq!(fixed.crossfade_seconds, DEFAULT_OVERLAP_SECS);
+        assert!(fixed.crossfade_overlap);
+
+        let kept = AppConfig { crossfade_overlap: true, crossfade_seconds: 8.0, ..AppConfig::default() }.sanitized();
+        assert_eq!(kept.crossfade_seconds, 8.0);
+
+        let off = AppConfig { crossfade_overlap: false, crossfade_seconds: 0.0, ..AppConfig::default() }.sanitized();
+        assert_eq!(off.crossfade_seconds, 0.0);
     }
 }
 

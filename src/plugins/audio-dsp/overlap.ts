@@ -237,10 +237,15 @@ export class OverlapController {
         overlay.setLevel(0);
         overlay.load(url);
         this.phase = 'ready';
+        this.deps.log('overlap: the next song is loading in the second player');
       },
       (e: unknown) => {
         if (attempt !== this.attempt) return;
-        this.abort(`no stream (${e instanceof Error ? e.message : String(e)})`);
+        const why = e instanceof Error ? e.message : String(e);
+        // Logged even though nothing was playing yet: without it, an overlap
+        // that never happens leaves no trace of why.
+        this.deps.log(`overlap: no stream for the next song (${why})`);
+        this.abort('no stream');
       }
     );
   }

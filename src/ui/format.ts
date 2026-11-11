@@ -20,6 +20,25 @@ export function formatCrossfade(secs: number, offLabel: string): string {
   return `${secs.toFixed(1)} s`;
 }
 
+/** The crossfade length the overlap switches on with when crossfade is off. */
+export const DEFAULT_OVERLAP_SECS = 5;
+
+/**
+ * Overlapping happens inside the crossfade, so it needs one: switching the
+ * overlap on with crossfade off gives it a length, and turning crossfade off
+ * switches the overlap off with it. (The toggle used to save as "on" next to
+ * a crossfade of 0, which did nothing at all.)
+ */
+export function reconcileOverlap(
+  changed: 'overlap' | 'seconds',
+  overlap: boolean,
+  seconds: number
+): { overlap: boolean; seconds: number } {
+  const secs = Number.isFinite(seconds) && seconds > 0 ? seconds : 0;
+  if (!overlap || secs > 0) return { overlap, seconds: secs };
+  return changed === 'overlap' ? { overlap: true, seconds: DEFAULT_OVERLAP_SECS } : { overlap: false, seconds: 0 };
+}
+
 export function getInitials(name: string): string {
   const parts = name.trim().split(/\s+/);
   if (parts.length >= 2) {
