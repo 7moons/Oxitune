@@ -18,6 +18,7 @@ ignore = [
     { id = "RUSTSEC-2026-0098", reason = "same" },
     { id = "RUSTSEC-2026-0099", reason = "same" },
     { id = "RUSTSEC-2026-0104", reason = "same" },
+    { id = "RUSTSEC-2026-0382", reason = "Temporary exception for rustls-webpki 0.102.8 via rumqttc 0.25.1" },
 ]
 
 [licenses]
