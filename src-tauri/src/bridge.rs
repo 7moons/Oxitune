@@ -192,6 +192,12 @@ fn plugin_manager(h: &AppHandle) -> Arc<crate::plugins::PluginManager> {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NextAudioArgs {
+    video_id: String,
+}
+
+#[derive(Deserialize)]
 struct PageLogArgs {
     level: String,
     scope: String,
@@ -431,6 +437,16 @@ bridge_commands! {
     "plugin_fetch" => |h, state, args| {
         let p: PluginFetchArgs = parse_args("plugin_fetch", args)?;
         to_data(plugin_manager(h).fetch(&p.id, &p.url).await?)
+    }
+    // Overlapping crossfade: the next song's stream address (next_audio.rs).
+    // Refused while the setting is off, so the page can't start yt-dlp unasked.
+    "resolve_next_audio" => |h, state, args| {
+        let p: NextAudioArgs = parse_args("resolve_next_audio", args)?;
+        if !state.config_manager.load().crossfade_overlap {
+            return Err("overlap-off".to_string());
+        }
+        let ytdlp = plugin_manager(h).tools.paths().ytdlp;
+        to_data(state.next_audio.resolve(ytdlp, &p.video_id).await?)
     }
     // Returns true when this error switched the plugin off.
     "plugin_media_save" => |h, state, args| {

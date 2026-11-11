@@ -35,6 +35,7 @@ interface AppConfig {
   loudness_normalization: boolean;
   crossfade_seconds: number;
   skip_silence_enabled: boolean;
+  crossfade_overlap: boolean;
   playback_speed: number;
   preserve_pitch: boolean;
   wheel_volume_on_player_page: boolean;
@@ -80,6 +81,7 @@ const TOGGLES: [keyof AppConfig & string, boolean][] = [
   ['lyrics_effects', true],
   ['loudness_normalization', false],
   ['skip_silence_enabled', false],
+  ['crossfade_overlap', false],
   ['preserve_pitch', true],
   ['wheel_volume_on_player_page', false],
   ['ambient_lighting_enabled', true],
@@ -909,6 +911,33 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   initStatsSection(errorMessage);
+  // The overlap is useless without yt-dlp: say so when it is switched on,
+  // and offer to install it (that click is the consent to download it).
+  $<HTMLInputElement>('crossfade_overlap')?.addEventListener('change', async (e) => {
+    const invoke = window.__TAURI__?.core.invoke;
+    if (!(e.target as HTMLInputElement).checked || !invoke) return;
+    try {
+      const status = (await invoke('plugins_media_tools_status')) as { ytdlp: string; installable: boolean };
+      if (status.ytdlp !== 'missing') return;
+      showToast(tr('settings.overlap.needsTool'), {
+        durationMs: 15000,
+        action: status.installable
+          ? {
+              label: tr('settings.overlap.install'),
+              onClick: () => {
+                showToast(tr('settings.overlap.installing'), { durationMs: 60000, id: 'overlap-tools' });
+                invoke('plugins_install_media_tools').then(
+                  () => showToast(tr('plugins.tools.done'), { id: 'overlap-tools' }),
+                  (err: unknown) => showToast(errorMessage(err), { durationMs: 8000, id: 'overlap-tools' })
+                );
+              }
+            }
+          : undefined
+      });
+    } catch (err) {
+      console.error('[Oxitune] Could not check the media tools:', err);
+    }
+  });
   void window.__TAURI__?.core
     .invoke('get_audio_output')
     .then((device) => onOutputDevice((device as OutputDevice | null) ?? null, false))

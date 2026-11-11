@@ -9,6 +9,10 @@ export const MAX_FADE_IN_SECS = 2;
 /** Each tick ramps to the level the song will be at this much later, which
  * joins the ~4 ticks a second into one continuous curve. */
 export const FADE_RAMP_SECS = 0.3;
+/** The longest a held song stays silent, whatever the overlap does. */
+export const MAX_HOLD_MS = 8000;
+/** How fast a held song comes up when it takes over. */
+export const HOLD_RELEASE_SECS = 0.25;
 /** A position at or below this, right after the end of a song, is a restart
  * (repeat one) or the next song before its details arrived. */
 const RESTART_WINDOW_SECS = 1.5;
@@ -85,10 +89,15 @@ export class CrossfadeController {
   private fadingIn = false;
   private lastPosition = -1;
   private inFadeOut = false;
+  /** The next song is already playing in a second player (overlap.ts): this
+   * one starts silent instead of fading in, until `release()`. */
+  private holdNext = false;
+  private heldSinceMs: number | null = null;
 
   constructor(
     private readonly readPlayerDuration: () => number | undefined = playerDuration,
-    private readonly readPlaybackRate: () => number = playbackRate
+    private readonly readPlaybackRate: () => number = playbackRate,
+    private readonly now: () => number = Date.now
   ) {}
 
   public setCrossfadeSeconds(secs: number): void {
@@ -105,7 +114,38 @@ export class CrossfadeController {
     return Math.min(this.crossfadeSeconds, MAX_FADE_IN_SECS);
   }
 
+  /** Whether the song after this fade-out should start silent and wait. */
+  public setHoldNext(hold: boolean): void {
+    this.holdNext = hold;
+  }
+
+  public isHeld(): boolean {
+    return this.heldSinceMs !== null;
+  }
+
+  /** Ends a hold: the song comes up to full level quickly, with no fade-in
+   * (the listener has been hearing it from the other player). */
+  public release(): void {
+    this.holdNext = false;
+    if (this.heldSinceMs === null) return;
+    this.heldSinceMs = null;
+    this.fadingIn = false;
+    AudioEngine.getInstance().setFadeGain(1, HOLD_RELEASE_SECS);
+  }
+
+  private startIncoming(): void {
+    if (this.holdNext) {
+      this.holdNext = false;
+      this.heldSinceMs = this.now();
+      this.fadingIn = false;
+    } else {
+      this.fadingIn = true;
+    }
+  }
+
   private reset(): void {
+    this.holdNext = false;
+    this.heldSinceMs = null;
     this.fadingIn = false;
     this.inFadeOut = false;
     AudioEngine.getInstance().resetFade();
@@ -123,7 +163,13 @@ export class CrossfadeController {
     // the time it is detected (fading it then was a dip, not a fade-in), and
     // one picked up mid-way (resume on launch) just plays at full level.
     const followsFade = this.fadingIn || this.inFadeOut;
-    this.fadingIn = followsFade && track.currentTimeSecs < this.fadeInSeconds();
+    if (this.heldSinceMs !== null) {
+      // Already held from the moment it started playing.
+    } else if (followsFade && track.currentTimeSecs < this.fadeInSeconds()) {
+      this.startIncoming();
+    } else {
+      this.fadingIn = false;
+    }
     this.inFadeOut = false;
     this.lastPosition = track.currentTimeSecs;
 
@@ -139,7 +185,7 @@ export class CrossfadeController {
     // the way. Either way a song is starting, so it fades in from here
     // instead of staying at the silent end of the fade-out.
     if (this.inFadeOut && currentTimeSecs < RESTART_WINDOW_SECS && this.lastPosition > currentTimeSecs) {
-      this.fadingIn = true;
+      this.startIncoming();
       this.inFadeOut = false;
     }
     this.lastPosition = currentTimeSecs;
@@ -147,6 +193,15 @@ export class CrossfadeController {
   }
 
   private apply(positionSecs: number, track: TrackInfo): void {
+    if (this.heldSinceMs !== null) {
+      // Whatever went wrong with the hand-over, the music must come back.
+      if (this.now() - this.heldSinceMs > MAX_HOLD_MS) {
+        this.release();
+      } else {
+        AudioEngine.getInstance().setFadeGain(0, 0.05);
+        return;
+      }
+    }
     const fadeIn = this.fadingIn ? this.fadeInSeconds() : 0;
     if (this.fadingIn && positionSecs >= fadeIn) this.fadingIn = false;
 

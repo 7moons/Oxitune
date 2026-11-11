@@ -140,7 +140,8 @@ export const COMMAND_PERMISSIONS: Record<string, Permission> = {
   toggle_settings_window: 'internal:windows',
   toggle_local_library_window: 'internal:windows',
   toggle_sync_window: 'internal:windows',
-  notify_track_change: 'internal:notify'
+  notify_track_change: 'internal:notify',
+  resolve_next_audio: 'internal:config'
 };
 
 /** App events each permission lets `ctx.events` receive. */

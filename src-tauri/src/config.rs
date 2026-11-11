@@ -51,6 +51,10 @@ pub struct AppConfig {
     pub loudness_normalization: bool,
     pub crossfade_seconds: f64,
     pub skip_silence_enabled: bool,
+    /// Experimental: the next song starts in a second player while the
+    /// current one fades out (needs yt-dlp; `next_audio.rs`).
+    #[serde(default)]
+    pub crossfade_overlap: bool,
     pub playback_speed: f64,
     pub preserve_pitch: bool,
     pub ambient_lighting_enabled: bool,
@@ -195,6 +199,7 @@ impl Default for AppConfig {
             loudness_normalization: false,
             crossfade_seconds: 0.0, // Disabled by default
             skip_silence_enabled: false,
+            crossfade_overlap: false,
             playback_speed: 1.0,
             preserve_pitch: true,
             ambient_lighting_enabled: true,

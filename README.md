@@ -84,6 +84,7 @@ To build it yourself, see [Development](#development).
 | **Audio** | Equalizer | 10 bands (32 Hz to 16 kHz), presets and your own, preamp from −24 to +24 dB, a remembered equalizer per output device (Windows, Linux with PulseAudio or PipeWire) |
 | | Loudness | Quiet songs raised to the level of the rest from YouTube's own loudness figure, with a limiter instead of a compressor |
 | | Transitions | Crossfade (0 to 12 s, a fade through the song change), skip silence at the start and end of songs |
+| | Overlap (experimental) | The next song starts under the end of the current one in a second player, then YouTube Music's player takes over; needs yt-dlp, off by default, falls back to the ordinary crossfade |
 | | Speed | 0.5× to 2×, optionally keeping the pitch |
 | **Desktop** | Media controls | MPRIS on Linux, SMTC on Windows, taskbar preview buttons on Windows |
 | | Discord | Rich Presence with the current song and an optional "Listen along" button |

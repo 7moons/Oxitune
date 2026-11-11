@@ -4,11 +4,17 @@ import { AudioEngine } from './engine';
 import { CrossfadeController } from './crossfade';
 import { SkipSilenceController } from './skip-silence';
 import { LoudnessController } from './loudness';
-import { isSyncGuest } from '../../preload/syncRole';
+import { OverlapController } from './overlap';
+import { createOverlayPlayer } from './overlayPlayer';
+import { nextInQueue } from '../lyrics/songInfo';
+import { PlayerBridge } from '../../preload/bridge';
+import { pageLog } from '../../preload/diagLog';
+import { inSyncRoom, isSyncGuest } from '../../preload/syncRole';
 
 let crossfadeRef: CrossfadeController | null = null;
 let skipSilenceRef: SkipSilenceController | null = null;
 let loudnessRef: LoudnessController | null = null;
+let overlapRef: OverlapController | null = null;
 let cleanup: (() => void) | null = null;
 
 /** Features that only work with YTM's audio routed through the Web Audio
@@ -45,6 +51,35 @@ export const AudioDspPlugin: OxitunePlugin = {
       loudness.setEnabled(enabled);
       if (enabled) loudness.onTrackChange(ctx.track?.videoId);
     };
+    // Experimental: the next song starts in a second player under the
+    // fade-out (overlap.ts). Off unless `crossfade_overlap` is set.
+    const overlap = new OverlapController(
+      {
+        resolve: (videoId) =>
+          ctx.invoke('resolve_next_audio', { videoId }, { timeoutMs: 25000 }).then((url) => {
+            if (typeof url !== 'string' || !url.startsWith('https://')) throw new Error('no stream');
+            return url;
+          }),
+        nextVideoId: () => nextInQueue(document.querySelectorAll('ytmusic-player-queue-item'))?.videoId ?? null,
+        createOverlay: createOverlayPlayer,
+        seekMain: (secs) => PlayerBridge.seekTo(secs),
+        mainState: () => {
+          const v = ctx.getVideoElement();
+          return v ? { paused: v.paused, seeking: v.seeking, readyState: v.readyState, volume: v.volume, muted: v.muted } : null;
+        },
+        playerDuration: () => PlayerBridge.getMoviePlayer()?.getDuration?.(),
+        isAd: () => {
+          const classes = PlayerBridge.getMoviePlayer()?.classList;
+          return !!classes && (classes.contains('ad-showing') || classes.contains('ad-interrupting'));
+        },
+        repeatsOne: () => PlayerBridge.getRepeatMode() === 'one',
+        inRoom: inSyncRoom,
+        now: Date.now,
+        log: (message) => pageLog('info', 'player', message)
+      },
+      crossfade
+    );
+    overlapRef = overlap;
     crossfadeRef = crossfade;
     skipSilenceRef = skipSilence;
 
@@ -91,7 +126,9 @@ export const AudioDspPlugin: OxitunePlugin = {
 
     if (config.crossfade_seconds !== undefined) {
       crossfade.setCrossfadeSeconds(config.crossfade_seconds as number);
+      overlap.setCrossfadeSeconds(config.crossfade_seconds as number);
     }
+    overlap.setEnabled(config.crossfade_overlap === true);
 
     if (config.skip_silence_enabled !== undefined) {
       skipSilence.setEnabled(Boolean(config.skip_silence_enabled));
@@ -134,6 +171,14 @@ export const AudioDspPlugin: OxitunePlugin = {
         listen<number>('set-crossfade-seconds', (e) => {
           if (e.payload > 0) ensureEngine();
           crossfade.setCrossfadeSeconds(e.payload);
+          overlap.setCrossfadeSeconds(e.payload);
+        }),
+        listen<Record<string, unknown>>('config-updated', (e) => {
+          const value = e.payload?.crossfade_overlap;
+          if (typeof value === 'boolean') {
+            if (value) ensureEngine();
+            overlap.setEnabled(value);
+          }
         }),
         listen<boolean>('set-skip-silence', (e) => {
           if (e.payload) ensureEngine();
@@ -154,6 +199,8 @@ export const AudioDspPlugin: OxitunePlugin = {
         checkVideo = null;
       }
       unlistenPromises.forEach((p) => p.then((unlisten) => unlisten()));
+      overlapRef?.destroy();
+      overlapRef = null;
       crossfadeRef?.destroy();
       crossfadeRef = null;
       skipSilenceRef = null;
@@ -165,7 +212,9 @@ export const AudioDspPlugin: OxitunePlugin = {
 
   onTrackChange(track: TrackInfo) {
     AudioEngine.getInstance().applyRateAndPitch();
+    // Crossfade first: the overlap reads whether it holds the new song.
     if (crossfadeRef) crossfadeRef.onTrackChange(track);
+    if (overlapRef) overlapRef.onTrackChange(track);
     if (skipSilenceRef) skipSilenceRef.onTrackChange();
     if (loudnessRef) loudnessRef.onTrackChange(track.videoId);
   },
@@ -174,6 +223,7 @@ export const AudioDspPlugin: OxitunePlugin = {
     if (loudnessRef) loudnessRef.onTick();
     // Crossfade only changes the level, so a room guest fades too.
     if (crossfadeRef) crossfadeRef.onTick(currentTimeSecs, ctx.track);
+    if (overlapRef) overlapRef.onTick(currentTimeSecs, ctx.track);
     // Skip-silence moves the player; a guest follows the host instead.
     if (isSyncGuest()) return;
     if (skipSilenceRef) skipSilenceRef.onTick(currentTimeSecs, ctx.track, ctx.getVideoElement());

@@ -86,6 +86,7 @@ pub const PAGE_CONFIG_KEYS: &[&str] = &[
     "loudness_normalization",
     "crossfade_seconds",
     "skip_silence_enabled",
+    "crossfade_overlap",
     "playback_speed",
     "preserve_pitch",
     "ambient_lighting_enabled",

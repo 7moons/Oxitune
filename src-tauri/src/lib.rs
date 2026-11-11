@@ -24,6 +24,7 @@ pub mod screen_lock;
 pub mod secure_fs;
 pub mod session;
 pub mod shortcuts;
+pub mod next_audio;
 pub mod stats;
 pub mod sync_crypto;
 pub mod sync_room;
@@ -57,6 +58,8 @@ pub struct AppState {
     pub session: session::SessionStore,
     /// Listening statistics, local only (`~/.oxitune/stats.json`).
     pub stats: stats::StatsStore,
+    /// The next song's stream address, for the overlapping crossfade.
+    pub next_audio: next_audio::NextAudio,
     pub lyrics: lyrics::LyricsState,
 }
 
@@ -181,6 +184,7 @@ pub fn run() {
         )),
         logs_dir: logs_dir.clone(),
         session: session_store,
+        next_audio: next_audio::NextAudio::default(),
         stats: stats::StatsStore::new(
             oxitune_dir.clone().unwrap_or_else(|| std::path::PathBuf::from(".")).join("stats.json"),
         ),

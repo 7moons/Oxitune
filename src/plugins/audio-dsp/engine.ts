@@ -40,6 +40,12 @@ export function normalizationGainDb(loudnessDb: number | undefined | null): numb
   return Math.min(MAX_NORMALIZATION_BOOST_DB, -loudnessDb);
 }
 
+/** A second song routed into the graph (`AudioEngine.attachOverlay`). */
+export interface OverlayHandle {
+  setGain: (value: number, rampSecs?: number) => void;
+  detach: () => void;
+}
+
 export class AudioEngine {
   private static instance: AudioEngine | null = null;
   private audioCtx: AudioContext | null = null;
@@ -48,6 +54,9 @@ export class AudioEngine {
   private filters: BiquadFilterNode[] = [];
   private preampNode: GainNode | null = null;
   private normNode: GainNode | null = null;
+  /** Where the (faded) song and an overlapping next song meet, ahead of
+   * the equalizer, so both get the same processing. */
+  private busNode: GainNode | null = null;
   private normDb = 0;
   private fadeNode: GainNode | null = null;
   private analyserNode: AnalyserNode | null = null;
@@ -151,6 +160,8 @@ export class AudioEngine {
       this.fadeNode = this.audioCtx.createGain();
       this.fadeNode.gain.setValueAtTime(1.0, this.audioCtx.currentTime);
 
+      this.busNode = this.audioCtx.createGain();
+
       // 6. Analyser for real-time visualizer & silence detection
       this.analyserNode = this.audioCtx.createAnalyser();
       this.analyserNode.fftSize = 256;
@@ -177,7 +188,7 @@ export class AudioEngine {
   }
 
   public rebuildGraph(): void {
-    if (!this.audioCtx || !this.sourceNode || !this.preampNode || !this.fadeNode || !this.analyserNode || !this.compressorNode || !this.normNode) {
+    if (!this.audioCtx || !this.sourceNode || !this.preampNode || !this.fadeNode || !this.analyserNode || !this.compressorNode || !this.normNode || !this.busNode) {
       return;
     }
 
@@ -189,8 +200,21 @@ export class AudioEngine {
       this.preampNode.disconnect();
       this.fadeNode.disconnect();
       this.analyserNode.disconnect();
+      // Only what leaves the bus: an overlapping song feeding it stays connected.
+      this.busNode.disconnect();
 
-      let lastNode: AudioNode = this.sourceNode;
+      // Analyser on the raw song: skip-silence must measure the song, not
+      // the fade or the equalizer. Measured after the fade, every faded-in
+      // intro read as silence and got fast-forwarded, and every fade-out as
+      // a silent outro.
+      this.sourceNode.connect(this.analyserNode);
+
+      // The fade right behind it, then the bus where an overlapping next
+      // song joins.
+      this.analyserNode.connect(this.fadeNode);
+      this.fadeNode.connect(this.busNode);
+
+      let lastNode: AudioNode = this.busNode;
 
       // Per-song gain first when loudness normalization is on
       if (this.isNormalizing) {
@@ -214,15 +238,7 @@ export class AudioEngine {
         lastNode = this.compressorNode;
       }
 
-      // Analyser before the fade: skip-silence must measure the song, not
-      // the fade. Measured after it, every faded-in intro read as silence
-      // and got fast-forwarded, and every fade-out as a silent outro.
-      lastNode.connect(this.analyserNode);
-      lastNode = this.analyserNode;
-
-      // Route through Crossfade / Fade node, then to the speakers
-      lastNode.connect(this.fadeNode);
-      this.fadeNode.connect(this.audioCtx.destination);
+      lastNode.connect(this.audioCtx.destination);
     } catch (e) {
       console.error('[Oxitune DSP] Graph rebuild error:', e);
     }
@@ -316,6 +332,50 @@ export class AudioEngine {
       param.linearRampToValueAtTime(target, now + rampSecs);
     } else {
       param.setValueAtTime(target, now);
+    }
+  }
+
+  /**
+   * Routes a second media element (the next song, for the overlapping
+   * crossfade) into the graph behind the fade, so it is equalized like the
+   * song itself but not faded with it. The element must be CORS-enabled
+   * (`crossOrigin` set and the server allowing it), or Web Audio plays
+   * silence for it. `null` when there is no graph to join.
+   */
+  public attachOverlay(element: HTMLMediaElement): OverlayHandle | null {
+    const ctx = this.audioCtx;
+    const bus = this.busNode;
+    if (!ctx || !bus) return null;
+    try {
+      const source = ctx.createMediaElementSource(element);
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0, ctx.currentTime);
+      source.connect(gain);
+      gain.connect(bus);
+      let last = 0;
+      return {
+        setGain: (value: number, rampSecs = 0) => {
+          const target = Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
+          if (target === last) return;
+          last = target;
+          const now = ctx.currentTime;
+          gain.gain.cancelScheduledValues(now);
+          gain.gain.setValueAtTime(gain.gain.value, now);
+          if (rampSecs > 0) gain.gain.linearRampToValueAtTime(target, now + rampSecs);
+          else gain.gain.setValueAtTime(target, now);
+        },
+        detach: () => {
+          try {
+            source.disconnect();
+            gain.disconnect();
+          } catch (_) {
+            // the context was closed under it
+          }
+        }
+      };
+    } catch (e) {
+      console.warn('[Oxitune DSP] Could not route the next song into the graph:', e);
+      return null;
     }
   }
 

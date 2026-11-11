@@ -29,6 +29,11 @@ export function setRoomNextOverride(override: (() => boolean) | null): void {
   roomNext = override;
 }
 
+/** In a Listen Together room, as its host or a guest. */
+export function inSyncRoom(): boolean {
+  return guest || roomNext !== null;
+}
+
 export function takeRoomNext(): boolean {
   return roomNext?.() ?? false;
 }
