@@ -3,10 +3,12 @@ import manifest from './manifest.json';
 import { AudioEngine } from './engine';
 import { CrossfadeController } from './crossfade';
 import { SkipSilenceController } from './skip-silence';
+import { LoudnessController } from './loudness';
 import { isSyncGuest } from '../../preload/syncRole';
 
 let crossfadeRef: CrossfadeController | null = null;
 let skipSilenceRef: SkipSilenceController | null = null;
+let loudnessRef: LoudnessController | null = null;
 let cleanup: (() => void) | null = null;
 
 /** Features that only work with YTM's audio routed through the Web Audio
@@ -36,6 +38,13 @@ export const AudioDspPlugin: OxitunePlugin = {
     const crossfade = new CrossfadeController();
     const skipSilence = new SkipSilenceController();
 
+    const loudness = new LoudnessController();
+    loudnessRef = loudness;
+    const setNormalization = (enabled: boolean) => {
+      engine.setLoudnessNormalization(enabled);
+      loudness.setEnabled(enabled);
+      if (enabled) loudness.onTrackChange(ctx.track?.videoId);
+    };
     crossfadeRef = crossfade;
     skipSilenceRef = skipSilence;
 
@@ -77,7 +86,7 @@ export const AudioDspPlugin: OxitunePlugin = {
     }
 
     if (config.loudness_normalization !== undefined) {
-      engine.setLoudnessNormalization(Boolean(config.loudness_normalization));
+      setNormalization(Boolean(config.loudness_normalization));
     }
 
     if (config.crossfade_seconds !== undefined) {
@@ -120,7 +129,7 @@ export const AudioDspPlugin: OxitunePlugin = {
         }),
         listen<boolean>('set-loudness-normalization', (e) => {
           if (e.payload) ensureEngine();
-          engine.setLoudnessNormalization(e.payload);
+          setNormalization(e.payload);
         }),
         listen<number>('set-crossfade-seconds', (e) => {
           if (e.payload > 0) ensureEngine();
@@ -148,6 +157,7 @@ export const AudioDspPlugin: OxitunePlugin = {
       crossfadeRef?.destroy();
       crossfadeRef = null;
       skipSilenceRef = null;
+      loudnessRef = null;
     };
 
     console.log('[Oxitune] Audio DSP, Equalizer, Crossfade & Speed controls active.');
@@ -157,9 +167,11 @@ export const AudioDspPlugin: OxitunePlugin = {
     AudioEngine.getInstance().applyRateAndPitch();
     if (crossfadeRef) crossfadeRef.onTrackChange(track);
     if (skipSilenceRef) skipSilenceRef.onTrackChange();
+    if (loudnessRef) loudnessRef.onTrackChange(track.videoId);
   },
 
   onTick(currentTimeSecs: number, ctx: PluginContext) {
+    if (loudnessRef) loudnessRef.onTick();
     // Crossfade only changes the level, so a room guest fades too.
     if (crossfadeRef) crossfadeRef.onTick(currentTimeSecs, ctx.track);
     // Skip-silence moves the player; a guest follows the host instead.

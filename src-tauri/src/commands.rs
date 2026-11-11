@@ -237,6 +237,43 @@ pub async fn export_settings(app_handle: AppHandle, state: State<'_, Arc<AppStat
     Ok(true)
 }
 
+/// Listening statistics for the Settings window: the top songs and artists
+/// and the last 30 days.
+#[tauri::command]
+pub fn get_listening_stats(state: State<'_, Arc<AppState>>) -> crate::stats::Summary {
+    state.stats.summary(25, 30)
+}
+
+/// Forgets every statistic (the file is removed).
+#[tauri::command]
+pub fn clear_listening_stats(state: State<'_, Arc<AppState>>) {
+    state.stats.clear();
+}
+
+/// Saves everything counted so far to a file the user picks; `false` when
+/// they cancel.
+#[tauri::command]
+pub async fn export_listening_stats(app_handle: AppHandle, state: State<'_, Arc<AppState>>) -> Result<bool, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let json = state.stats.export_json()?;
+    let handle = app_handle.clone();
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        handle
+            .dialog()
+            .file()
+            .add_filter("JSON", &["json"])
+            .set_file_name("oxitune-listening-stats.json")
+            .blocking_save_file()
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    let Some(path) = picked.and_then(|p| p.into_path().ok()) else {
+        return Ok(false);
+    };
+    std::fs::write(&path, json).map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
 /// Replaces all settings with a backup file the user picks and applies
 /// what can be applied right away (shortcuts). Returns the new settings for
 /// the Settings window to show and push live; `None` when they cancel.
@@ -278,6 +315,7 @@ pub fn update_track_info(
     // Update internal state
     *state.current_track.lock() = Some(track.clone());
     state.session.record(&track);
+    state.stats.record(&track, config.stats_enabled);
 
     // Update Discord RPC if enabled
     if config.discord_rpc_enabled {

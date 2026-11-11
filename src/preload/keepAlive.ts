@@ -52,6 +52,13 @@ export function findYouThereConfirm(root: PromptRoot): HTMLElement | null {
 }
 
 let started = false;
+let enabled = true;
+
+/** The "Don't ask if I'm still listening" setting; on until the config says
+ * otherwise, so the first song after launch is covered too. */
+export function setKeepAliveEnabled(on: boolean): void {
+  enabled = on;
+}
 
 export function startKeepAlive(): void {
   if (started) return;
@@ -65,13 +72,14 @@ export function startKeepAlive(): void {
 
   // Only while something plays: a paused, forgotten app is really idle.
   const refresh = () => {
-    if (isPlaying()) touchActivity(activity, Date.now());
+    if (enabled && isPlaying()) touchActivity(activity, Date.now());
   };
   const refreshTimer = setInterval(refresh, ACTIVITY_REFRESH_MS);
   // The prompt is scheduled when a song starts; be fresh at that moment too.
   document.addEventListener('playing', refresh, true);
 
   const dismiss = () => {
+    if (!enabled) return;
     const button = findYouThereConfirm(document);
     if (!button) return;
     touchActivity(activity, Date.now());

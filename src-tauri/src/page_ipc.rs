@@ -92,6 +92,7 @@ pub const PAGE_CONFIG_KEYS: &[&str] = &[
     "ambient_intensity",
     "inhibit_sleep",
     "pause_on_lock",
+    "keep_playing_when_idle",
     // The welcome window is done: the page shows its one-time tips.
     "onboarding_done",
 ];

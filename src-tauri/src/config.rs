@@ -64,6 +64,13 @@ pub struct AppConfig {
     pub remote_bind: String,
     pub inhibit_sleep: bool,
     pub pause_on_lock: bool,
+    /// Answer YouTube Music's "Video paused. Continue watching?" for the
+    /// user, so music left playing in the background isn't stopped by it.
+    #[serde(default = "default_true")]
+    pub keep_playing_when_idle: bool,
+    /// Count what is listened to (`stats.rs`); it stays on this computer.
+    #[serde(default = "default_true")]
+    pub stats_enabled: bool,
     /// Reopen the last song at its position when the app starts.
     #[serde(default = "default_true")]
     pub resume_on_launch: bool,
@@ -73,6 +80,10 @@ pub struct AppConfig {
     /// Equalizer presets the user saved; picked by `equalizer_preset` = id.
     #[serde(default)]
     pub equalizer_custom_presets: Vec<CustomEqPreset>,
+    /// The equalizer to switch to when an output device becomes the default
+    /// one, by the device's id (`audio_output.rs`).
+    #[serde(default)]
+    pub equalizer_device_profiles: BTreeMap<String, DeviceEqProfile>,
     /// Global shortcut per player action (`crate::shortcuts::ACTIONS`), as
     /// an accelerator string; empty = no shortcut.
     #[serde(default = "crate::shortcuts::default_shortcuts")]
@@ -122,7 +133,22 @@ pub struct CustomEqPreset {
     pub preamp: f64,
 }
 
+/// The equalizer remembered for one output device.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DeviceEqProfile {
+    /// The device's name when the profile was saved, for display.
+    #[serde(default)]
+    pub name: String,
+    pub preset: String,
+    pub gains: Vec<f64>,
+    #[serde(default)]
+    pub preamp: f64,
+}
+
 const EQ_BANDS: usize = 10;
+const MAX_DEVICE_PROFILES: usize = 16;
+const MAX_DEVICE_ID_CHARS: usize = 300;
+const MAX_DEVICE_NAME_CHARS: usize = 80;
 const MAX_CUSTOM_PRESETS: usize = 30;
 const MAX_PRESET_NAME_CHARS: usize = 40;
 const MAX_ACCELERATOR_LEN: usize = 64;
@@ -180,9 +206,12 @@ impl Default for AppConfig {
             remote_bind: default_remote_bind(),
             inhibit_sleep: true,
             pause_on_lock: true,
+            keep_playing_when_idle: true,
+            stats_enabled: true,
             resume_on_launch: true,
             resume_autoplay: false,
             equalizer_custom_presets: Vec::new(),
+            equalizer_device_profiles: BTreeMap::new(),
             shortcuts: crate::shortcuts::default_shortcuts(),
             onboarding_done: false,
         }
@@ -259,6 +288,24 @@ impl AppConfig {
                 *gain = clamp(*gain, -24.0, 24.0, 0.0);
             }
             preset.preamp = clamp(preset.preamp, -24.0, 24.0, 0.0);
+        }
+
+        // Device profiles: a bounded number, sane ids, one gain per band.
+        self.equalizer_device_profiles
+            .retain(|id, _| !id.is_empty() && id.len() <= MAX_DEVICE_ID_CHARS && !id.chars().any(char::is_control));
+        while self.equalizer_device_profiles.len() > MAX_DEVICE_PROFILES {
+            self.equalizer_device_profiles.pop_last();
+        }
+        for profile in self.equalizer_device_profiles.values_mut() {
+            profile.name = profile.name.trim().chars().filter(|c| !c.is_control()).take(MAX_DEVICE_NAME_CHARS).collect();
+            if profile.preset.is_empty() || profile.preset.len() > 40 {
+                profile.preset = "custom".to_string();
+            }
+            profile.gains.resize(EQ_BANDS, 0.0);
+            for gain in profile.gains.iter_mut() {
+                *gain = clamp(*gain, -24.0, 24.0, 0.0);
+            }
+            profile.preamp = clamp(profile.preamp, -24.0, 24.0, 0.0);
         }
 
         // Shortcuts: only known actions, every action present (missing ones

@@ -351,6 +351,12 @@
           "markdownDescription": "Enables the check_for_updates command without any pre-configured scope."
         },
         {
+          "description": "Enables the clear_listening_stats command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-clear-listening-stats",
+          "markdownDescription": "Enables the clear_listening_stats command without any pre-configured scope."
+        },
+        {
           "description": "Enables the clear_lyrics_cache command without any pre-configured scope.",
           "type": "string",
           "const": "allow-clear-lyrics-cache",
@@ -381,6 +387,12 @@
           "markdownDescription": "Enables the end_sync_room command without any pre-configured scope."
         },
         {
+          "description": "Enables the export_listening_stats command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-export-listening-stats",
+          "markdownDescription": "Enables the export_listening_stats command without any pre-configured scope."
+        },
+        {
           "description": "Enables the export_settings command without any pre-configured scope.",
           "type": "string",
           "const": "allow-export-settings",
@@ -397,6 +409,12 @@
           "type": "string",
           "const": "allow-get-app-version",
           "markdownDescription": "Enables the get_app_version command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_audio_output command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-audio-output",
+          "markdownDescription": "Enables the get_audio_output command without any pre-configured scope."
         },
         {
           "description": "Enables the get_config command without any pre-configured scope.",
@@ -421,6 +439,12 @@
           "type": "string",
           "const": "allow-get-discord-invite",
           "markdownDescription": "Enables the get_discord_invite command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_listening_stats command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-listening-stats",
+          "markdownDescription": "Enables the get_listening_stats command without any pre-configured scope."
         },
         {
           "description": "Enables the get_remote_info command without any pre-configured scope.",
@@ -735,6 +759,12 @@
           "markdownDescription": "Denies the check_for_updates command without any pre-configured scope."
         },
         {
+          "description": "Denies the clear_listening_stats command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-clear-listening-stats",
+          "markdownDescription": "Denies the clear_listening_stats command without any pre-configured scope."
+        },
+        {
           "description": "Denies the clear_lyrics_cache command without any pre-configured scope.",
           "type": "string",
           "const": "deny-clear-lyrics-cache",
@@ -765,6 +795,12 @@
           "markdownDescription": "Denies the end_sync_room command without any pre-configured scope."
         },
         {
+          "description": "Denies the export_listening_stats command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-export-listening-stats",
+          "markdownDescription": "Denies the export_listening_stats command without any pre-configured scope."
+        },
+        {
           "description": "Denies the export_settings command without any pre-configured scope.",
           "type": "string",
           "const": "deny-export-settings",
@@ -781,6 +817,12 @@
           "type": "string",
           "const": "deny-get-app-version",
           "markdownDescription": "Denies the get_app_version command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_audio_output command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-audio-output",
+          "markdownDescription": "Denies the get_audio_output command without any pre-configured scope."
         },
         {
           "description": "Denies the get_config command without any pre-configured scope.",
@@ -805,6 +847,12 @@
           "type": "string",
           "const": "deny-get-discord-invite",
           "markdownDescription": "Denies the get_discord_invite command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_listening_stats command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-listening-stats",
+          "markdownDescription": "Denies the get_listening_stats command without any pre-configured scope."
         },
         {
           "description": "Denies the get_remote_info command without any pre-configured scope.",

@@ -1,5 +1,6 @@
 #[cfg(test)]
 mod acl_tests;
+pub mod audio_output;
 pub mod bridge;
 pub mod commands;
 pub mod config;
@@ -23,6 +24,7 @@ pub mod screen_lock;
 pub mod secure_fs;
 pub mod session;
 pub mod shortcuts;
+pub mod stats;
 pub mod sync_crypto;
 pub mod sync_room;
 pub mod thumbbar;
@@ -53,6 +55,8 @@ pub struct AppState {
     pub logs_dir: std::path::PathBuf,
     /// Last song and position, for resume on launch (`~/.oxitune/session.json`).
     pub session: session::SessionStore,
+    /// Listening statistics, local only (`~/.oxitune/stats.json`).
+    pub stats: stats::StatsStore,
     pub lyrics: lyrics::LyricsState,
 }
 
@@ -177,6 +181,9 @@ pub fn run() {
         )),
         logs_dir: logs_dir.clone(),
         session: session_store,
+        stats: stats::StatsStore::new(
+            oxitune_dir.clone().unwrap_or_else(|| std::path::PathBuf::from(".")).join("stats.json"),
+        ),
         lyrics: lyrics::LyricsState::new(
             oxitune_dir.clone().unwrap_or_else(|| std::path::PathBuf::from(".")),
         ),
@@ -305,6 +312,7 @@ pub fn run() {
             // elsewhere). Replaces the page's `document.hidden` check, which
             // also fired on minimize/hide-to-tray.
             screen_lock::start(handle.clone());
+            audio_output::start(handle.clone());
 
             // The music.youtube.com page's event feed (page_ipc.rs).
             page_ipc::start_relay(&handle);
@@ -452,6 +460,7 @@ pub fn run() {
                 if window.label() == "main" {
                     let state = window.state::<Arc<AppState>>();
                     state.session.flush();
+                    state.stats.flush();
                     let config = state.config_manager.load();
                     if config.close_to_tray {
                         api.prevent_close();
@@ -476,6 +485,7 @@ pub fn run() {
             commands::oxitune_subscribe,
             commands::retry_connection,
             commands::get_config,
+            audio_output::get_audio_output,
             commands::save_config,
             commands::finish_onboarding,
             commands::open_welcome_window,
@@ -510,6 +520,9 @@ pub fn run() {
             commands::reset_shortcuts,
             commands::open_logs_folder,
             commands::export_settings,
+            commands::get_listening_stats,
+            commands::clear_listening_stats,
+            commands::export_listening_stats,
             commands::import_settings,
             commands::get_remote_info,
             commands::regenerate_remote_token,
@@ -541,7 +554,9 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
-                app.state::<Arc<AppState>>().session.flush();
+                let state = app.state::<Arc<AppState>>();
+                state.session.flush();
+                state.stats.flush();
             }
         });
 }

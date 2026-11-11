@@ -1,7 +1,7 @@
 import { PlayerObserver } from './observer';
 import { PlayerBridge } from './bridge';
 import { startResume } from './resume';
-import { startKeepAlive } from './keepAlive';
+import { setKeepAliveEnabled, startKeepAlive } from './keepAlive';
 import { HostContext, PluginRegistry } from '../plugins/registry';
 import {
   ExternalPlugin,
@@ -131,6 +131,8 @@ async function initOxitune() {
       configLoaded = true;
     }
   }
+
+  setKeepAliveEnabled(config.keep_playing_when_idle !== false);
 
   // Everything plugins can do; each gets the slice its manifest grants
   // (plugins/registry.ts `scopedContext`).
@@ -313,6 +315,7 @@ async function initOxitune() {
   // the change for free since `config` is mutated in place, not reassigned.
   const applyConfig = (payload: Record<string, unknown>) => {
     Object.assign(config, payload);
+    setKeepAliveEnabled(config.keep_playing_when_idle !== false);
     const toggles = configToggleMap(config);
     for (const [pluginId, shouldBeEnabled] of Object.entries(toggles)) {
       if (shouldBeEnabled) {

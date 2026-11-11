@@ -13,6 +13,7 @@ export type MoviePlayer = HTMLElement & {
     | {
         playabilityStatus?: { status?: string; reason?: string };
         videoDetails?: { videoId?: string };
+        playerConfig?: { audioConfig?: { loudnessDb?: number } };
         microformat?: { microformatDataRenderer?: { tags?: unknown } };
       }
     | undefined;

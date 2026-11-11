@@ -17,6 +17,29 @@ export function clampPlaybackRate(rate: number): number {
   return Math.max(0.5, Math.min(2.0, rate));
 }
 
+/** The limiter that follows a normalization boost. */
+export const LIMITER_THRESHOLD_DB = -1.5;
+export const LIMITER_RATIO = 20;
+/** The most a quiet song is raised. */
+export const MAX_NORMALIZATION_BOOST_DB = 9;
+
+/** The make-up gain a Web Audio compressor adds by itself (it cannot be
+ * switched off): (1 / gain of a full-scale signal) ^ 0.6, here in dB. */
+export function limiterMakeupDb(thresholdDb: number, ratio: number): number {
+  return -0.6 * (thresholdDb - thresholdDb / ratio);
+}
+
+/**
+ * How much to raise a song so quiet ones match the rest. `loudnessDb` is
+ * YouTube's own measurement of the song against its reference level: the
+ * player already turns down songs above it (positive values), but leaves the
+ * quiet ones quiet. Unknown loudness changes nothing.
+ */
+export function normalizationGainDb(loudnessDb: number | undefined | null): number {
+  if (typeof loudnessDb !== 'number' || !Number.isFinite(loudnessDb) || loudnessDb >= 0) return 0;
+  return Math.min(MAX_NORMALIZATION_BOOST_DB, -loudnessDb);
+}
+
 export class AudioEngine {
   private static instance: AudioEngine | null = null;
   private audioCtx: AudioContext | null = null;
@@ -24,6 +47,8 @@ export class AudioEngine {
   private compressorNode: DynamicsCompressorNode | null = null;
   private filters: BiquadFilterNode[] = [];
   private preampNode: GainNode | null = null;
+  private normNode: GainNode | null = null;
+  private normDb = 0;
   private fadeNode: GainNode | null = null;
   private analyserNode: AnalyserNode | null = null;
   private isInitialized = false;
@@ -89,13 +114,17 @@ export class AudioEngine {
       // 1. Source node from video
       this.sourceNode = this.audioCtx.createMediaElementSource(video);
 
-      // 2. Dynamics compressor for Loudness Normalization
+      // 2. Loudness normalization: a per-song gain (see normalizationGainDb)
+      // and a limiter behind it that only catches the peaks a boost pushes
+      // over full scale. This used to be one heavy compressor on every song,
+      // which evened songs out by squashing the dynamics inside each of them.
+      this.normNode = this.audioCtx.createGain();
       this.compressorNode = this.audioCtx.createDynamicsCompressor();
-      this.compressorNode.threshold.setValueAtTime(-24, this.audioCtx.currentTime);
-      this.compressorNode.knee.setValueAtTime(30, this.audioCtx.currentTime);
-      this.compressorNode.ratio.setValueAtTime(12, this.audioCtx.currentTime);
-      this.compressorNode.attack.setValueAtTime(0.003, this.audioCtx.currentTime);
-      this.compressorNode.release.setValueAtTime(0.25, this.audioCtx.currentTime);
+      this.compressorNode.threshold.setValueAtTime(LIMITER_THRESHOLD_DB, this.audioCtx.currentTime);
+      this.compressorNode.knee.setValueAtTime(0, this.audioCtx.currentTime);
+      this.compressorNode.ratio.setValueAtTime(LIMITER_RATIO, this.audioCtx.currentTime);
+      this.compressorNode.attack.setValueAtTime(0.002, this.audioCtx.currentTime);
+      this.compressorNode.release.setValueAtTime(0.1, this.audioCtx.currentTime);
 
       // 3. 10-band Equalizer Filters
       this.filters = EQ_FREQUENCIES.map((freq, idx) => {
@@ -131,6 +160,7 @@ export class AudioEngine {
       this.rebuildGraph();
       this.setAllGains(this.gains);
       this.setPreamp(this.preampDb);
+      this.setNormalizationDb(this.normDb, 0);
       this.applyRateAndPitch();
 
       // Ensure AudioContext resumes upon playback
@@ -147,13 +177,14 @@ export class AudioEngine {
   }
 
   public rebuildGraph(): void {
-    if (!this.audioCtx || !this.sourceNode || !this.preampNode || !this.fadeNode || !this.analyserNode || !this.compressorNode) {
+    if (!this.audioCtx || !this.sourceNode || !this.preampNode || !this.fadeNode || !this.analyserNode || !this.compressorNode || !this.normNode) {
       return;
     }
 
     try {
       this.sourceNode.disconnect();
       this.compressorNode.disconnect();
+      this.normNode.disconnect();
       this.filters.forEach((f) => f.disconnect());
       this.preampNode.disconnect();
       this.fadeNode.disconnect();
@@ -161,10 +192,10 @@ export class AudioEngine {
 
       let lastNode: AudioNode = this.sourceNode;
 
-      // Route through compressor if loudness normalization enabled
+      // Per-song gain first when loudness normalization is on
       if (this.isNormalizing) {
-        lastNode.connect(this.compressorNode);
-        lastNode = this.compressorNode;
+        lastNode.connect(this.normNode);
+        lastNode = this.normNode;
       }
 
       // Route through 10-band EQ filters
@@ -176,6 +207,12 @@ export class AudioEngine {
       // Route through Preamp Gain
       lastNode.connect(this.preampNode);
       lastNode = this.preampNode;
+
+      // The limiter last, so it also catches what the EQ and preamp add
+      if (this.isNormalizing) {
+        lastNode.connect(this.compressorNode);
+        lastNode = this.compressorNode;
+      }
 
       // Analyser before the fade: skip-silence must measure the song, not
       // the fade. Measured after it, every faded-in intro read as silence
@@ -230,6 +267,24 @@ export class AudioEngine {
       this.isNormalizing = enabled;
       this.rebuildGraph();
     }
+  }
+
+  /** The current song's normalization gain in dB (0 = leave it alone). The
+   * limiter's built-in make-up gain is taken back out here. */
+  public setNormalizationDb(gainDb: number, rampSecs = 0.2): void {
+    this.normDb = Math.max(0, Math.min(MAX_NORMALIZATION_BOOST_DB, Number.isFinite(gainDb) ? gainDb : 0));
+    if (!this.normNode || !this.audioCtx) return;
+    const linear = Math.pow(10, (this.normDb - limiterMakeupDb(LIMITER_THRESHOLD_DB, LIMITER_RATIO)) / 20);
+    const param = this.normNode.gain;
+    const now = this.audioCtx.currentTime;
+    param.cancelScheduledValues(now);
+    param.setValueAtTime(param.value, now);
+    if (rampSecs > 0) param.linearRampToValueAtTime(linear, now + rampSecs);
+    else param.setValueAtTime(linear, now);
+  }
+
+  public getNormalizationDb(): number {
+    return this.normDb;
   }
 
   public applyPreset(presetId: string): number[] {

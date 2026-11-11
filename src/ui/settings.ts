@@ -10,6 +10,8 @@ import { initWindowChrome, onBeforeClose } from './window';
 import { initPluginsSection } from './plugins';
 import { normalizeProviders, ProviderSetting, renderProviderList } from './lyricsProviders';
 import { openLyricsCacheBrowser } from './lyricsCache';
+import { initStatsSection } from './stats';
+import { DeviceProfiles, OutputDevice, hasDeviceProfile, withDeviceProfile } from './eqDevices';
 
 interface AppConfig {
   close_to_tray: boolean;
@@ -45,9 +47,12 @@ interface AppConfig {
   remote_port: number;
   inhibit_sleep: boolean;
   pause_on_lock: boolean;
+  keep_playing_when_idle: boolean;
+  stats_enabled: boolean;
   resume_on_launch: boolean;
   resume_autoplay: boolean;
   equalizer_custom_presets?: CustomEqPreset[];
+  equalizer_device_profiles?: DeviceProfiles;
   shortcuts?: Record<string, string>;
   // Every other field of the backend's AppConfig round-trips untouched.
   [key: string]: unknown;
@@ -81,6 +86,8 @@ const TOGGLES: [keyof AppConfig & string, boolean][] = [
   ['remote_enabled', false],
   ['inhibit_sleep', true],
   ['pause_on_lock', true],
+  ['keep_playing_when_idle', true],
+  ['stats_enabled', true],
   ['resume_on_launch', true],
   ['resume_autoplay', false]
 ];
@@ -88,6 +95,44 @@ const TOGGLES: [keyof AppConfig & string, boolean][] = [
 const SAVE_DEBOUNCE_MS = 500;
 
 let currentConfig: AppConfig | null = null;
+/** The system's default output device, when the backend can tell. */
+let outputDevice: OutputDevice | null = null;
+
+/** Shows the "remember for this output" row for the current device. */
+function syncDeviceRow() {
+  const row = $('eq-device-row');
+  const toggle = $<HTMLInputElement>('eq-device-remember');
+  if (!row || !toggle) return;
+  row.classList.toggle('is-hidden', !outputDevice);
+  if (!outputDevice) return;
+  const desc = $('eq-device-desc');
+  if (desc) desc.textContent = tr('settings.eqDevice.desc', { device: outputDevice.name });
+  toggle.checked = hasDeviceProfile(currentConfig?.equalizer_device_profiles, outputDevice);
+}
+
+/** The output changed (or the window just opened). The backend has already
+ * applied and saved that device's equalizer, so what is on disk is shown
+ * rather than what this window last knew. */
+async function onOutputDevice(device: OutputDevice | null, reload: boolean) {
+  const changed = device?.id !== outputDevice?.id;
+  outputDevice = device;
+  if (reload && changed && window.__TAURI__?.core) {
+    if (saveTimer !== null) {
+      clearTimeout(saveTimer);
+      saveTimer = null;
+    }
+    try {
+      const config = (await window.__TAURI__.core.invoke('get_config')) as AppConfig;
+      applyConfig(config);
+      if (device && hasDeviceProfile(config.equalizer_device_profiles, device)) {
+        showToast(tr('settings.eqDevice.applied', { device: device.name }));
+      }
+    } catch (e) {
+      console.error('[Oxitune] Failed to reload settings after an output change:', e);
+    }
+  }
+  syncDeviceRow();
+}
 let lyricsProviders: ProviderSetting[] = normalizeProviders(undefined);
 
 /** Languages lyrics can be translated into, named in the app's language. */
@@ -494,6 +539,7 @@ function applyConfig(config: AppConfig) {
   renderTranslateLangs(config.lyrics_translate_lang || 'en');
   const lyricsTheme = $<HTMLSelectElement>('lyrics_theme');
   if (lyricsTheme) lyricsTheme.value = config.lyrics_theme || 'classic';
+  syncDeviceRow();
 }
 
 /** After an import: every live effect the settings drive, pushed to the
@@ -537,6 +583,18 @@ function collectConfig(config: AppConfig): AppConfig {
     : config.wheel_volume_step ?? 0.05;
   next.equalizer_gains = [...currentGains];
   next.equalizer_custom_presets = customPresets;
+  const remember = $<HTMLInputElement>('eq-device-remember');
+  const profiles = withDeviceProfile(config.equalizer_device_profiles, outputDevice, remember?.checked === true, {
+    preset: next.equalizer_preset,
+    gains: next.equalizer_gains,
+    preamp: next.preamp_gain
+  });
+  if (profiles) {
+    next.equalizer_device_profiles = profiles;
+  } else {
+    if (remember) remember.checked = false;
+    showToast(tr('settings.eqDevice.limit'));
+  }
   next.shortcuts = shortcuts;
   next.lyrics_providers = lyricsProviders;
   next.lyrics_translate_lang = $<HTMLSelectElement>('lyrics_translate_lang')?.value || next.lyrics_translate_lang;
@@ -850,6 +908,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  initStatsSection(errorMessage);
+  void window.__TAURI__?.core
+    .invoke('get_audio_output')
+    .then((device) => onOutputDevice((device as OutputDevice | null) ?? null, false))
+    .catch(() => undefined);
+  void window.__TAURI__?.event.listen<OutputDevice | null>('audio-output-changed', (e) => {
+    void onOutputDevice(e.payload ?? null, true);
+  });
   $('lyrics-cache-browse-btn')?.addEventListener('click', () => void openLyricsCacheBrowser());
   $('lyrics-cache-clear-btn')?.addEventListener('click', async () => {
     try {

@@ -81,14 +81,15 @@ To build it yourself, see [Development](#development).
 
 | | Feature | What you get |
 | --- | --- | --- |
-| **Audio** | Equalizer | 10 bands (32 Hz to 16 kHz), presets and your own, preamp from −24 to +24 dB |
-| | Loudness | Normalization so quiet and loud tracks sit together |
-| | Transitions | Crossfade (0 to 12 s), skip silence at the start and end of songs |
+| **Audio** | Equalizer | 10 bands (32 Hz to 16 kHz), presets and your own, preamp from −24 to +24 dB, a remembered equalizer per output device (Windows, Linux with PulseAudio or PipeWire) |
+| | Loudness | Quiet songs raised to the level of the rest from YouTube's own loudness figure, with a limiter instead of a compressor |
+| | Transitions | Crossfade (0 to 12 s, a fade through the song change), skip silence at the start and end of songs |
 | | Speed | 0.5× to 2×, optionally keeping the pitch |
 | **Desktop** | Media controls | MPRIS on Linux, SMTC on Windows, taskbar preview buttons on Windows |
 | | Discord | Rich Presence with the current song and an optional "Listen along" button |
 | | Everyday | Tray menu, configurable global shortcuts, notifications, scroll-wheel volume |
-| | Behaviour | Sleep inhibition while playing, pause on screen lock, resume the last song, optional autostart |
+| | Behaviour | Sleep inhibition while playing, pause on screen lock, resume the last song, optional autostart, no "Continue watching?" pauses |
+| | Listening stats | Time listened, plays, top songs and artists and the last 30 days, kept on your computer only; export or delete anytime |
 | | Robustness | Single instance, an offline screen that retries by itself, crash reports in the logs folder |
 | | First launch | A short welcome that sets up the essentials and says what goes online, then tips in YouTube Music; again anytime from Settings → About |
 | **Lyrics** | Sources | Local `.lrc` and tags, lrc.red, LRCLIB, YouTube Music, Genius; Unison, Musixmatch and NetEase optional |
