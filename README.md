@@ -11,21 +11,28 @@
 
 <p align="center">
   <a href="https://github.com/7moons/Oxitune/actions/workflows/ci.yml"><img src="https://github.com/7moons/Oxitune/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://github.com/7moons/Oxitune/releases/latest"><img src="https://img.shields.io/github/v/release/7moons/Oxitune.svg" alt="release"></a>
-  <a href="https://github.com/7moons/Oxitune/releases"><img src="https://img.shields.io/github/downloads/7moons/Oxitune/total.svg" alt="downloads"></a>
-  <img src="https://img.shields.io/badge/platform-Linux%20%7C%20Windows-informational.svg" alt="Linux and Windows">
-  <img src="https://img.shields.io/badge/built%20with-Tauri%20v2-24C8DB.svg" alt="Tauri v2">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--only-blue.svg" alt="GPL-3.0-only"></a>
+  <a href="https://github.com/7moons/Oxitune/releases/latest"><img src="https://img.shields.io/github/v/release/7moons/Oxitune?style=flat-square&amp;color=3f3f46" alt="release"></a>
+  <a href="https://github.com/7moons/Oxitune/releases"><img src="https://img.shields.io/github/downloads/7moons/Oxitune/total?style=flat-square&amp;color=3f3f46" alt="downloads"></a>
+  <img src="https://img.shields.io/badge/platform-Linux%20%7C%20Windows-3f3f46?style=flat-square" alt="Linux and Windows">
+  <img src="https://img.shields.io/badge/Tauri-v2-3f3f46?style=flat-square&amp;logo=tauri&amp;logoColor=white" alt="Tauri v2">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--only-3f3f46?style=flat-square" alt="GPL-3.0-only"></a>
 </p>
 
 <p align="center">
   <a href="#install">Install</a> ·
   <a href="#features">Features</a> ·
+  <a href="#screenshots">Screenshots</a> ·
   <a href="#plugins">Plugins</a> ·
   <a href="#how-it-compares">Comparison</a> ·
   <a href="#security">Security</a> ·
   <a href="#limits">Limits</a> ·
+  <a href="#development">Development</a> ·
   <a href="#legal">Legal</a>
+</p>
+
+<p align="center">
+  <a href="docs/images/cinema.webp"><img src="docs/images/cinema.webp" width="1000" alt="Oxitune playing a song in cinema mode with ambient lighting"></a><br>
+  <sub>Cinema mode with ambient lighting. Open the image to see the full 1600 × 1000 capture.</sub>
 </p>
 
 | **7.4 MB** | **16 MB** | **~530 ms** | **357 MB** |
@@ -108,6 +115,27 @@ To build it yourself, see [Development](#development).
 | | Backup | Export every setting to one file and import it elsewhere |
 
 English and Polish, following the system or YouTube Music language.
+
+## Screenshots
+
+Captured from Oxitune 0.4.0 on Linux, in English and signed out of YouTube Music,
+with a song playing. Listen Together shows its setup window, not an active session.
+Click an image to open the original capture.
+
+<table>
+  <tr>
+    <td width="50%" align="center" valign="top"><a href="docs/images/cinema.webp"><img src="docs/images/cinema.webp" width="480" alt="Player in cinema mode with ambient lighting"></a><br><sub><b>Cinema + ambient</b><br>The player with cover-based background lighting.</sub></td>
+    <td width="50%" align="center" valign="top"><a href="docs/images/mini-player.webp"><img src="docs/images/mini-player.webp" width="240" alt="Mini player showing the current song and playback controls"></a><br><sub><b>Mini player</b><br>The current song and playback controls in a compact window.</sub></td>
+  </tr>
+  <tr>
+    <td align="center" valign="top"><a href="docs/images/lyrics.webp"><img src="docs/images/lyrics.webp" width="480" alt="Oxitune player with song lyrics"></a><br><sub><b>Player + lyrics</b><br>Playback alongside the current song's lyrics.</sub></td>
+    <td align="center" valign="top"><a href="docs/images/listen-together.webp"><img src="docs/images/listen-together.webp" width="480" alt="Listen Together setup window"></a><br><sub><b>Listen Together</b><br>Start a listening session or join one with a code.</sub></td>
+  </tr>
+  <tr>
+    <td align="center" valign="top"><a href="docs/images/settings.webp"><img src="docs/images/settings.webp" width="480" alt="Oxitune settings window"></a><br><sub><b>Settings</b><br>Configure Oxitune's desktop features.</sub></td>
+    <td align="center" valign="top"><a href="docs/images/welcome.webp"><img src="docs/images/welcome.webp" width="480" alt="First page of Oxitune onboarding"></a><br><sub><b>Welcome</b><br>The first page shown during initial setup.</sub></td>
+  </tr>
+</table>
 
 ## Plugins
 
@@ -276,8 +304,9 @@ under GPL-3.0-only.
 - **No affiliation.** Oxitune is an independent open source project, not affiliated with, endorsed
   by or sponsored by Google LLC, YouTube, Discord or any lyrics provider. "YouTube" and "YouTube
   Music" are trademarks of Google LLC, named only to say what the app works with.
-- **No content.** This repository holds no music, videos, lyrics, artwork or other copyrighted
-  media, and no Google or YouTube code or assets. Oxitune shows the official music.youtube.com
+- **Content.** Documentation screenshots show the app running and may include third-party
+  artwork, lyrics and interface elements belonging to their respective owners. No music or
+  video files, or Google or YouTube source code, are bundled. Oxitune shows the official music.youtube.com
   website, which you sign in to with your own account; playback, streams and any protection on
   them are handled by YouTube in that page.
 - **No circumvention.** Oxitune contains no code that decrypts, bypasses or modifies a technical
