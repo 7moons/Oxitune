@@ -261,7 +261,13 @@ impl Manifest {
             for o in &s.options {
                 o.label.validate("option label")?;
             }
-            if s.coerce(&s.default).as_ref() != Some(&s.default) {
+            // Numbers compare by value: coerce() yields a float, and serde_json
+            // keeps `12` and `12.0` apart.
+            let fits = match (s.coerce(&s.default), &s.default) {
+                (Some(Value::Number(a)), Value::Number(b)) => a.as_f64() == b.as_f64(),
+                (coerced, default) => coerced.as_ref() == Some(default),
+            };
+            if !fits {
                 return Err(format!("default of setting {} doesn't fit its type", s.key));
             }
         }
@@ -379,6 +385,13 @@ pub(crate) mod tests {
         assert_eq!(values["strength"], 1.0, "clamped to max");
         assert_eq!(values["mode"], "dark", "not an option: default");
         assert!(!values.contains_key("unknown"));
+    }
+
+    #[test]
+    fn test_whole_number_default() {
+        let m = with(json!({ "settings": [{ "key": "radius", "type": "number", "label": "R", "default": 12, "min": 0, "max": 28 }] }));
+        assert!(m.is_ok(), "{m:?}");
+        assert!(with(json!({ "settings": [{ "key": "r", "type": "number", "label": "R", "default": 30, "min": 0, "max": 28 }] })).is_err());
     }
 
     #[test]
