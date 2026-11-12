@@ -1,0 +1,50 @@
+name: Bug report
+description: Something in Oxitune does not work as it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Never paste cookies, tokens or Listen Together codes here. Security problems go through a
+        private advisory instead (see SECURITY.md).
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Play a song
+        2. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Oxitune version
+      placeholder: v0.4.1
+    validations:
+      required: true
+  - type: dropdown
+    id: system
+    attributes:
+      label: System and package
+      options:
+        - Windows 11 (setup.exe)
+        - Windows 10 (setup.exe)
+        - Windows (msi)
+        - Linux (.deb)
+        - Linux (.rpm)
+        - Linux (AppImage)
+    validations:
+      required: true
+  - type: input
+    id: desktop
+    attributes:
+      label: Linux desktop and session (if on Linux)
+      placeholder: GNOME 48, Wayland, PipeWire

@@ -6,7 +6,7 @@
 
 <p align="center">
   <b>YouTube Music on the desktop, done properly.</b><br>
-  Media keys, synced lyrics, a 10-band equalizer, Discord status, Listen Together and a phone remote, in a 7 MB app for Linux and Windows.
+  Media keys, synced lyrics, a 10-band equalizer, Discord status, Listen Together and a phone remote, for Linux and Windows. The Linux package is 8 MB.
 </p>
 
 <p align="center">
@@ -35,9 +35,9 @@
   <sub>Cinema mode with ambient lighting. Open the image to see the full 1600 × 1000 capture.</sub>
 </p>
 
-| **7.4 MB** | **16 MB** | **~530 ms** | **357 MB** |
+| **8 MB** | **16 MB** | **~530 ms** | **357 MB** |
 | :---: | :---: | :---: | :---: |
-| Linux `.deb` | the whole binary | from launch to the window on screen | memory at idle, every process (PSS) |
+| Linux `.deb` (v0.4.1: 7.98 MB; the AppImage is 88 MB) | the whole binary | from launch to the window on screen | memory at idle, every process (PSS) |
 
 Release build on Linux (WebKitGTK), measured without YouTube Music loaded, so these are the app's
 own costs: the YouTube Music page adds its own memory on top. Windows (WebView2) has not been
@@ -81,6 +81,14 @@ The AppImage and both Windows installers update themselves: Oxitune checks in th
 offers the new version and verifies it against the signing key built into the app before it runs.
 `.deb` and `.rpm` installs are updated by installing the new package. The Windows installers are
 not code-signed yet, so SmartScreen asks once on first run.
+
+Every release file has a build provenance attestation from GitHub Actions. To check a download:
+
+```bash
+gh attestation verify Oxitune_<version>_amd64.deb --repo 7moons/Oxitune
+```
+
+Questions and ideas are welcome in [Discussions](https://github.com/7moons/Oxitune/discussions).
 
 To build it yourself, see [Development](#development).
 

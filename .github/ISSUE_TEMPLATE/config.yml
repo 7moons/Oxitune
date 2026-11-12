@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Ask a question or share an idea
+    url: https://github.com/7moons/Oxitune/discussions
+    about: Not a bug? Discussions are the place for questions and ideas.
+  - name: Report a security problem
+    url: https://github.com/7moons/Oxitune/security/advisories/new
+    about: Privately, so it can be fixed before it is public.

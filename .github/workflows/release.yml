@@ -24,6 +24,8 @@ jobs:
   release:
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     strategy:
       fail-fast: false
       matrix:
@@ -73,7 +75,8 @@ jobs:
       - name: versions match the tag
         run: bun scripts/versions.ts check ${{ steps.meta.outputs.tag }}
 
-      - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0.6
+      - id: tauri
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0.6
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -87,6 +90,25 @@ jobs:
           releaseDraft: ${{ github.event_name != 'workflow_dispatch' }}
           prerelease: false
           args: ${{ matrix.args }}
+
+      # tauri-action reports the files it built as a JSON array of paths; the attestation
+      # wants one path per line. The .sig files are the updater's own signatures, not release files.
+      - name: list built files
+        id: built
+        shell: bash
+        env:
+          ARTIFACT_PATHS: ${{ steps.tauri.outputs.artifactPaths }}
+        run: |
+          {
+            echo "paths<<BUILT_EOF"
+            printf '%s' "$ARTIFACT_PATHS" | jq -r '.[]' | grep -v '\.sig$' | tr '\\' '/'
+            echo "BUILT_EOF"
+          } >> "$GITHUB_OUTPUT"
+          cat "$GITHUB_OUTPUT"
+
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: ${{ steps.built.outputs.paths }}
 
   # A release published by this workflow doesn't trigger other workflows
   # (GitHub's rule for its own token), so put it on Pages from here.
