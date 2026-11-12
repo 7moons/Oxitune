@@ -84,7 +84,7 @@ windows = { version = "0.61", features = ["Win32_System_Com", "Win32_System_Powe
 [dev-dependencies]
 # The mock runtime, to test the IPC permissions (acl_tests.rs).
 tauri = { version = "2.0.0", features = ["test"] }
-ctor = "0.4"
+ctor = "0.8"
 tempfile = "3.10"
 tokio-tungstenite = "0.29"
 # Paused clock for timing tests.
